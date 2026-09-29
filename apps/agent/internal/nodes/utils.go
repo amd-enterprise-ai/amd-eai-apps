@@ -58,15 +58,14 @@ func getNodeStatus(node *corev1.Node) (string, bool) {
 }
 
 func getGPUInfo(node *corev1.Node) *GPUInformation {
+	// A positive AMD count takes precedence. Kubelet can keep an extended resource
+	// registered at zero, so a zero-valued amd.com/gpu falls back to NVIDIA as well.
 	gpuCapacity, exists := node.Status.Capacity[GPUCapacityKey]
-	if !exists {
+	if !exists || gpuCapacity.Value() == 0 {
 		return getNVIDIAGPUInfo(node)
 	}
 
 	gpuCount := gpuCapacity.Value()
-	if gpuCount == 0 {
-		return nil
-	}
 
 	labels := node.Labels
 	if labels == nil {

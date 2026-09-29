@@ -339,7 +339,9 @@ Namespace should have label
 
 NVIDIA GPU nodes from Kubernetes
     [Documentation]    Returns the Kubernetes nodes that advertise nvidia.com/gpu capacity
-    ...    (i.e. nodes running the NVIDIA device plugin), as node objects.
+    ...    (i.e. nodes running the NVIDIA device plugin) and no positive amd.com/gpu
+    ...    capacity, as node objects. Nodes with a positive amd.com/gpu count are
+    ...    reported as AMD by design, so they are excluded here.
 
     ${result}=    Run Process    kubectl    get    nodes    -o    json
     ...    stdout=PIPE    stderr=PIPE
@@ -347,6 +349,6 @@ NVIDIA GPU nodes from Kubernetes
     ...    msg=Failed to list nodes. Error: ${result.stderr}
 
     ${nodes}=    Evaluate
-    ...    [n for n in json.loads($result.stdout)['items'] if int(n['status'].get('capacity', {}).get('nvidia.com/gpu', '0')) > 0]
+    ...    [n for n in json.loads($result.stdout)['items'] if int(n['status'].get('capacity', {}).get('nvidia.com/gpu', '0')) > 0 and int(n['status'].get('capacity', {}).get('amd.com/gpu', '0')) == 0]
     ...    modules=json
     RETURN    ${nodes}

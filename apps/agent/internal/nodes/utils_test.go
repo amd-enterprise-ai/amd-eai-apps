@@ -423,6 +423,42 @@ func TestGetGPUInfo(t *testing.T) {
 				ProductName:        "AMD Instinct MI300X",
 			},
 		},
+		{
+			name: "zero AMD capacity falls back to NVIDIA",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						NVIDIAGPUProductLabel: "NVIDIA-RTX-6000-Ada-Generation",
+						NVIDIAGPUMemoryLabel:  "49140",
+						NVIDIAGPUFamilyLabel:  "ada-lovelace",
+					},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						GPUCapacityKey:       resource.MustParse("0"),
+						NVIDIAGPUCapacityKey: resource.MustParse("4"),
+					},
+				},
+			},
+			expected: &GPUInformation{
+				Count:              4,
+				GPUType:            "ada-lovelace",
+				Vendor:             agent.GPUVendorNVIDIA,
+				VRAMBytesPerDevice: 49140 * 1024 * 1024,
+				ProductName:        "NVIDIA RTX 6000 Ada Generation",
+			},
+		},
+		{
+			name: "zero AMD capacity and no NVIDIA capacity reports no GPU",
+			node: &corev1.Node{
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						GPUCapacityKey: resource.MustParse("0"),
+					},
+				},
+			},
+			expected: nil,
+		},
 	}
 
 	for _, tt := range tests {
