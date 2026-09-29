@@ -306,6 +306,159 @@ func TestGetGPUInfo(t *testing.T) {
 				ProductName:        "Unknown",
 			},
 		},
+		{
+			name: "NVIDIA node with GFD labels",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						NVIDIAGPUProductLabel: "NVIDIA-RTX-6000-Ada-Generation",
+						NVIDIAGPUMemoryLabel:  "49140",
+						NVIDIAGPUFamilyLabel:  "ada-lovelace",
+					},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						NVIDIAGPUCapacityKey: resource.MustParse("4"),
+					},
+				},
+			},
+			expected: &GPUInformation{
+				Count:              4,
+				GPUType:            "ada-lovelace",
+				Vendor:             agent.GPUVendorNVIDIA,
+				VRAMBytesPerDevice: 49140 * 1024 * 1024,
+				ProductName:        "NVIDIA RTX 6000 Ada Generation",
+			},
+		},
+		{
+			name: "NVIDIA node without GFD labels",
+			node: &corev1.Node{
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						NVIDIAGPUCapacityKey: resource.MustParse("2"),
+					},
+				},
+			},
+			expected: &GPUInformation{
+				Count:              2,
+				GPUType:            "Unknown",
+				Vendor:             agent.GPUVendorNVIDIA,
+				VRAMBytesPerDevice: 0,
+				ProductName:        "Unknown",
+			},
+		},
+		{
+			name: "NVIDIA node with invalid memory label",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						NVIDIAGPUMemoryLabel: "not-a-number",
+					},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						NVIDIAGPUCapacityKey: resource.MustParse("1"),
+					},
+				},
+			},
+			expected: &GPUInformation{
+				Count:              1,
+				GPUType:            "Unknown",
+				Vendor:             agent.GPUVendorNVIDIA,
+				VRAMBytesPerDevice: 0,
+				ProductName:        "Unknown",
+			},
+		},
+		{
+			name: "NVIDIA node with zero GPUs",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						NVIDIAGPUProductLabel: "NVIDIA-RTX-6000-Ada-Generation",
+					},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						NVIDIAGPUCapacityKey: resource.MustParse("0"),
+					},
+				},
+			},
+			expected: nil,
+		},
+		{
+			name: "GFD labels without device plugin capacity",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						NVIDIAGPUProductLabel: "NVIDIA-RTX-6000-Ada-Generation",
+						NVIDIAGPUMemoryLabel:  "49140",
+					},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{},
+				},
+			},
+			expected: nil,
+		},
+		{
+			name: "AMD capacity takes precedence over NVIDIA",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						GPUProductNameLabel: "AMD_Instinct_MI300X",
+					},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						GPUCapacityKey:       resource.MustParse("8"),
+						NVIDIAGPUCapacityKey: resource.MustParse("4"),
+					},
+				},
+			},
+			expected: &GPUInformation{
+				Count:              8,
+				GPUType:            "Unknown",
+				Vendor:             agent.GPUVendorAMD,
+				VRAMBytesPerDevice: 0,
+				ProductName:        "AMD Instinct MI300X",
+			},
+		},
+		{
+			name: "zero AMD capacity falls back to NVIDIA",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						NVIDIAGPUProductLabel: "NVIDIA-RTX-6000-Ada-Generation",
+						NVIDIAGPUMemoryLabel:  "49140",
+						NVIDIAGPUFamilyLabel:  "ada-lovelace",
+					},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						GPUCapacityKey:       resource.MustParse("0"),
+						NVIDIAGPUCapacityKey: resource.MustParse("4"),
+					},
+				},
+			},
+			expected: &GPUInformation{
+				Count:              4,
+				GPUType:            "ada-lovelace",
+				Vendor:             agent.GPUVendorNVIDIA,
+				VRAMBytesPerDevice: 49140 * 1024 * 1024,
+				ProductName:        "NVIDIA RTX 6000 Ada Generation",
+			},
+		},
+		{
+			name: "zero AMD capacity and no NVIDIA capacity reports no GPU",
+			node: &corev1.Node{
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						GPUCapacityKey: resource.MustParse("0"),
+					},
+				},
+			},
+			expected: nil,
+		},
 	}
 
 	for _, tt := range tests {
