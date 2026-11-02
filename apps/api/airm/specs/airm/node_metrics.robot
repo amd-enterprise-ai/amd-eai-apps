@@ -154,6 +154,22 @@ Single node detail includes GPU info fields
     And node should have GPU info
 
 
+Node running the NVIDIA device plugin reports NVIDIA GPU info
+    [Documentation]    Verify that a node exposing GPUs through the NVIDIA device plugin is reported
+    ...    with vendor NVIDIA, the device plugin's GPU count, and the product name and VRAM from
+    ...    the GPU Feature Discovery labels. Needs a cluster with an NVIDIA GPU node; skipped otherwise.
+    [Tags]    nodes    details    gpu    nvidia    skip-in-ci
+
+    Given a cluster exists in system
+    And a node running the NVIDIA device plugin exists
+
+    When the NVIDIA node is fetched from the API
+
+    Then node GPU vendor should be NVIDIA
+    And node GPU count should match the device plugin capacity
+    And node GPU product and VRAM should match the GPU Feature Discovery labels
+
+
 # =============================================================================
 # Scenario 3: Per-workload GPU data
 # =============================================================================

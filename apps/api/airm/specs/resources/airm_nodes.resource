@@ -10,7 +10,9 @@ Resource            api/nodes.resource
 Resource            airm_metrics.resource
 Resource            resources/api/common.resource
 Resource            resources/common/resource_resolver.resource
+Resource            kubectl_verification.resource
 Library             Collections
+Library             String
 
 
 *** Keywords ***
@@ -443,3 +445,80 @@ The cluster should have GPU nodes
         END
     END
     Should Be True    ${found_gpu_node}    msg=No nodes with GPUs found in cluster
+
+# =============================================================================
+# Scenario: NVIDIA GPU node detection
+# =============================================================================
+
+A node running the NVIDIA device plugin exists
+    [Documentation]    Finds a Kubernetes node that advertises nvidia.com/gpu capacity and stores
+    ...                what the device plugin and GPU Feature Discovery report for it.
+    ...                Skips the test when the cluster has no such node.
+    ...                Sets: TEST_NVIDIA_NODE_NAME, TEST_NVIDIA_GPU_COUNT,
+    ...                TEST_NVIDIA_GPU_PRODUCT, TEST_NVIDIA_GPU_MEMORY_MIB
+
+    ${nodes}=    NVIDIA GPU nodes from Kubernetes
+    ${count}=    Get Length    ${nodes}
+    Skip If    ${count} == 0    No node in this cluster advertises nvidia.com/gpu capacity
+
+    ${node}=    Set Variable    ${nodes[0]}
+    ${labels}=    Set Variable    ${node['metadata'].get('labels', {})}
+
+    Set Test Variable    ${TEST_NVIDIA_NODE_NAME}    ${node['metadata']['name']}
+    Set Test Variable    ${TEST_NVIDIA_GPU_COUNT}    ${node['status']['capacity']['nvidia.com/gpu']}
+    Set Test Variable    ${TEST_NVIDIA_GPU_PRODUCT}    ${labels.get('nvidia.com/gpu.product')}
+    Set Test Variable    ${TEST_NVIDIA_GPU_MEMORY_MIB}    ${labels.get('nvidia.com/gpu.memory')}
+    Log    NVIDIA node ${TEST_NVIDIA_NODE_NAME}: ${TEST_NVIDIA_GPU_COUNT} GPU(s), product=${TEST_NVIDIA_GPU_PRODUCT}, memory=${TEST_NVIDIA_GPU_MEMORY_MIB} MiB
+
+The NVIDIA node is fetched from the API
+    [Documentation]    Looks up the NVIDIA node by name in the AIRM cluster node list and fetches its detail.
+    ...                Requires: TEST_CLUSTER_ID, TEST_NVIDIA_NODE_NAME
+    ...                Sets: TEST_NODE_ID, TEST_NODE_DETAIL
+
+    ${response}=    Get cluster nodes    ${TEST_CLUSTER_ID}    expected_status=200
+    VAR    ${match}    ${None}
+    FOR    ${n}    IN    @{response.json()['data']}
+        IF    '${n['name']}' == '${TEST_NVIDIA_NODE_NAME}'
+            ${match}=    Set Variable    ${n}
+            BREAK
+        END
+    END
+    Should Not Be Equal    ${match}    ${None}
+    ...    msg=Node ${TEST_NVIDIA_NODE_NAME} is not registered in AIRM cluster ${TEST_CLUSTER_ID}
+
+    ${detail}=    Get cluster node    ${TEST_CLUSTER_ID}    ${match['id']}    expected_status=200
+    Set Test Variable    ${TEST_NODE_ID}    ${match['id']}
+    Set Test Variable    ${TEST_NODE_DETAIL}    ${detail.json()}
+
+Node GPU vendor should be NVIDIA
+    [Documentation]    Validates the node is reported with NVIDIA GPU info.
+    ...                Requires: TEST_NODE_DETAIL
+
+    Should Not Be Equal    ${TEST_NODE_DETAIL['gpuInfo']}    ${None}
+    ...    msg=Node ${TEST_NVIDIA_NODE_NAME} has no GPU info in AIRM
+    Should Be Equal    ${TEST_NODE_DETAIL['gpuInfo']['vendor']}    NVIDIA
+
+Node GPU count should match the device plugin capacity
+    [Documentation]    Validates the GPU count equals the node's nvidia.com/gpu capacity.
+    ...                Requires: TEST_NODE_DETAIL, TEST_NVIDIA_GPU_COUNT
+
+    Should Be Equal As Integers    ${TEST_NODE_DETAIL['gpuCount']}    ${TEST_NVIDIA_GPU_COUNT}
+
+Node GPU product and VRAM should match the GPU Feature Discovery labels
+    [Documentation]    Validates the product name and per-device VRAM against the GPU Feature Discovery
+    ...                labels (nvidia.com/gpu.product, nvidia.com/gpu.memory in MiB), when they are set.
+    ...                Requires: TEST_NODE_DETAIL, TEST_NVIDIA_GPU_PRODUCT, TEST_NVIDIA_GPU_MEMORY_MIB
+
+    ${gpu_info}=    Set Variable    ${TEST_NODE_DETAIL['gpuInfo']}
+    IF    $TEST_NVIDIA_GPU_PRODUCT is not None
+        ${expected_name}=    Replace String    ${TEST_NVIDIA_GPU_PRODUCT}    -    ${SPACE}
+        Should Be Equal    ${gpu_info['name']}    ${expected_name}
+    ELSE
+        Log    nvidia.com/gpu.product label not set, skipping product check    WARN
+    END
+    IF    $TEST_NVIDIA_GPU_MEMORY_MIB is not None
+        ${expected_bytes}=    Evaluate    int($TEST_NVIDIA_GPU_MEMORY_MIB) * 1024 * 1024
+        Should Be Equal As Integers    ${gpu_info['memoryBytesPerDevice']}    ${expected_bytes}
+    ELSE
+        Log    nvidia.com/gpu.memory label not set, skipping VRAM check    WARN
+    END

@@ -18,6 +18,12 @@ const (
 	GPUVRAMLabel     = "amd.com/gpu.vram"
 	GPUVRAMLabelBeta = "beta.amd.com/gpu.vram"
 
+	// NVIDIA nodes: resource from the NVIDIA device plugin, labels from GPU Feature Discovery (GFD).
+	NVIDIAGPUCapacityKey  = "nvidia.com/gpu"
+	NVIDIAGPUProductLabel = "nvidia.com/gpu.product"
+	NVIDIAGPUMemoryLabel  = "nvidia.com/gpu.memory" // MiB per device
+	NVIDIAGPUFamilyLabel  = "nvidia.com/gpu.family"
+
 	UnknownString = "Unknown"
 )
 
