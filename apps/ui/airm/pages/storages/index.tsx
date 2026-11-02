@@ -6,9 +6,9 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { getServerSession } from 'next-auth';
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import { fetchProjects } from '@/services/app';
+import { getPageTranslations } from '@/utils/i18n';
 import { fetchSecrets } from '@/services/app';
 import { fetchStorages } from '@/services/app';
 import { getProjects } from '@/services/server';
@@ -298,12 +298,7 @@ export async function getServerSideProps(context: any) {
 
     return {
       props: {
-        ...(await serverSideTranslations(locale, [
-          'common',
-          'storages',
-          'secrets',
-          'sharedComponents',
-        ])),
+        ...(await getPageTranslations(locale, ['storages', 'secrets'])),
         projects: projects?.data || [],
         secrets: secrets?.data || [],
         storages: storages?.data || [],

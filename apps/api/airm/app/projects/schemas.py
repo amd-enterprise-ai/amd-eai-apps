@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import ConfigDict, Field, computed_field, field_validator
 
 from api_common.schemas import BaseEntityPublic, BaseModel
+from api_common.slugs import is_slug_stable
 
 from ..clusters.schemas import ClusterResponse, ClusterWithResources
 from ..quotas.schemas import (
@@ -16,13 +17,20 @@ from ..quotas.schemas import (
 from .constants import MAX_PROJECT_NAME_LENGTH, RESTRICTED_PROJECT_NAMES
 from .enums import GpuPreemptionPolicy, ProjectStatus
 
+PROJECT_NAME_PATTERN = "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+
+# What project creation actually accepts: the pattern above minus the names that do not survive
+# slugging. Published to OpenAPI so generated clients apply the same rule the server does; the
+# equivalence to `is_slug_stable` is pinned by a test, since the two are declared separately.
+SLUG_STABLE_PROJECT_NAME_PATTERN = "^[a-z0-9]+(-[a-z0-9]+)*$"
+
 
 class ProjectBase(BaseModel):
     name: str = Field(
         description="The name of the project.",
         min_length=2,
         max_length=MAX_PROJECT_NAME_LENGTH,
-        pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+        pattern=PROJECT_NAME_PATTERN,
     )
     description: str = Field(description="The description of the project.", min_length=2, max_length=1024)
     cluster_id: UUID = Field(description="The cluster ID the project belongs to")
@@ -74,11 +82,56 @@ class ProjectEdit(BaseModel):
 
 
 class ProjectCreate(ProjectBase):
+    # The stricter rule is published rather than enforced as a `pattern=` constraint. Pydantic
+    # runs field constraints before validators, so a tightened `pattern=` here would reject
+    # repeated hyphens with a bare regex mismatch and the validator below — which explains what
+    # is actually wrong and why — would never run. Declaring it as schema-only keeps the OpenAPI
+    # contract honest for generated clients while callers still get the explanation.
+    #
+    # `pattern` must stay: it is what rejects underscores and uppercase, and the validator does
+    # not. `slugify("a_b") == "a_b"`, so `a_b` is slug-stable and the validator admits it. Drop
+    # this constraint on the assumption that the validator subsumes it and the accepted set
+    # silently widens — on the very rule that keeps one project out of another's storage.
+    name: str = Field(
+        description="The name of the project.",
+        min_length=2,
+        max_length=MAX_PROJECT_NAME_LENGTH,
+        pattern=PROJECT_NAME_PATTERN,
+        json_schema_extra={"pattern": SLUG_STABLE_PROJECT_NAME_PATTERN},
+    )
     quota: QuotaUpdate = Field(description="The quota for the project.")
     # TODO: Make gpu_preemption required (no default) once the UI sends it on create.
     gpu_preemption: GpuPreemptionConfig = Field(
         default_factory=GpuPreemptionConfig, description="GPU preemption configuration."
     )
+
+    @field_validator("name")
+    @classmethod
+    def require_slug_stable_project_name(cls, v):
+        """The project name becomes a namespace, and the namespace's slug is a storage boundary.
+
+        Slugging is lossy — it folds runs of separators — so names like `data--science` and
+        `data-science` address the same storage prefix, and a member of one project would be
+        able to reach the other's artifacts. Accepting only names that already equal their own
+        slug keeps the mapping from name to prefix one-to-one, so the boundary holds.
+
+        The rule is kept here rather than folded into `pattern` so that the accepted set is defined
+        by the same `slugify` the storage prefix is built from, and cannot drift from it. Everything
+        `pattern` already rejects never reaches this validator, so in practice it is repeated
+        hyphens that are caught here.
+
+        It must stay on the create schema and not move up to `ProjectBase`: `ProjectResponse`
+        derives from `ProjectBase` too, and a validator there runs while serialising rows that are
+        already in the database. Names that predate this rule are not renamed by it, so a shared
+        rule would turn every read of such a project into a 400 and make it unreachable.
+        """
+        if not is_slug_stable(v):
+            raise ValueError(
+                f"'{v}' cannot be used as a project name because it does not survive being turned into "
+                "a storage path segment: repeated hyphens collapse into one, which would put this "
+                "project in another project's storage. Use a single hyphen between words."
+            )
+        return v
 
 
 class ProjectWithClusterAndQuota(ProjectResponse):

@@ -11,11 +11,15 @@ Documentation       BDD keywords for workspace UI features.
 Resource            common/session.resource
 Resource            pages/workspaces_page.resource
 Resource            resources/aiwb_workspaces.resource
-Library             ../libraries/TemporaryUserManager.py
+Resource            resources/aiwb_secrets.resource
 Library             Collections
+Library             Process
+Library             ../libraries/TemporaryUserManager.py
+Library             TestPrefix
 
 *** Variables ***
-${TEST_WORKSPACE_NAME}      ${None}
+${TEST_WORKSPACE_NAME}          ${None}
+&{TEST_IMAGE_PULL_SECRETS}      &{EMPTY}
 
 
 *** Keywords ***
@@ -46,31 +50,87 @@ Workspace name is "${workspace_name}"
 
 User deploys a workspace "${workspace_type}"
     [Documentation]    Deploys a workspace of the specified type through the catalog UI.
-    ...                Opens the deploy drawer, captures the auto-generated name, submits,
+    ...                Opens the deploy wizard, captures the default name, submits,
     ...                and tracks the workspace for cleanup via API.
 
     Click deploy button on workspace card    ${workspace_type}
-    Wait for deploy drawer
-    ${name}=    Get deploy drawer workload name
+    Wait for deploy wizard
+    Submit workspace deployment from the settings step
+
+User deploys a workspace "${workspace_type}" with image pull secrets "${first}" and "${second}"
+    [Documentation]    Deploys a workspace through the catalog UI, choosing both image pull
+    ...                secrets by the display names the user gave them.
+    ...                Requires: the secrets to exist (see "Image pull secrets ... exist in the project")
+
+    Click deploy button on workspace card    ${workspace_type}
+    Wait for deploy wizard
+    Open image pull secrets dropdown
+    FOR    ${name}    IN    ${first}    ${second}
+        ${display_name}=    Test Name    ${name}
+        Select image pull secret option    ${display_name}
+    END
+    Close image pull secrets dropdown
+    Submit workspace deployment from the settings step
+
+Submit workspace deployment from the settings step
+    [Documentation]    Advances past the settings step, captures the default workload name,
+    ...                submits, and tracks the workspace for cleanup via API.
+    ...                Sets: TEST_WORKSPACE_NAME
+
+    Advance deploy wizard
+    ${name}=    Get deploy wizard workload name
     VAR    ${TEST_WORKSPACE_NAME}    ${name}    scope=TEST
-    Click deploy in drawer
-    Wait for deploy drawer to close
-    # Track the workspace for cleanup by finding it via API
+    Submit deploy wizard
+    Wait for deploy wizard to close
     Track UI deployed workspace    ${name}
+
+Image pull secrets "${first}" and "${second}" exist in the project
+    [Documentation]    Creates two image pull secrets via the AIWB API and records each one's
+    ...                Kubernetes name against its display name for later verification.
+    ...                Sets: TEST_IMAGE_PULL_SECRETS (display name -> Kubernetes secret name)
+
+    VAR    &{pull_secrets}    &{EMPTY}
+    FOR    ${name}    IN    ${first}    ${second}
+        A secret "${name}" with use case "ImagePullSecret" is created via AIWB
+        Set To Dictionary    ${pull_secrets}    ${TEST_AIWB_SECRET_NAME}=${TEST_AIWB_SECRET_K8S_NAME}
+    END
+    VAR    &{TEST_IMAGE_PULL_SECRETS}    &{pull_secrets}    scope=TEST
+
+User starts deploying a workspace "${workspace_type}"
+    [Documentation]    Opens the deployment flow for the selected workspace type.
+
+    Click deploy button on workspace card    ${workspace_type}
+
+Workspace deployment settings should be available
+    [Documentation]    Verifies that the selected workspace details and image settings are available.
+
+    Wait for deploy wizard settings
 
 User navigates to the workspace list
     [Documentation]    Navigates to the Dashboard to view workloads including workspaces.
 
     Navigate to dashboard page    ${UI_BASE_URL}    ${TEST_PROJECT}[name]
 
-User terminates the workspace
-    [Documentation]    Deletes the workspace via the actions menu on the dashboard.
+User opens the undeploy confirmation for the workspace
+    [Documentation]    Opens the delete confirmation modal for the workspace via the actions menu.
     ...                Expects ${TEST_WORKSPACE_NAME} to be set.
 
     Should Not Be Equal    ${TEST_WORKSPACE_NAME}    ${None}
     ...    msg=TEST_WORKSPACE_NAME not set. Deploy a workspace first.
     Click workload actions menu    ${TEST_WORKSPACE_NAME}
     Click delete in actions menu
+
+Undeploy confirmation should name the workspace
+    [Documentation]    Verifies the open delete confirmation names the workspace being removed,
+    ...                so the user isn't left guessing which workspace they are about to undeploy.
+
+    ${confirmation_text}=    Get Delete Confirmation Modal Text
+    Should Contain    ${confirmation_text}    ${TEST_WORKSPACE_NAME}
+    ...    msg=Undeploy confirmation should name the workspace being removed
+
+User confirms the undeploy
+    [Documentation]    Confirms deletion in the currently open delete confirmation modal.
+
     Confirm delete in modal
 
 Workspace catalog should display cards
@@ -171,6 +231,46 @@ Workspace should be listed by its catalog name "${catalog_name}"
     IF    "${catalog_name}" != "${TEST_WORKSPACE_NAME}"
         Workload row should not exist    ${TEST_WORKSPACE_NAME}
     END
+
+The workspace should use image pull secrets "${first}" and "${second}"
+    [Documentation]    Verifies the deployed workspace's pods are configured with every one of
+    ...                the selected registry credentials. Polls because the workload's Deployment
+    ...                is created asynchronously after submission.
+    ...                Requires: TEST_WORKSPACE_ID (set when the UI deployment is tracked),
+    ...                TEST_IMAGE_PULL_SECRETS
+
+    ${workload_id}=    Get Variable Value    ${TEST_WORKSPACE_ID}    ${None}
+    Should Not Be Equal    ${workload_id}    ${None}
+    ...    msg=TEST_WORKSPACE_ID not set. Deploy a workspace first.
+    VAR    @{expected}    @{EMPTY}
+    FOR    ${name}    IN    ${first}    ${second}
+        ${display_name}=    Test Name    ${name}
+        Append To List    ${expected}    ${TEST_IMAGE_PULL_SECRETS}[${display_name}]
+    END
+    ${namespace}=    Get Project Namespace
+    Wait Until Keyword Succeeds    2 min    5s
+    ...    Workload pods should reference image pull secrets    ${workload_id}    ${namespace}    @{expected}
+
+Workload pods should reference image pull secrets
+    [Documentation]    Helper: reads the workload's Deployments and checks their pod template
+    ...                lists every expected image pull secret (used with polling). The cluster
+    ...                may add its own registry credentials, so extra secrets are allowed.
+    [Arguments]    ${workload_id}    ${namespace}    @{expected}
+
+    ${result}=    Run Process    kubectl    get    deployments
+    ...    -n    ${namespace}
+    ...    -l    airm.silogen.ai/workload-id\=${workload_id}
+    ...    -o    json
+    ...    stderr=PIPE
+    Should Be Equal As Integers    ${result.rc}    0
+    ...    msg=Failed to get Deployments for workload ${workload_id}: ${result.stderr}
+    ${deployments}=    Evaluate    json.loads($result.stdout)['items']    modules=json
+    Should Not Be Empty    ${deployments}
+    ...    msg=No Deployment found yet for workload ${workload_id} in ${namespace}
+    ${pod_specs}=    Evaluate    [d['spec']['template']['spec'] for d in $deployments]
+    ${actual}=    Evaluate    sorted({s.get('name') or '' for p in $pod_specs for s in p.get('imagePullSecrets') or []})
+    List Should Contain Sub List    ${actual}    ${expected}
+    ...    msg=Workspace image pull secrets ${actual} are missing some of the selected ${expected}
 
 Workspace status should be displayed
     [Documentation]    Verifies the workspace row shows a recognized status indicator.

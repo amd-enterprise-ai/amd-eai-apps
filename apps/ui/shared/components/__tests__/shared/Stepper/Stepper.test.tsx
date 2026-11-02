@@ -19,14 +19,17 @@ describe('Stepper Component', () => {
     render(<Stepper step={1} steps={steps} />);
     const stepElements = screen.getAllByText(/Step \d/);
 
+    // Completed step uses bg-accent
     expect(stepElements[0].previousElementSibling?.className).toContain(
-      'bg-primary',
+      'bg-accent',
     );
+    // Active step uses accent border styling
     expect(stepElements[1].previousElementSibling?.className).toContain(
-      'bg-primary-50',
+      'border-accent',
     );
+    // Future step uses muted foreground styling
     expect(stepElements[2].previousElementSibling?.className).toContain(
-      'bg-slate-50',
+      'border-foreground/50',
     );
   });
 

@@ -114,7 +114,7 @@ vi.mock('next-i18next', () => ({
 vi.mock('@/contexts/ProjectContext', () => ({
   useProject: () => ({
     isStandaloneMode: false,
-    clusterAuthEnabled: true,
+    apiKeysManagementEnabled: true,
     aiGatewayEnabled: true,
     airmAppUrl: undefined,
     activeProject: 'project1',

@@ -26,10 +26,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api_common.auth.security import get_user_email
 from api_common.database import get_session
 from app import app  # type: ignore[attr-defined]
-from app.cluster_auth import get_cluster_auth_client
 from app.dispatch.kube_client import KubernetesClient, get_kube_client
 from app.metrics.client import get_prometheus_client
 from app.minio import get_minio_client
+from app.openbao import get_openbao_client
+from app.openbao.client import OpenBaoClient
 from app.projects.security import ensure_access_to_project, ensure_access_to_workbench_namespace
 
 
@@ -93,10 +94,10 @@ MINIO_OVERRIDES: dict[Callable[..., Any], Callable[..., Any]] = {
     get_minio_client: lambda: None,
 }
 
-# Session + cluster auth client
-CLUSTER_AUTH_OVERRIDES: dict[Callable[..., Any], Callable[..., Any]] = {
+# Session + OpenBao store client (the API-key path; cluster-auth is not involved).
+APIKEY_OVERRIDES: dict[Callable[..., Any], Callable[..., Any]] = {
     **SESSION_OVERRIDES,
-    get_cluster_auth_client: lambda: AsyncMock(),
+    get_openbao_client: lambda: AsyncMock(spec=OpenBaoClient),
 }
 
 # Session + Prometheus client (for metrics tests)

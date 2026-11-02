@@ -2,8 +2,6 @@
 #
 # SPDX-License-Identifier: MIT
 
-orphan: true
-
 repos:
   - repo: local
     hooks:
@@ -30,12 +28,3 @@ repos:
         stages: [pre-push]
         verbose: true
         fail_fast: true
-      - id: robot-dryrun
-        name: Robot Framework dry-run validation
-        description: Validates keyword names, arguments, imports, and syntax without executing tests
-        entry: bash -c 'cd ../../.. && tooling/robot_dryrun.sh'
-        language: system
-        pass_filenames: false
-        files: ^specs/.*\.(robot|resource|py|txt|csv)$
-        stages: [pre-push]
-        verbose: true

@@ -51,6 +51,18 @@ describe('LinkToast', () => {
     expect(link).toHaveTextContent('Show Details');
   });
 
+  it('renders a custom link label', () => {
+    render(
+      <LinkToast
+        message={mockMessage}
+        href={mockHref}
+        linkLabel="View models"
+      />,
+    );
+
+    expect(screen.getByTestId('toast-link')).toHaveTextContent('View models');
+  });
+
   it('renders the link with correct href', () => {
     render(<LinkToast message={mockMessage} href={mockHref} />);
 

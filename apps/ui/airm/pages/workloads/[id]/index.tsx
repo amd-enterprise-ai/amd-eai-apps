@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 import {
+  ActionButton,
   Button,
   Card,
   CardBody,
@@ -20,7 +21,6 @@ import {
 import { GetServerSidePropsContext } from 'next';
 import { getServerSession } from 'next-auth';
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import { useRouter } from 'next/router';
 
 import {
@@ -28,6 +28,7 @@ import {
   useLastQueryUpdated,
   useSystemToast,
 } from '@amdenterpriseai/hooks';
+import { getPageTranslations } from '@/utils/i18n';
 
 import {
   getWorkloadMetrics,
@@ -238,15 +239,13 @@ const WorkloadDetailPage: React.FC<Props> & WithDocumentationLink = ({
       {/* Header: breadcrumb (back + module name + status) and actions on one row */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-2 min-w-0">
-          <Button
+          <ActionButton
+            secondary
             size="sm"
-            isIconOnly
-            variant="light"
             onPress={() => router.back()}
+            icon={<IconArrowLeft size={16} />}
             aria-label={t('workloads:details.actions.back')}
-          >
-            <IconArrowLeft size={16} />
-          </Button>
+          />
           <span className="text-base font-medium truncate">{moduleName}</span>
           <StatusDisplay
             type={workload.status}
@@ -289,9 +288,9 @@ const WorkloadDetailPage: React.FC<Props> & WithDocumentationLink = ({
         {showGpuLoadingPlaceholder ? (
           <GpuMetricsLoadingSkeleton />
         ) : !hasGpuMetrics ? (
-          <Card className="border border-default-200 shadow-sm rounded-sm dark:bg-default-100">
+          <Card>
             <CardBody>
-              <p className="text-default-500 text-sm">
+              <p className="text-muted text-sm">
                 {t('workloads:details.fields.noGpuMetrics')}
               </p>
             </CardBody>
@@ -371,10 +370,7 @@ export async function getServerSideProps(context: GetServerSidePropsContext) {
         )
       : { data: [] };
 
-    const translations = await serverSideTranslations(locale, [
-      'common',
-      'workloads',
-    ]);
+    const translations = await getPageTranslations(locale, ['workloads']);
 
     const breadcrumb = [{ title: 'Workload details' }];
     return {

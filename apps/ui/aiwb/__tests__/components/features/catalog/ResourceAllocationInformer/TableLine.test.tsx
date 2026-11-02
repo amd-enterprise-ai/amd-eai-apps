@@ -33,6 +33,7 @@ vi.mock('next-i18next', () => ({
 
 // Mock shared component adapters
 vi.mock('@amdenterpriseai/components', () => ({
+  cn: (...classes: string[]) => classes.filter(Boolean).join(' '),
   Chip: ({ children, size, variant }: any) => (
     <span data-testid="chip" data-size={size} data-variant={variant}>
       {children}
@@ -160,6 +161,7 @@ describe('TableLine', () => {
         'Exceeds quota limit',
       );
       expect(screen.getByTestId('alert-triangle')).toHaveClass('text-warning');
+      expect(screen.getByText('12')).toHaveClass('text-warning');
     });
 
     it('shows warning when total is below required', () => {
@@ -171,6 +173,21 @@ describe('TableLine', () => {
         'Below required minimum',
       );
       expect(screen.getByTestId('alert-triangle')).toHaveClass('text-danger');
+      expect(screen.getByText('1')).toHaveClass('text-danger');
+    });
+
+    it('shows warning when total is below required without quota', () => {
+      render(
+        <TableLine {...defaultProps} value={1} quota={undefined} req={2} />,
+      );
+
+      expect(screen.getByTestId('alert-triangle')).toBeInTheDocument();
+      expect(screen.getByTestId('tooltip')).toHaveAttribute(
+        'title',
+        'Below required minimum',
+      );
+      expect(screen.getByTestId('alert-triangle')).toHaveClass('text-danger');
+      expect(screen.getByText('1')).toHaveClass('text-danger');
     });
 
     it('shows warning when total is below required and exceeds quota', () => {

@@ -103,8 +103,8 @@ Remove project assignment
 
     When project assignment is removed
 
-    Then secret should have "0" project assignments
-    And secret status should be "Unassigned"
+    Then secret transitions to "Unassigned"
+    And secret should have "0" project assignments
     And secret ExternalSecret should not exist in cluster
 
 Delete unassigned secret

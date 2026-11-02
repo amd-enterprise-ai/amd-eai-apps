@@ -4,10 +4,16 @@
 
 """Tests for AIMs utils module."""
 
+from collections.abc import Callable
+
 import pytest
 
-from api_common.exceptions import ValidationException
+from api_common.exceptions import InconsistentStateException, ValidationException
 from app.aims.crds import (
+    AIMProfileResource,
+    AIMProfileSetResource,
+    AIMProfileSpec,
+    AIMProfileStatus,
     HTTPRouteBackendRef,
     HTTPRouteMatch,
     HTTPRoutePathMatch,
@@ -15,18 +21,26 @@ from app.aims.crds import (
     HTTPRouteRule,
     HTTPRouteSpec,
 )
-from app.aims.enums import OptimizationMetric
+from app.aims.enums import AdapterMode, OptimizationMetric
 from app.aims.schemas import AIMDeployRequest
 from app.aims.utils import (
+    agreed_adapter_weights,
+    classify_default_profile_set,
+    effective_profile_for_set,
     extract_endpoints,
     generate_aim_service_manifest,
     generate_aim_service_name,
     generate_fine_tuned_aim_service_manifest,
     generate_namespace_aim_service_manifest,
+    is_default_profile_set,
+    owning_profile_set_name,
+    profiles_derived_from_set,
+    profiles_without_owning_set,
+    select_custom_deploy_profile,
 )
 from app.dispatch.crds import K8sMetadata
 from app.workloads.constants import CANONICAL_NAME_LABEL, DISPLAY_NAME_ANNOTATION, MODEL_NAME_LABEL
-from tests.factory import make_aim_cluster_model, make_aim_service_k8s, make_httproute
+from tests.factory import make_aim_cluster_model, make_aim_profile_set, make_aim_service_k8s, make_httproute
 
 
 def test_generate_aim_service_name() -> None:
@@ -144,7 +158,6 @@ def test_generate_aim_service_manifest_basic() -> None:
         service_name="wb-aim-12345678",
         api_version="aims.amd.com/v1alpha2",
         submitter="test@example.com",
-        cluster_auth_group_id="group-123",
     )
 
     assert manifest["apiVersion"] == "aims.amd.com/v1alpha2"
@@ -152,17 +165,16 @@ def test_generate_aim_service_manifest_basic() -> None:
     assert manifest["metadata"]["namespace"] == "test-ns"
     assert manifest["spec"]["replicas"] == 2
     assert manifest["spec"]["model"]["name"] == "llama3-8b"
-    assert manifest["spec"]["routing"]["annotations"]["cluster-auth/allowed-group"] == "group-123"
     # caching.mode replaces the deprecated cacheModel boolean.
     assert manifest["spec"]["caching"]["mode"] == "Shared"
     assert "cacheModel" not in manifest["spec"]
     # Forces the v1alpha2 profile pipeline so status.resolvedProfile lands;
-    # EAI-6783 will remove the annotation once aim-engine drops v1alpha1 dispatch.
+    # The annotation will be removed once aim-engine drops v1alpha1 dispatch.
     assert manifest["metadata"]["annotations"]["aim.eai.amd.com/reconciler-pipeline"] == "profile"
 
 
 def test_generate_aim_service_manifest_with_metric() -> None:
-    """Metric criteria flow into spec.profile.selector (ADR 006b §3)."""
+    """Metric criteria flow into spec.profile.selector."""
     aim = make_aim_cluster_model()
     req = AIMDeployRequest(model="img", metric=OptimizationMetric.LATENCY)
 
@@ -173,10 +185,116 @@ def test_generate_aim_service_manifest_with_metric() -> None:
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert "overrides" not in manifest["spec"]
+    assert manifest["spec"]["profile"]["selector"] == {"minimumType": "any", "metric": "latency"}
+
+
+# One group identity spanning two quantisations, which is the shape that makes an
+# unconstrained selector able to pick a variant the adapters cannot load.
+_GROUP_ID = "example-org/base-model"
+_FP8_WEIGHTS = "example-org/base-model-fp8"
+_BF16_WEIGHTS = "example-org/base-model-bf16"
+
+
+_BOTH_QUANTISATIONS = {_FP8_WEIGHTS, _BF16_WEIGHTS}
+# An unquantised base states one identity twice: the BF16 profile's modelId is the group id its
+# quantised sibling also carries, so the same string is both a family name and real weights.
+_UNQUANTISED_BASE = {_GROUP_ID, _FP8_WEIGHTS}
+
+
+@pytest.mark.parametrize(
+    ("declarations", "published", "expected"),
+    [
+        pytest.param([[_GROUP_ID, _FP8_WEIGHTS]], _BOTH_QUANTISATIONS, _FP8_WEIGHTS, id="one-adapter-names-weights"),
+        pytest.param(
+            [[_GROUP_ID, _FP8_WEIGHTS], [_GROUP_ID, _FP8_WEIGHTS]],
+            _BOTH_QUANTISATIONS,
+            _FP8_WEIGHTS,
+            id="adapters-agree-on-weights",
+        ),
+        pytest.param([[_GROUP_ID], [_GROUP_ID]], _BOTH_QUANTISATIONS, None, id="every-adapter-names-only-the-group"),
+        pytest.param(
+            [[_GROUP_ID], [_GROUP_ID, _FP8_WEIGHTS]], _BOTH_QUANTISATIONS, None, id="one-adapter-names-only-the-group"
+        ),
+        pytest.param(
+            [[_GROUP_ID, _FP8_WEIGHTS], [_GROUP_ID, _BF16_WEIGHTS]], _BOTH_QUANTISATIONS, None, id="adapters-disagree"
+        ),
+        pytest.param(
+            # Two servable answers are not an impasse: either one loads the adapter, and abstaining
+            # would refuse a declaration that names no group id for the fallback arm to match.
+            [[_GROUP_ID, _FP8_WEIGHTS, _BF16_WEIGHTS]],
+            _BOTH_QUANTISATIONS,
+            _BF16_WEIGHTS,
+            id="one-adapter-names-two-servable-weights",
+        ),
+        pytest.param(
+            [[_GROUP_ID, _FP8_WEIGHTS, _BF16_WEIGHTS]],
+            {_FP8_WEIGHTS},
+            _FP8_WEIGHTS,
+            id="several-declared-but-one-servable",
+        ),
+        pytest.param([[_GROUP_ID]], _UNQUANTISED_BASE, _GROUP_ID, id="group-id-is-also-real-weights"),
+        pytest.param([["example-org/other-model"]], _BOTH_QUANTISATIONS, None, id="weights-this-model-does-not-serve"),
+        pytest.param([[_GROUP_ID, _FP8_WEIGHTS]], set(), None, id="model-publishes-nothing"),
+        pytest.param([], _BOTH_QUANTISATIONS, None, id="no-adapters"),
+    ],
+)
+def test_agreed_adapter_weights(declarations: list[list[str]], published: set[str], expected: str | None) -> None:
+    """Only weights every adapter names and the model serves narrow anything; with several, one is picked.
+
+    The pick is by sorted order so the same request pins the same weights on every retry; a caller
+    that wants a narrower answer narrows what it publishes rather than relying on the tie-break.
+    """
+    assert agreed_adapter_weights(declarations, published) == expected
+
+
+def test_generate_aim_service_manifest_pins_agreed_adapter_weights() -> None:
+    """The weights the adapters need reach the selector, so the engine cannot resolve a sibling."""
+    manifest = generate_aim_service_manifest(
+        aim=make_aim_cluster_model(),
+        deploy_request=AIMDeployRequest(model="img", metric=OptimizationMetric.LATENCY),
+        namespace="ns",
+        service_name="wb-aim-test",
+        api_version="v1",
+        submitter="u",
+        pinned_model_id=_FP8_WEIGHTS,
+        pinned_aim_id=_GROUP_ID,
+    )
+
+    assert manifest["spec"]["profile"]["selector"] == {
+        "minimumType": "any",
+        "metric": "latency",
+        "modelId": _FP8_WEIGHTS,
+        # Carried alongside because the engine indexes its candidate listing on the group identity.
+        "aimId": _GROUP_ID,
+    }
+
+
+@pytest.mark.parametrize(
+    ("pinned_model_id", "pinned_aim_id"),
+    [
+        pytest.param(None, None, id="no-adapters-to-pin"),
+        pytest.param(None, _GROUP_ID, id="adapters-name-only-the-group"),
+        pytest.param(_FP8_WEIGHTS, None, id="model-has-not-resolved-its-group"),
+    ],
+)
+def test_generate_aim_service_manifest_leaves_selector_alone_without_both_identities(
+    pinned_model_id: str | None, pinned_aim_id: str | None
+) -> None:
+    """Nothing to narrow with is a no-op, never a constraint the adapters did not ask for."""
+    manifest = generate_aim_service_manifest(
+        aim=make_aim_cluster_model(),
+        deploy_request=AIMDeployRequest(model="img", metric=OptimizationMetric.LATENCY),
+        namespace="ns",
+        service_name="wb-aim-test",
+        api_version="v1",
+        submitter="u",
+        pinned_model_id=pinned_model_id,
+        pinned_aim_id=pinned_aim_id,
+    )
+
     assert manifest["spec"]["profile"]["selector"] == {"minimumType": "any", "metric": "latency"}
 
 
@@ -192,7 +310,6 @@ def test_generate_aim_service_manifest_with_hf_token() -> None:
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert manifest["spec"]["env"] == []
@@ -215,7 +332,6 @@ def test_generate_aim_service_manifest_with_image_pull_secrets() -> None:
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert "imagePullSecrets" in manifest["spec"]
@@ -241,7 +357,6 @@ def test_generate_aim_service_manifest_with_scaling() -> None:
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert manifest["spec"]["minReplicas"] == 2
@@ -266,7 +381,6 @@ def test_generate_aim_service_manifest_auto_via_model() -> None:
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert manifest["spec"]["model"]["name"] == "llama3-8b"
@@ -297,10 +411,9 @@ def test_generate_aim_service_manifest_profile_name_wins_over_selector() -> None
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
-    # ADR 006b: legacy spec.overrides shape must not be emitted by v1alpha2.
+    # Legacy spec.overrides shape must not be emitted by v1alpha2.
     assert "overrides" not in manifest["spec"]
     profile = manifest["spec"]["profile"]
     assert profile == {"name": "my-explicit-profile"}
@@ -320,7 +433,6 @@ def test_generate_aim_service_manifest_selector_only_precision() -> None:
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert "overrides" not in manifest["spec"]
@@ -344,7 +456,6 @@ def test_generate_aim_service_manifest_gpu_count_alone_emits_minimum_type_select
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert "overrides" not in manifest["spec"]
@@ -355,7 +466,7 @@ def test_generate_aim_service_manifest_gpu_count_alone_emits_minimum_type_select
 def test_generate_aim_service_manifest_gpu_count_omitted_emits_no_overrides() -> None:
     """When gpu_count is not supplied, spec.profileOverrides is not emitted.
 
-    Per ADR 006b §3 the engine derives the count from the resolved profile, so
+    The engine derives the count from the resolved profile, so
     AIWB must not stamp an empty/default override that would shadow it.
     """
     aim = make_aim_cluster_model()
@@ -368,7 +479,6 @@ def test_generate_aim_service_manifest_gpu_count_omitted_emits_no_overrides() ->
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert "profileOverrides" not in manifest["spec"]
@@ -390,7 +500,6 @@ def test_generate_aim_service_manifest_gpu_count_with_profile_name() -> None:
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert manifest["spec"]["profile"] == {"name": "mi300x-throughput-fp8"}
@@ -409,7 +518,6 @@ def test_generate_aim_service_manifest_selector_only_gpu_model() -> None:
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert "overrides" not in manifest["spec"]
@@ -433,7 +541,6 @@ def test_generate_aim_service_manifest_selector_metric_precision_gpu_model() -> 
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert "overrides" not in manifest["spec"]
@@ -449,7 +556,7 @@ def test_generate_aim_service_manifest_gpu_count_with_selector() -> None:
     """gpu_count and selector criteria coexist on independent spec branches.
 
     Fences a future refactor from folding gpu_count back into the selector dict:
-    the selector picks the profile by hardware model (per ADR 006b §3) and
+    the selector picks the profile by hardware model and
     gpu_count layers as profileOverrides.acceleratorCount on the resolved profile.
     """
     aim = make_aim_cluster_model()
@@ -466,7 +573,6 @@ def test_generate_aim_service_manifest_gpu_count_with_selector() -> None:
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert manifest["spec"]["profile"] == {"selector": {"minimumType": "any", "metric": "latency"}}
@@ -492,7 +598,6 @@ def test_generate_aim_service_manifest_camelcase_keys_to_cluster() -> None:
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     spec = manifest["spec"]
@@ -505,15 +610,10 @@ def test_generate_aim_service_manifest_camelcase_keys_to_cluster() -> None:
     assert "autoScaling" in spec
 
 
-def test_generate_aim_service_manifest_with_cluster_auth_group() -> None:
-    """Cluster-auth group ID is stamped in two places during the migration window:
-
-    - metadata.annotations: read by aim-engine, propagated to InferenceService,
-      then surfaced as SecurityPolicy contextExtensions by ai-gateway-discovery
-      (the Envoy AI Gateway auth path, EAI-6038)
-    - spec.routing.annotations: legacy slot still consumed by kgateway + API key auth;
-      kept for back-compat until kgateway is removed
-    """
+def test_generate_aim_service_manifest_omits_cluster_auth_group() -> None:
+    """cluster-auth has been removed from the serving path; the manifest must not
+    stamp cluster-auth/allowed-group in either metadata.annotations or
+    spec.routing.annotations."""
     aim = make_aim_cluster_model(name="llama3-8b")
     req = AIMDeployRequest(model="llama3-8b")
 
@@ -524,11 +624,11 @@ def test_generate_aim_service_manifest_with_cluster_auth_group() -> None:
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="group-123",
     )
 
-    assert manifest["metadata"]["annotations"]["cluster-auth/allowed-group"] == "group-123"
-    assert manifest["spec"]["routing"]["annotations"]["cluster-auth/allowed-group"] == "group-123"
+    assert "cluster-auth/allowed-group" not in manifest.get("metadata", {}).get("annotations", {})
+    routing_annotations = manifest.get("spec", {}).get("routing", {}).get("annotations", {})
+    assert "cluster-auth/allowed-group" not in routing_annotations
 
 
 def test_generate_aim_service_manifest_includes_workload_type_label() -> None:
@@ -543,7 +643,6 @@ def test_generate_aim_service_manifest_includes_workload_type_label() -> None:
         service_name="wb-aim-12345678",
         api_version="v1",
         submitter="test@example.com",
-        cluster_auth_group_id="group-123",
     )
 
     assert "labels" in manifest["metadata"]
@@ -566,7 +665,6 @@ def test_generate_fine_tuned_aim_service_manifest_stamps_finetuned_metadata() ->
         service_name="wb-aim-test",
         api_version="aim.eai.amd.com/v1alpha2",
         submitter="user@example.com",
-        cluster_auth_group_id="group-123",
         display_name="my-finetune",
         canonical_name="Qwen/Qwen2.5-0.5B-Instruct",
     )
@@ -583,12 +681,11 @@ def test_generate_fine_tuned_aim_service_manifest_stamps_finetuned_metadata() ->
     # Annotation preserves slashes; the FE reads this for code samples.
     assert annotations[CANONICAL_NAME_LABEL] == "Qwen/Qwen2.5-0.5B-Instruct"
     # Forces the v1alpha2 profile pipeline so status.resolvedProfile lands;
-    # EAI-6783 will remove the annotation once aim-engine drops v1alpha1 dispatch.
+    # The annotation will be removed once aim-engine drops v1alpha1 dispatch.
     assert annotations["aim.eai.amd.com/reconciler-pipeline"] == "profile"
-    # Cluster-auth group is stamped on metadata for the Envoy AI Gateway path
-    # (EAI-6038), and also on spec.routing.annotations for legacy kgateway.
-    assert annotations["cluster-auth/allowed-group"] == "group-123"
-    assert manifest["spec"]["routing"]["annotations"]["cluster-auth/allowed-group"] == "group-123"
+    # cluster-auth has been removed from the serving path.
+    assert "cluster-auth/allowed-group" not in annotations
+    assert "cluster-auth/allowed-group" not in manifest["spec"].get("routing", {}).get("annotations", {})
 
     # caching.mode replaces the deprecated cacheModel boolean.
     assert manifest["spec"]["caching"]["mode"] == "Shared"
@@ -603,7 +700,6 @@ def _fine_tuned_manifest(req: AIMDeployRequest) -> dict:
         service_name="wb-aim-test",
         api_version="aim.eai.amd.com/v1alpha2",
         submitter="user@example.com",
-        cluster_auth_group_id="group-123",
         display_name="my-finetune",
         canonical_name="Qwen/Qwen2.5-0.5B-Instruct",
     )
@@ -627,12 +723,13 @@ def test_generate_namespace_aim_service_manifest_pins_resolved_profile_name() ->
             model="custom-model",
             metric=OptimizationMetric.LATENCY,
             precision="fp8",
+            adapter_mode=AdapterMode.DYNAMIC,
+            max_lora_rank=32,
         ),
         namespace="workbench",
         service_name="wb-aim-test",
         api_version="aim.eai.amd.com/v1alpha2",
         submitter="user@example.com",
-        cluster_auth_group_id=None,
         display_name="Custom Display",
         canonical_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
         is_fine_tuned=False,
@@ -642,6 +739,8 @@ def test_generate_namespace_aim_service_manifest_pins_resolved_profile_name() ->
     assert manifest["spec"]["profile"] == {"name": "custom-profile"}
     assert "profileOverrides" not in manifest["spec"]
     assert "selector" not in manifest["spec"].get("profile", {})
+    # adapterRuntime is a sibling of profile/profileOverrides, so a pinned profile doesn't suppress it.
+    assert manifest["spec"]["adapterRuntime"] == {"maxRank": 32}
 
 
 def test_generate_namespace_aim_service_manifest_uses_deploy_display_name() -> None:
@@ -654,7 +753,6 @@ def test_generate_namespace_aim_service_manifest_uses_deploy_display_name() -> N
         service_name="wb-aim-test",
         api_version="aim.eai.amd.com/v1alpha2",
         submitter="user@example.com",
-        cluster_auth_group_id=None,
         display_name="Custom Display",
         canonical_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
         is_fine_tuned=False,
@@ -677,7 +775,6 @@ def test_generate_namespace_aim_service_manifest_falls_back_to_model_display_nam
         service_name="wb-aim-test",
         api_version="aim.eai.amd.com/v1alpha2",
         submitter="user@example.com",
-        cluster_auth_group_id=None,
         display_name="Custom Display",
         canonical_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
         is_fine_tuned=False,
@@ -696,7 +793,6 @@ def test_generate_namespace_aim_service_manifest_ignores_whitespace_deploy_displ
         service_name="wb-aim-test",
         api_version="aim.eai.amd.com/v1alpha2",
         submitter="user@example.com",
-        cluster_auth_group_id=None,
         display_name="Custom Display",
         canonical_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
         is_fine_tuned=False,
@@ -766,6 +862,19 @@ def test_generate_fine_tuned_aim_service_manifest_with_engine_args_profile_overr
     assert manifest["spec"]["profileOverrides"] == {"engineArgs": {"max-model-len": 8192}}
 
 
+def test_generate_fine_tuned_aim_service_manifest_writes_max_lora_rank() -> None:
+    manifest = _fine_tuned_manifest(
+        AIMDeployRequest(
+            model="wb-llm-finetune-abc123",
+            adapter_mode=AdapterMode.DYNAMIC,
+            max_lora_rank=32,
+        )
+    )
+
+    assert manifest["spec"]["adapterRuntime"] == {"maxRank": 32}
+    assert "profileOverrides" not in manifest["spec"]
+
+
 def test_generate_fine_tuned_aim_service_manifest_with_engine_env_profile_override() -> None:
     manifest = _fine_tuned_manifest(
         AIMDeployRequest(model="wb-llm-finetune-abc123", engine_env=[{"name": "VLLM_LOGGING_LEVEL", "value": "DEBUG"}])
@@ -800,7 +909,6 @@ def test_generate_aim_service_manifest_rejects_invalid_engine_env_entries(
             service_name="wb-aim-test",
             api_version="v1",
             submitter="u",
-            cluster_auth_group_id="grp",
         )
 
 
@@ -839,10 +947,32 @@ def test_generate_aim_service_manifest_with_engine_args_profile_override() -> No
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert manifest["spec"]["profileOverrides"] == {"engineArgs": {"max-model-len": 8192}}
+
+
+def test_generate_aim_service_manifest_writes_max_lora_rank() -> None:
+    """The rank ceiling lands on adapterRuntime, leaving other engine args untouched."""
+    aim = make_aim_cluster_model()
+    req = AIMDeployRequest(
+        model="llama3-8b",
+        engine_args={"max-model-len": 8192},
+        adapter_mode=AdapterMode.DYNAMIC,
+        max_lora_rank=32,
+    )
+
+    manifest = generate_aim_service_manifest(
+        aim=aim,
+        deploy_request=req,
+        namespace="ns",
+        service_name="wb-aim-test",
+        api_version="v1",
+        submitter="u",
+    )
+
+    assert manifest["spec"]["profileOverrides"] == {"engineArgs": {"max-model-len": 8192}}
+    assert manifest["spec"]["adapterRuntime"] == {"maxRank": 32}
 
 
 def test_generate_aim_service_manifest_with_engine_env_profile_override() -> None:
@@ -856,7 +986,6 @@ def test_generate_aim_service_manifest_with_engine_env_profile_override() -> Non
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert manifest["spec"]["profileOverrides"] == {"engineEnv": {"VLLM_LOGGING_LEVEL": "DEBUG"}}
@@ -874,7 +1003,6 @@ def test_generate_aim_service_manifest_with_container_env_profile_override() -> 
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert manifest["spec"]["profileOverrides"] == {"containerEnv": container_env}
@@ -896,7 +1024,6 @@ def test_generate_aim_service_manifest_selector_and_profile_overrides() -> None:
         service_name="wb-aim-test",
         api_version="v1",
         submitter="u",
-        cluster_auth_group_id="grp",
     )
 
     assert manifest["spec"]["profile"]["selector"] == {"minimumType": "any", "metric": "latency"}
@@ -904,3 +1031,246 @@ def test_generate_aim_service_manifest_selector_and_profile_overrides() -> None:
         "acceleratorCount": 2,
         "engineEnv": {"VLLM_LOGGING_LEVEL": "INFO"},
     }
+
+
+def test_is_default_profile_set_by_absence_of_origin_label() -> None:
+    default_set = make_aim_profile_set(is_aiwb_authored=False)
+    aiwb_set = make_aim_profile_set(is_aiwb_authored=True)
+
+    assert is_default_profile_set(default_set) is True
+    assert is_default_profile_set(aiwb_set) is False
+
+
+def test_is_default_profile_set_with_no_labels() -> None:
+    """A set carrying no labels at all classifies as Default (unlabeled == engine)."""
+    unlabeled = AIMProfileSetResource.model_validate({"metadata": {"name": "m-profiles-abc"}})
+
+    assert unlabeled.metadata.labels == {}
+    assert is_default_profile_set(unlabeled) is True
+
+
+def test_classify_default_profile_set_returns_the_single_default() -> None:
+    default_set = make_aim_profile_set(name="m-profiles-abc", is_aiwb_authored=False)
+    aiwb_set = make_aim_profile_set(name="m-fast", is_aiwb_authored=True)
+
+    result = classify_default_profile_set([aiwb_set, default_set])
+
+    assert result.metadata.name == "m-profiles-abc"
+
+
+def test_classify_default_profile_set_raises_on_zero_defaults() -> None:
+    aiwb_only = [make_aim_profile_set(name="m-fast", is_aiwb_authored=True)]
+
+    with pytest.raises(InconsistentStateException, match="found 0"):
+        classify_default_profile_set(aiwb_only)
+
+
+def test_classify_default_profile_set_raises_on_multiple_defaults() -> None:
+    two_defaults = [
+        make_aim_profile_set(name="m-profiles-abc", is_aiwb_authored=False),
+        make_aim_profile_set(name="m-profiles-def", is_aiwb_authored=False),
+    ]
+
+    with pytest.raises(InconsistentStateException, match="found 2"):
+        classify_default_profile_set(two_defaults)
+
+
+def _make_derived_profile(
+    *,
+    name: str,
+    owner_set: str | None = "m-profiles-abc",
+    precision: str = "bf16",
+    metric: str = "latency",
+    status: str = "Ready",
+    primary: bool = False,
+    optimization_type: str = "general",
+) -> AIMProfileResource:
+    """A derived AIMProfile, owned by an AIMProfileSet the way aim-engine emits them."""
+    owner_references = [{"kind": "AIMProfileSet", "name": owner_set, "controller": True}] if owner_set else []
+    return AIMProfileResource(
+        metadata=K8sMetadata(name=name, namespace="ns", owner_references=owner_references),
+        spec=AIMProfileSpec(precision=precision, metric=metric, primary=primary, type=optimization_type),
+        status=AIMProfileStatus(status=status),
+    )
+
+
+def test_owning_profile_set_name_reads_the_profile_set_owner_reference() -> None:
+    profile = _make_derived_profile(name="m-bf16-latency", owner_set="m-profiles-abc")
+
+    assert owning_profile_set_name(profile) == "m-profiles-abc"
+
+
+def test_owning_profile_set_name_ignores_other_owner_kinds() -> None:
+    """Profiles emitted before sets owned them are owned by the AIMModel, not a set."""
+    profile = _make_derived_profile(name="m-legacy", owner_set=None)
+    profile.metadata.owner_references = [{"kind": "AIMModel", "name": "m"}]
+
+    assert owning_profile_set_name(profile) is None
+
+
+def test_profiles_derived_from_set_selects_only_that_sets_profiles_in_order() -> None:
+    profiles = [
+        _make_derived_profile(name="authored-fp8", owner_set="m-fast"),
+        _make_derived_profile(name="default-bf16", owner_set="m-profiles-abc"),
+        _make_derived_profile(name="default-fp8", owner_set="m-profiles-abc"),
+        _make_derived_profile(name="unowned", owner_set=None),
+    ]
+
+    derived = profiles_derived_from_set(profiles, "m-profiles-abc")
+
+    assert [p.metadata.name for p in derived] == ["default-bf16", "default-fp8"]
+
+
+def test_select_custom_deploy_profile_matches_engine_ranking() -> None:
+    """Optimization tier wins first, then primary, then latency over throughput."""
+    profiles = [
+        _make_derived_profile(
+            name="fp8-general-primary",
+            precision="fp8",
+            metric="throughput",
+            primary=True,
+            optimization_type="general",
+        ),
+        _make_derived_profile(
+            name="fp8-optimized-throughput",
+            precision="fp8",
+            metric="throughput",
+            optimization_type="optimized",
+        ),
+        _make_derived_profile(
+            name="fp8-optimized-latency",
+            precision="fp8",
+            metric="latency",
+            optimization_type="optimized",
+        ),
+        _make_derived_profile(name="bf16-latency", precision="bf16", metric="latency"),
+    ]
+
+    assert select_custom_deploy_profile(profiles, "fp8").metadata.name == "fp8-optimized-latency"
+    # Drop the latency profile: optimized still wins over a general primary.
+    assert select_custom_deploy_profile(profiles[:2] + profiles[3:], "fp8").metadata.name == (
+        "fp8-optimized-throughput"
+    )
+    # No matching precision => None so the caller can fall back.
+    assert select_custom_deploy_profile(profiles, "fp16") is None
+
+
+def test_select_custom_deploy_profile_ignores_non_ready_profiles() -> None:
+    profiles = [_make_derived_profile(name="fp8-pending", precision="fp8", status="Pending")]
+
+    assert select_custom_deploy_profile(profiles, "fp8") is None
+
+
+def test_select_custom_deploy_profile_treats_an_unset_primary_as_not_primary() -> None:
+    """``spec.primary`` is optional, and an unset flag must not be read as the engine
+    having marked the profile primary — that would outrank a genuinely primary one."""
+    unset = _make_derived_profile(name="fp8-primary-unset", precision="fp8")
+    unset.spec.primary = None
+    explicit = _make_derived_profile(name="fp8-primary", precision="fp8", primary=True)
+
+    assert select_custom_deploy_profile([unset, explicit], "fp8").metadata.name == "fp8-primary"
+    assert select_custom_deploy_profile([explicit, unset], "fp8").metadata.name == "fp8-primary"
+
+
+def test_profiles_without_owning_set_selects_only_unowned_profiles() -> None:
+    """Deploy falls back to these when the Default is unresolvable through the set
+    layer, so a profile owned by an authored set must never appear here."""
+    profiles = [
+        _make_derived_profile(name="owned", owner_set="m-fast"),
+        _make_derived_profile(name="legacy-bf16", owner_set=None),
+        _make_derived_profile(name="legacy-fp8", owner_set=None),
+    ]
+
+    assert [p.metadata.name for p in profiles_without_owning_set(profiles)] == ["legacy-bf16", "legacy-fp8"]
+
+
+def test_effective_profile_for_set_returns_the_single_profile_of_a_narrowed_set() -> None:
+    """A narrowed set derives exactly one profile, so the precision annotation cannot override it."""
+    only = _make_derived_profile(name="m-fast-fp8", precision="fp8")
+
+    assert effective_profile_for_set([only], "bf16").metadata.name == "m-fast-fp8"
+
+
+def test_effective_profile_for_set_prefers_the_annotated_precision() -> None:
+    profiles = [
+        _make_derived_profile(name="m-bf16-latency", precision="bf16"),
+        _make_derived_profile(name="m-fp8-latency", precision="fp8"),
+    ]
+
+    assert effective_profile_for_set(profiles, "fp8").metadata.name == "m-fp8-latency"
+
+
+def test_effective_profile_for_set_falls_back_to_the_first_profile() -> None:
+    """Without an annotation, or with no Ready profile at that precision, the first
+    derived profile is chosen — the answer deploy gave before profile sets existed."""
+    profiles = [
+        _make_derived_profile(name="m-bf16-latency", precision="bf16"),
+        _make_derived_profile(name="m-fp8-latency", precision="fp8", status="Pending"),
+    ]
+
+    assert effective_profile_for_set(profiles, None).metadata.name == "m-bf16-latency"
+    assert effective_profile_for_set(profiles, "fp8").metadata.name == "m-bf16-latency"
+
+
+def test_effective_profile_for_set_returns_none_without_derived_profiles() -> None:
+    assert effective_profile_for_set([], "fp8") is None
+
+
+def _namespace_manifest(deploy_request: AIMDeployRequest) -> dict:
+    return generate_namespace_aim_service_manifest(
+        model_name="custom-model",
+        deploy_request=deploy_request,
+        namespace="workbench",
+        service_name="wb-aim-test",
+        api_version="aim.eai.amd.com/v1alpha2",
+        submitter="user@example.com",
+        display_name="Custom Display",
+        canonical_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        is_fine_tuned=False,
+        resolved_profile_name="custom-profile",
+    )
+
+
+def _cluster_manifest(deploy_request: AIMDeployRequest) -> dict:
+    return generate_aim_service_manifest(
+        aim=make_aim_cluster_model(name="llama3-8b"),
+        deploy_request=deploy_request,
+        namespace="ns",
+        service_name="wb-aim-test",
+        api_version="aim.eai.amd.com/v1alpha2",
+        submitter="user@example.com",
+    )
+
+
+@pytest.mark.parametrize("build_manifest", [_cluster_manifest, _namespace_manifest], ids=["cluster", "namespace"])
+def test_manifest_omits_adapter_fields_when_none_requested(build_manifest: Callable[[AIMDeployRequest], dict]) -> None:
+    """An empty adapters array is still a declaration aim-engine acts on, and adapterMode is
+    immutable once written, so a deploy that asked for neither writes neither."""
+    spec = build_manifest(AIMDeployRequest(model="llama3-8b"))["spec"]
+
+    assert "adapters" not in spec
+    assert "adapterMode" not in spec
+    assert "adapterRuntime" not in spec
+
+
+@pytest.mark.parametrize("build_manifest", [_cluster_manifest, _namespace_manifest], ids=["cluster", "namespace"])
+def test_manifest_writes_adapters_as_artifact_references(
+    build_manifest: Callable[[AIMDeployRequest], dict],
+) -> None:
+    """Requested names become AIMArtifact references in the service's own namespace."""
+    request = AIMDeployRequest(model="llama3-8b", adapters=["first-adapter", "second-adapter"])
+
+    spec = build_manifest(request)["spec"]
+
+    assert spec["adapters"] == [
+        {"kind": "AIMArtifact", "name": "first-adapter"},
+        {"kind": "AIMArtifact", "name": "second-adapter"},
+    ]
+    assert "adapterMode" not in spec
+
+
+@pytest.mark.parametrize("build_manifest", [_cluster_manifest, _namespace_manifest], ids=["cluster", "namespace"])
+def test_manifest_writes_adapter_mode_only_when_chosen(build_manifest: Callable[[AIMDeployRequest], dict]) -> None:
+    request = AIMDeployRequest(model="llama3-8b", adapters=["first-adapter"], adapter_mode=AdapterMode.DYNAMIC)
+
+    assert build_manifest(request)["spec"]["adapterMode"] == "dynamic"

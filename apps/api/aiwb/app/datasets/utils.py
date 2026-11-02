@@ -12,6 +12,7 @@ from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from api_common.exceptions import ValidationException
+from api_common.slugs import slugify
 
 from ..minio.client import MinioClient, handle_s3_operation
 from ..minio.config import MINIO_BUCKET, MINIO_MAX_ATTEMPTS, MINIO_MAX_WAIT, MINIO_MIN_WAIT
@@ -21,27 +22,6 @@ from .config import (
     MAX_FILE_SIZE_MB,
 )
 from .models import Dataset
-
-
-def slugify(name: str) -> str:
-    """
-    Convert a dataset name to a path-safe slug.
-    - Convert to lowercase
-    - Replace spaces and special characters with hyphens
-    - Remove consecutive hyphens
-    - Remove leading and trailing hyphens
-    - Preserve letters and digits from any language
-    """
-    # Convert to lowercase
-    slug = name.lower()
-    # Replace non-alphanumeric characters with hyphens, but preserve Unicode letters and digits
-    slug = re.sub(r"[^\w\d]+", "-", slug, flags=re.UNICODE)
-    # Remove consecutive hyphens
-    slug = re.sub(r"-+", "-", slug)
-    # Remove leading and trailing hyphens
-    slug = slug.strip("-")
-
-    return slug
 
 
 def get_object_key(dataset_id: str, namespace: str) -> str:

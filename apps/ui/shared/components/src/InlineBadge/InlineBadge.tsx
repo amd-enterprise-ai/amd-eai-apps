@@ -45,9 +45,9 @@ export const InlineBadge = ({
 
   // Build custom classes based on variants
   const sizeClasses = {
-    sm: 'min-w-6 px-1 h-6 text-tiny',
-    md: 'min-w-7 px-1 h-7 text-small',
-    lg: 'min-w-8 px-2 h-8 text-medium',
+    sm: 'min-w-6 px-1 h-6 text-xs',
+    md: 'min-w-7 px-1 h-7 text-sm',
+    lg: 'min-w-8 px-2 h-8 text-base',
   };
 
   const outlineClasses = showOutline

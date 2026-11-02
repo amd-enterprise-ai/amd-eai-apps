@@ -29,8 +29,8 @@ import { useAccessControl } from '@/hooks/useAccessControl';
 
 const customComparator: CustomComparatorConfig<User, UserTableField> = {
   [UserTableField.NAME]: compareUsersByFullName,
-  [UserTableField.LAST_SEEN_AT]: (a, b) =>
-    dateComparator(a.lastActiveAt, b.lastActiveAt),
+  [UserTableField.CREATED_AT]: (a, b) =>
+    dateComparator(a.createdAt, b.createdAt),
   [UserTableField.ROLES]: (a: User, b: User): number =>
     a.role.localeCompare(b.role),
 };
@@ -44,7 +44,7 @@ const columns: TableColumns<UserTableField | null> = [
     key: UserTableField.EMAIL,
     sortable: true,
   },
-  { key: UserTableField.LAST_SEEN_AT, sortable: true },
+  { key: UserTableField.CREATED_AT, sortable: true },
   { key: UserTableField.ROLES, sortable: true },
 ];
 
@@ -107,10 +107,8 @@ export const ActiveUsersTab = ({
     Record<UserTableField, (item: User) => React.ReactNode | string>
   > = {
     [UserTableField.NAME]: (item) => `${item.firstName} ${item.lastName}`,
-    [UserTableField.LAST_SEEN_AT]: (item) => {
-      if (!item.lastActiveAt) return t('list.lastSeenAt.never');
-      return <DateDisplay date={item.lastActiveAt} />;
-    },
+    [UserTableField.CREATED_AT]: (item) =>
+      item.createdAt ? <DateDisplay date={item.createdAt} /> : '-',
     [UserTableField.ROLES]: (item) => item.role,
   };
 

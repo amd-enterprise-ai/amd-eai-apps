@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Copyright © Advanced Micro Devices, Inc., or its affiliates.
+
+SPDX-License-Identifier: MIT
+-->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.0.xsd">
+
+    <changeSet id="010-api-keys-store-columns" author="aiwb">
+        <!-- The OpenBao/ESO store is the sole key path now. Expiry is owned here
+             (was fetched from cluster-auth); null = never. OpenBao delete_version_after enforces
+             the actual drop. -->
+        <addColumn tableName="api_keys">
+            <column name="expires_at" type="TIMESTAMP WITH TIME ZONE"/>
+        </addColumn>
+
+        <!-- Store-created keys have no cluster-auth accessor, so cluster_auth_key_id is now
+             nullable. The unique constraint remains (Postgres allows multiple NULLs). The column
+             is kept until cluster-auth is dropped from the key path. -->
+        <dropNotNullConstraint
+            tableName="api_keys"
+            columnName="cluster_auth_key_id"
+            columnDataType="VARCHAR(255)"/>
+    </changeSet>
+
+</databaseChangeLog>

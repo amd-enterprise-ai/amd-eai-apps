@@ -116,18 +116,24 @@ Time range selector should offer expected options
     Should Contain    ${labels}    24 hours
     Should Contain    ${labels}    7 days
 
+The chart time range control should be labeled for selection
+    [Documentation]    Verifies the shared chart control uses a readable label.
+
+    ${label}=    Get chart time range control label
+    Should Be Equal    ${label}    Time range selection
+
 Allocation and workload summary cards should be displayed
     [Documentation]    Verifies the allocation summary cards are visible in the dashboard.
-    ...                "GPU Utilization" appears both as a table column header and as a stat card,
+    ...                "GPU utilization" appears both as a table column header and as a stat card,
     ...                so we verify the section heading and use nth-match for the stat card text.
 
     Allocations section should be visible
 
     # All three stat card titles also appear as table column headers,
     # so use the allocation-specific getter that avoids ambiguity.
-    Allocation stat card should be visible    GPU Utilization
-    Allocation stat card should be visible    Running Workloads
-    Allocation stat card should be visible    Pending Workloads
+    Allocation stat card should be visible    GPU utilization
+    Allocation stat card should be visible    Running workloads
+    Allocation stat card should be visible    Pending workloads
 
 Allocation stat card should be visible
     [Documentation]    Asserts that an allocation summary stat card with the given title

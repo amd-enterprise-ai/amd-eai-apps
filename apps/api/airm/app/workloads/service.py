@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 import asyncio
+import re
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -18,7 +19,7 @@ from ..messaging.sender import MessageSender
 from ..metrics.service import get_gpu_and_node_counts_for_workload
 from ..projects.models import Project
 from .constants import WORKLOAD_STATS_STATUSES
-from .enums import WorkloadStatus, WorkloadType
+from .enums import WorkloadComponentKind, WorkloadStatus, WorkloadType
 from .messaging import (
     AutoDiscoveredWorkloadComponentMessage,
     DeleteWorkloadMessage,
@@ -46,6 +47,7 @@ from .repository import (
 from .repository import get_workloads_accessible_to_user as get_workloads_accessible_to_user_from_db
 from .repository import get_workloads_by_project as get_workloads_by_project_in_db
 from .repository import update_workload_component_status as update_workload_component_status_in_db
+from .repository import update_workload_display_name as update_workload_display_name_in_db
 from .repository import update_workload_status as update_workload_status_in_db
 from .schemas import (
     WorkloadComponent,
@@ -64,6 +66,48 @@ from .utils import (
     inject_workload_metadata_to_manifest,
     resolve_workload_status,
 )
+
+# These mirror Kubernetes' own generated-name scheme (apimachinery `rand.SafeEncodeString` /
+# `rand.String`): the alphabet is k8s `alphanums` = "bcdfghjklmnpqrstvwxz2456789" (vowels, the
+# consonant y, and the digits 0/1/3 dropped), a ReplicaSet appends a 1-10 char pod-template-hash,
+# and a Pod appends a 5-char suffix. These are internal conventions with no compatibility
+# guarantee, so reconstructing them here is best-effort and fail-closed.
+_REPLICA_SET_NAME_SUFFIX = re.compile(r"^[bcdfghjklmnpqrstvwxz2456789]{1,10}$")
+_POD_NAME_SUFFIX = re.compile(r"^[bcdfghjklmnpqrstvwxz2456789]{5}$")
+# Owner kind -> the descendant kinds whose apiserver-generated names begin with the owner's.
+# Deployment owns ReplicaSets (and, transitively, their Pods); ReplicaSet, Job and DaemonSet
+# own Pods directly. StatefulSet is deliberately excluded: its pods use deterministic
+# ordinal names (`<sts>-<n>`), so they can't be mistaken for their owner in the first place.
+_OWNER_DESCENDANT_KINDS = {
+    WorkloadComponentKind.DEPLOYMENT: frozenset(
+        {WorkloadComponentKind.REPLICA_SET.value, WorkloadComponentKind.POD.value}
+    ),
+    WorkloadComponentKind.REPLICA_SET: frozenset({WorkloadComponentKind.POD.value}),
+    WorkloadComponentKind.JOB: frozenset({WorkloadComponentKind.POD.value}),
+    WorkloadComponentKind.DAEMON_SET: frozenset({WorkloadComponentKind.POD.value}),
+}
+
+
+def _looks_like_generated_descendant(owner_kind: WorkloadComponentKind, descendant_suffix: str) -> bool:
+    """Whether descendant_suffix is the Kubernetes-generated tail of owner_kind's child.
+
+    A ReplicaSet appends a pod-template-hash (1-10 chars) and its Pod appends a further 5-char
+    suffix, so a Deployment's descendant is either `<hash>` or `<hash>-<pod>`. ReplicaSet-, Job-
+    and DaemonSet-owned Pods add a single 5-char suffix. Pods never own a rename, so a Pod-kind
+    owner is not reachable here.
+    """
+    if owner_kind == WorkloadComponentKind.DEPLOYMENT:
+        replica_set_suffix, separator, pod_suffix = descendant_suffix.rpartition("-")
+        return bool(
+            _REPLICA_SET_NAME_SUFFIX.fullmatch(descendant_suffix)
+            or (
+                separator
+                and _REPLICA_SET_NAME_SUFFIX.fullmatch(replica_set_suffix)
+                and _POD_NAME_SUFFIX.fullmatch(pod_suffix)
+            )
+        )
+    # ReplicaSet, Job and DaemonSet own Pods directly: a single apiserver 5-char suffix.
+    return bool(_POD_NAME_SUFFIX.fullmatch(descendant_suffix))
 
 
 async def extract_components_and_submit_workload(
@@ -307,6 +351,47 @@ async def register_auto_discovered_workload_component(
             display_name=message.name,
             workload_id=message.workload_id,
         )
+    elif (
+        workload.display_name
+        and workload.display_name != message.name
+        and message.kind in _OWNER_DESCENDANT_KINDS
+        and workload.display_name.startswith(f"{message.name}-")
+    ):
+        # Discovery messages for an owner and its hash-suffixed children can arrive in any
+        # order. Rename to the shorter owner name only when the current name is a generated
+        # child suffix AND a child component actually carries that name, so submitter-chosen
+        # names that merely share a prefix are left unchanged.
+        descendant_suffix = workload.display_name.removeprefix(f"{message.name}-")
+        if _looks_like_generated_descendant(message.kind, descendant_suffix):
+            components = await get_workload_components_by_workload_id(session, workload.id)
+            # Require a real descendant component carrying this name before renaming, so a
+            # submitter-chosen name that merely shares the prefix is never rewritten.
+            # For an auto-discovered owner->child chain the agent propagates one shared
+            # component_id into each pod template, so the chain collapses to a single component
+            # row (a manifest-submitted workload has one row per resource, but those arrive under
+            # the owner name and never reach this branch). In a Pod->ReplicaSet->Deployment race
+            # that single row is the Pod, and after the Pod->ReplicaSet rename the stored
+            # display_name is the ReplicaSet name while the row still holds the grandchild Pod
+            # name; the second clause recognises that Pod as the display_name's descendant.
+            # Without it, Pod-first three-level discovery would stop one level short.
+            has_descendant_lineage = any(
+                component.kind in _OWNER_DESCENDANT_KINDS[message.kind]
+                and (
+                    component.name == workload.display_name
+                    or (
+                        component.kind == WorkloadComponentKind.POD
+                        and component.name.startswith(f"{workload.display_name}-")
+                        and _POD_NAME_SUFFIX.fullmatch(component.name.removeprefix(f"{workload.display_name}-"))
+                    )
+                )
+                for component in components
+            )
+            if has_descendant_lineage:
+                logger.info(
+                    f"Renaming auto-discovered workload {workload.id} from {workload.display_name} "
+                    f"to its owning {message.kind} {message.name}"
+                )
+                await update_workload_display_name_in_db(session, workload, message.name, "system")
 
     component = await get_workload_component_by_id(session, message.component_id, workload.id)
     if not component:

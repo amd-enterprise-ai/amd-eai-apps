@@ -20,12 +20,12 @@ ${REPLICA_ROW_SELECTOR}                 css=[data-testid="scaling-status-card"] 
 
 *** Keywords ***
 Wait for autoscaling toggle
-    [Documentation]    Waits for the autoscaling toggle to become visible in the deploy drawer.
+    [Documentation]    Waits for the autoscaling toggle to become visible in the deploy wizard.
 
     Wait For Elements State    ${AUTOSCALING_TOGGLE_SELECTOR}    visible    timeout=15s
 
 Click autoscaling toggle
-    [Documentation]    Clicks the autoscaling enable/disable toggle in the deploy drawer.
+    [Documentation]    Clicks the autoscaling enable/disable toggle in the deploy wizard.
 
     Wait For Elements State    ${AUTOSCALING_TOGGLE_SELECTOR}    visible    timeout=15s
     # HeroUI Switch uses a checkbox internally; Check Checkbox toggles it reliably

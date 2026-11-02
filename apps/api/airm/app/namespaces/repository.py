@@ -49,6 +49,11 @@ async def delete_namespace(session: AsyncSession, namespace: Namespace) -> None:
     await session.flush()
 
 
+async def get_namespaces_in_cluster(session: AsyncSession, cluster_id: UUID) -> list[Namespace]:
+    result = await session.execute(select(Namespace).where(Namespace.cluster_id == cluster_id))
+    return list(result.scalars().all())
+
+
 async def get_namespace_by_name_and_cluster(
     session: AsyncSession, cluster_id: UUID, namespace_name: str
 ) -> Namespace | None:

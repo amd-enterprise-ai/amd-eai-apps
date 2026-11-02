@@ -6,13 +6,13 @@ import { vi, beforeEach, describe, it, expect } from 'vitest';
 
 import { listChattableWorkloads } from '@/lib/app/chat';
 import { resolveAIMServiceDisplay } from '@/lib/app/aims';
+import { resolveCustomProfileDeployments } from '@/lib/app/custom-profiles';
 import {
   getInferenceModel,
   listAllInferenceDeployments,
 } from '@/lib/app/inference';
 import {
   AIM_DISPLAY_NAME_ANNOTATION,
-  AIMMetric,
   AIMServiceStatus,
   FINE_TUNED_LABEL,
   NAMESPACE_AIM_MODEL_LABEL,
@@ -29,6 +29,11 @@ vi.mock('@/lib/app/inference', () => ({
   listAllInferenceDeployments: vi.fn(),
 }));
 
+vi.mock('@/lib/app/custom-profiles', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/app/custom-profiles')>()),
+  resolveCustomProfileDeployments: vi.fn().mockResolvedValue(new Map()),
+}));
+
 const mockListInferenceDeployments = listAllInferenceDeployments as ReturnType<
   typeof vi.fn
 >;
@@ -36,6 +41,8 @@ const mockGetInferenceModel = getInferenceModel as ReturnType<typeof vi.fn>;
 const mockResolveAIMServiceDisplay = resolveAIMServiceDisplay as ReturnType<
   typeof vi.fn
 >;
+const mockResolveCustomProfileDeployments =
+  resolveCustomProfileDeployments as ReturnType<typeof vi.fn>;
 
 const buildAimService = (overrides: {
   id: string;
@@ -59,18 +66,16 @@ const buildAimService = (overrides: {
     spec: {
       model: { name: overrides.modelRef ?? 'aim-model' },
       replicas: 1,
-      overrides: {},
-      cacheModel: false,
       routing: { annotations: {}, enabled: false },
       runtimeConfigName: '',
     },
     status: {
-      status: overrides.status ?? AIMServiceStatus.RUNNING,
+      status: overrides.status ?? 'Running',
       resolvedModel: { name: overrides.modelRef ?? 'aim-model' },
       routing: { path: '' },
       endpoints: { internal: '', external: '' },
     },
-    clusterAuthGroupId: null,
+    statusValue: '',
     endpoints: { internal: '', external: '' },
   }) as AIMService;
 
@@ -80,6 +85,7 @@ describe('listChattableWorkloads', () => {
     // Default to a 404 for any per-name lookup so tests don't accidentally
     // pull cluster-catalog metadata they didn't set up.
     mockGetInferenceModel.mockRejectedValue(new Error('not found'));
+    mockResolveCustomProfileDeployments.mockResolvedValue(new Map());
   });
 
   it('uses the user-given deploy name for fine-tuned AIM services', async () => {
@@ -99,7 +105,7 @@ describe('listChattableWorkloads', () => {
       canonicalName: 'meta-llama/Llama-3.2-3B-Instruct',
       imageVersion: '0.11.0',
       name: 'amd-rai-suite-qa-with-refusal-v6',
-      metric: AIMMetric.Throughput,
+      metric: 'throughput',
       tags: [],
     });
 
@@ -111,7 +117,7 @@ describe('listChattableWorkloads', () => {
     );
   });
 
-  it('uses the canonical name for non fine-tuned AIM services', async () => {
+  it('uses canonical name fallback for non fine-tuned AIM services', async () => {
     const catalogService = buildAimService({
       id: 'svc-catalog',
       modelRef: 'aim-llama-3.2-3b',
@@ -122,7 +128,7 @@ describe('listChattableWorkloads', () => {
       canonicalName: 'meta-llama/Llama-3.2-3B-Instruct',
       imageVersion: '0.11.0',
       name: 'aim-llama-3.2-3b',
-      metric: AIMMetric.Throughput,
+      metric: 'throughput',
       tags: [],
     });
 
@@ -132,6 +138,31 @@ describe('listChattableWorkloads', () => {
     expect(result.workloads[0].displayName).toBe(
       'meta-llama/Llama-3.2-3B-Instruct',
     );
+  });
+
+  it('uses deploy display name for non fine-tuned AIM services when it differs from resource name', async () => {
+    const catalogService = buildAimService({
+      id: 'svc-catalog-display',
+      name: 'svc-catalog-resource-name',
+      annotations: {
+        [AIM_DISPLAY_NAME_ANNOTATION]: 'Llama Chat Friendly Name',
+      },
+      modelRef: 'aim-llama-3.2-3b',
+    });
+    mockListInferenceDeployments.mockResolvedValue([catalogService]);
+    mockResolveAIMServiceDisplay.mockReturnValue({
+      title: 'Llama 3.2 3B Instruct',
+      canonicalName: 'meta-llama/Llama-3.2-3B-Instruct',
+      imageVersion: '0.11.0',
+      name: 'aim-llama-3.2-3b',
+      metric: 'throughput',
+      tags: [],
+    });
+
+    const result = await listChattableWorkloads('project1');
+
+    expect(result.workloads).toHaveLength(1);
+    expect(result.workloads[0].displayName).toBe('Llama Chat Friendly Name');
   });
 
   it('fans out per-name catalog lookups, skipping namespace-scoped AIMModel services', async () => {
@@ -164,7 +195,7 @@ describe('listChattableWorkloads', () => {
       canonicalName: 'org/x',
       imageVersion: '1.0.0',
       name: 'aim-model-a',
-      metric: AIMMetric.Default,
+      metric: 'default',
       tags: [],
     });
 
@@ -193,7 +224,7 @@ describe('listChattableWorkloads', () => {
       canonicalName: 'byom-namespace-model',
       imageVersion: '',
       name: 'byom-namespace-model',
-      metric: AIMMetric.Default,
+      metric: 'default',
       tags: [],
     });
 
@@ -202,6 +233,70 @@ describe('listChattableWorkloads', () => {
     expect(result.workloads).toHaveLength(1);
     expect(result.workloads[0].id).toBe('svc-byom');
     expect(mockGetInferenceModel).not.toHaveBeenCalled();
+  });
+
+  it('labels a custom-model deployment with the profile it was deployed with', async () => {
+    const byomService = buildAimService({
+      id: 'svc-byom',
+      labels: { [NAMESPACE_AIM_MODEL_LABEL]: 'true' },
+      modelRef: 'byom-namespace-model',
+    });
+    mockListInferenceDeployments.mockResolvedValue([byomService]);
+    // A pinned custom profile carries no selector, so the metric falls back to
+    // 'default' — the label is what must reach the dropdown instead.
+    mockResolveAIMServiceDisplay.mockReturnValue({
+      title: 'My Custom Model',
+      canonicalName: 'byom-namespace-model',
+      imageVersion: '',
+      name: 'byom-namespace-model',
+      metric: 'default',
+      tags: [],
+    });
+    mockResolveCustomProfileDeployments.mockResolvedValue(
+      new Map([
+        [
+          'svc-byom',
+          {
+            displayName: 'High speed',
+            profile: {
+              metric: 'latency',
+              gpu: 'MI300X',
+              templateGpuCount: 2,
+              acceleratorType: 'gpu',
+              precision: 'fp8',
+            },
+          },
+        ],
+      ]),
+    );
+
+    const result = await listChattableWorkloads('project1');
+
+    expect(result.workloadDisplayInfo['svc-byom'].profileDisplayName).toBe(
+      'High speed',
+    );
+  });
+
+  it('leaves non-custom deployments without a profile label', async () => {
+    const catalogService = buildAimService({
+      id: 'svc-catalog',
+      modelRef: 'aim-llama-3.2-3b',
+    });
+    mockListInferenceDeployments.mockResolvedValue([catalogService]);
+    mockResolveAIMServiceDisplay.mockReturnValue({
+      title: 'Llama 3.2 3B Instruct',
+      canonicalName: 'meta-llama/Llama-3.2-3B-Instruct',
+      imageVersion: '0.11.0',
+      name: 'aim-llama-3.2-3b',
+      metric: 'throughput',
+      tags: [],
+    });
+
+    const result = await listChattableWorkloads('project1');
+
+    expect(
+      result.workloadDisplayInfo['svc-catalog'].profileDisplayName,
+    ).toBeUndefined();
   });
 
   it('tolerates per-name fetch failures via Promise.allSettled', async () => {
@@ -230,7 +325,7 @@ describe('listChattableWorkloads', () => {
       canonicalName: 'org/y',
       imageVersion: '1.0',
       name: 'aim-model-a',
-      metric: AIMMetric.Default,
+      metric: 'default',
       tags: [],
     });
 
@@ -251,7 +346,7 @@ describe('listChattableWorkloads', () => {
       canonicalName: 'meta-llama/Llama-3.2-3B-Instruct',
       imageVersion: '',
       name: 'bare-model-ref',
-      metric: AIMMetric.Default,
+      metric: 'default',
       tags: [],
     });
 
@@ -264,7 +359,7 @@ describe('listChattableWorkloads', () => {
     const runningService = buildAimService({ id: 'svc-running' });
     const pendingService = buildAimService({
       id: 'svc-pending',
-      status: AIMServiceStatus.PENDING,
+      status: 'Pending',
     });
     mockListInferenceDeployments.mockResolvedValue([
       runningService,
@@ -275,7 +370,7 @@ describe('listChattableWorkloads', () => {
       canonicalName: 'org/model',
       imageVersion: '1.0',
       name: 'model',
-      metric: AIMMetric.Throughput,
+      metric: 'throughput',
       tags: [],
     });
 

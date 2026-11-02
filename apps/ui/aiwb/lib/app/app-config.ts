@@ -7,7 +7,7 @@ import { APIRequestError } from '@amdenterpriseai/utils/app';
 export interface AppConfig {
   isStandaloneMode: boolean;
   defaultNamespace: string | null;
-  clusterAuthEnabled: boolean;
+  apiKeysManagementEnabled: boolean;
   aiGatewayEnabled: boolean;
   aiGatewayUrl?: string;
   airmAppUrl?: string;

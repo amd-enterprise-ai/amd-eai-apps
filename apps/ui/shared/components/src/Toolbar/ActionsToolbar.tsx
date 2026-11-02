@@ -11,6 +11,7 @@ import RefreshButton from '../Filters/RefreshButton';
 interface Props {
   filterConfig: FilterFieldMapping;
   onFilterChange: (filters: FilterValueMap) => void;
+  canClear?: boolean;
   onRefresh?: () => void;
   isRefreshing?: boolean;
   updatedTimestamp?: number;
@@ -20,6 +21,7 @@ interface Props {
 
 export const ActionsToolbar = ({
   filterConfig,
+  canClear = true,
   isRefreshing,
   onFilterChange,
   onRefresh,
@@ -40,7 +42,11 @@ export const ActionsToolbar = ({
             lastFetchedTimestamp={updatedTimestamp}
           />
         ) : null}
-        <DataFilter filters={filterConfig} onFilterChange={onFilterChange} />
+        <DataFilter
+          filters={filterConfig}
+          onFilterChange={onFilterChange}
+          canClear={canClear}
+        />
         {extraContent}
       </div>
       {endContent != undefined ? (
@@ -48,7 +54,7 @@ export const ActionsToolbar = ({
           <div className="flex items-center gap-3 sm:justify-start justify-end ml-auto lg:ml-0 order-1 lg:order-2">
             {endContent}
           </div>
-          <div className="w-full border-b border-default-200 dark:border-default-100 lg:hidden order-1 lg:order-2"></div>
+          <div className="w-full border-b border-default dark:border-default lg:hidden order-1 lg:order-2"></div>
         </>
       ) : null}
     </Toolbar>

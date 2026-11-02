@@ -39,7 +39,7 @@ const FileUploadFooter = memo(
         >
           {t('add', { count: +multiple + 1 })}
         </ActionButton>
-        <div className="flex gap-2 text-sm text-default-500 items-center justify-end mr-2 h-5">
+        <div className="flex gap-2 text-sm text-muted items-center justify-end mr-2 h-5">
           <span>{t('footerFiles', { count: filesCount })}</span>
           <Divider orientation="vertical" />
           <span>{displayBytesInOptimalUnit(totalSize)}</span>

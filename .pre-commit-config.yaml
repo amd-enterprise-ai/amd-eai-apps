@@ -2,32 +2,20 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Common repo-wide hooks (whitespace, copyright, shellcheck, prettier, mypy).
-# App-specific hooks live in per-app configs under apps/*/ (prek workspace mode with orphan: true).
+# Common repo-wide hooks (whitespace, shellcheck, prettier, mypy).
+# App-specific hooks live in per-app configs under apps/*/, discovered by prek as nested
+# workspace projects. Those configs must never declare `orphan: true`: an orphan project
+# consumes its own files instead of passing them up, so every hook here would report
+# "no files to check" for anything under it and the repo-wide checks would silently stop
+# covering that tree. Per-project file scoping already keeps one app's hooks off another's
+# files, which is all orphan was ever wanted for.
 
 repos:
-  - repo: local
-    hooks:
-      - id: ai-rules-sync
-        name: AI Rules Sync
-        description: Ensure CLAUDE.md symlinks and generated files are up to date
-        entry: make ai-rules
-        language: system
-        files: ^(.*AGENTS\.md|.*CLAUDE\.md|\.github/copilot-instructions\.md|\.github/instructions/.*)$
-        pass_filenames: false
-      - id: copyright-check
-        name: AMD Copyright Check
-        description: Check that all files have the required AMD copyright
-        entry: tooling/check_copyright.py --fix
-        language: python
-        pass_filenames: true
-        always_run: false
-        exclude: ^(sbom\.json|THIRD-PARTY-NOTICES\.md)$
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: ^(apps/api/workloads_manager/workloads_manager/data/patches|packages/workloads_manager/workloads_manager/data/patches|sbom\.json|THIRD-PARTY-NOTICES\.md)
+        exclude: ^(apps/api/workloads_manager/workloads_manager/data/patches|sbom\.json|THIRD-PARTY-NOTICES\.md)
       - id: end-of-file-fixer
         exclude: ^(sbom\.json|THIRD-PARTY-NOTICES\.md)$
   - repo: https://github.com/rbubley/mirrors-prettier

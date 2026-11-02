@@ -2,7 +2,12 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { PaginatedList } from '@/types/pagination';
+import type { components } from '@/types/api';
+
+type PaginatedList<T> = {
+  data: T[];
+  pagination: components['schemas']['PaginationMetadata'];
+};
 
 /**
  * Function that fetches a single page of a paginated list endpoint.
@@ -10,12 +15,12 @@ import { PaginatedList } from '@/types/pagination';
  * Implementations issue exactly one HTTP request and return the raw
  * paginated envelope so {@link fetchAllPages} can read `pagination.total`.
  */
-export type PageFetcher<T> = (
+type PageFetcher<T> = (
   page: number,
   pageSize: number,
 ) => Promise<PaginatedList<T>>;
 
-export interface FetchAllPagesOptions {
+interface FetchAllPagesOptions {
   /**
    * Items per request. Backend caps at 100; using the max minimizes round-trips.
    */
@@ -51,8 +56,7 @@ const sleep = (ms: number): Promise<void> =>
  * bounded-concurrency batches with a small inter-request delay so the
  * backend isn't hit with N simultaneous connections.
  *
- * Prefer this utility over hand-rolled `Promise.all` walkers — see
- * `apps/ui/aiwb/AGENTS.md` "Paginated list loaders" for the rule.
+ * Prefer this utility over hand-rolled `Promise.all` walkers.
  *
  * @example
  * const all = await fetchAllPages<Dataset>((page, pageSize) =>

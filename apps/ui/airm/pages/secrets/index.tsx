@@ -5,9 +5,9 @@ import { useQuery } from '@tanstack/react-query';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'next-i18next';
 import { getServerSession } from 'next-auth';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import { fetchStorages } from '@/services/app';
+import { getPageTranslations } from '@/utils/i18n';
 import { getProjects } from '@/services/server';
 import { getSecrets } from '@/services/server';
 import { getStorages } from '@/services/server';
@@ -306,11 +306,7 @@ export async function getServerSideProps(context: any) {
 
     return {
       props: {
-        ...(await serverSideTranslations(locale, [
-          'common',
-          'secrets',
-          'sharedComponents',
-        ])),
+        ...(await getPageTranslations(locale, ['secrets'])),
         projects: projects?.data || [],
         secrets,
         storages,

@@ -37,16 +37,25 @@ export const ProjectQuotaForm: React.FC<Props> = ({ project, cluster }) => {
   const queryClient = useQueryClient();
   const { isAdministrator } = useAccessControl();
 
-  const defaultValues = {
-    [QuotaAllocationEditFields.CPU]: project.quota.cpuMilliCores / 1000,
-    [QuotaAllocationEditFields.GPU]: project.quota.gpuCount,
-    [QuotaAllocationEditFields.RAM]: Math.floor(
-      project.quota.memoryBytes / (1024 * 1024 * 1024),
-    ),
-    [QuotaAllocationEditFields.DISK]: Math.floor(
-      project.quota.ephemeralStorageBytes / (1024 * 1024 * 1024),
-    ),
-  };
+  const defaultValues = useMemo(
+    (): ProjectQuotaFormData => ({
+      [QuotaAllocationEditFields.CPU]: project.quota.cpuMilliCores / 1000,
+      [QuotaAllocationEditFields.GPU]: project.quota.gpuCount,
+      [QuotaAllocationEditFields.RAM]: Math.floor(
+        project.quota.memoryBytes / (1024 * 1024 * 1024),
+      ),
+      [QuotaAllocationEditFields.DISK]: Math.floor(
+        project.quota.ephemeralStorageBytes / (1024 * 1024 * 1024),
+      ),
+    }),
+    [
+      project.id,
+      project.quota.cpuMilliCores,
+      project.quota.ephemeralStorageBytes,
+      project.quota.gpuCount,
+      project.quota.memoryBytes,
+    ],
+  );
 
   const formSchema = useMemo(
     () =>
@@ -70,16 +79,39 @@ export const ProjectQuotaForm: React.FC<Props> = ({ project, cluster }) => {
   );
 
   const { mutate: updateProjectMutation, isPending: isUpdatingProject } =
-    useMutation<ProjectWithResourceAllocation, Error, UpdateProjectRequest>({
+    useMutation<
+      ProjectWithResourceAllocation,
+      Error,
+      UpdateProjectRequest,
+      { previousProject?: ProjectWithMembers }
+    >({
       mutationFn: updateProject,
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ['project'] });
-        queryClient.invalidateQueries({ queryKey: ['cluster'] });
-        toast.success(t('settings.form.notification.success'));
+      onMutate: async (variables) => {
+        await queryClient.cancelQueries({ queryKey: ['project'] });
+        const previousProject = queryClient.getQueryData<ProjectWithMembers>([
+          'project',
+        ]);
+        if (previousProject) {
+          queryClient.setQueryData<ProjectWithMembers>(['project'], {
+            ...previousProject,
+            quota: { ...previousProject.quota, ...variables.quota },
+          });
+        }
+        return { previousProject };
       },
-      onError: (error) => {
+      onError: (error, _variables, context) => {
+        if (context?.previousProject) {
+          queryClient.setQueryData(['project'], context.previousProject);
+        }
         toast.error(error.message, error as APIRequestError);
         console.error('Error saving project', error);
+      },
+      onSuccess: () => {
+        toast.success(t('settings.form.notification.success'));
+      },
+      onSettled: () => {
+        queryClient.invalidateQueries({ queryKey: ['project'] });
+        queryClient.invalidateQueries({ queryKey: ['cluster'] });
       },
     });
 
@@ -121,8 +153,7 @@ export const ProjectQuotaForm: React.FC<Props> = ({ project, cluster }) => {
           <section id="guaranteed-quota">
             <div className="flex flex-col gap-6 my-3">
               <Alert
-                color="primary"
-                hideIconWrapper={true}
+                status="accent"
                 description={t('settings.form.guaranteedQuota.info')}
               />
               <AllocationSettings

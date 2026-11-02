@@ -5,8 +5,7 @@
 import { Tooltip } from '../Tooltip';
 import React from 'react';
 import { Chip } from '../Chip';
-import { Popover, PopoverContent, PopoverTrigger } from '../Popover';
-import { cn } from '@heroui/react';
+import { cn, Popover } from '@heroui/react';
 import {
   IconInfoCircle,
   IconCircleCheck,
@@ -29,7 +28,6 @@ export type StatusProps = {
   helpContent?: React.ReactNode;
   isClickable?: boolean;
   isTextColored?: boolean;
-  isSubtle?: boolean;
   isShowBackground?: boolean;
   size?: Size;
 };
@@ -56,8 +54,8 @@ const INTENT_TO_PROPS = {
 
 const HOVER_DECORATION_CLASSES: Record<Exclude<Color, undefined>, string> = {
   default: 'group-hover:decoration-foreground',
-  primary: 'group-hover:decoration-primary',
-  secondary: 'group-hover:decoration-secondary',
+  primary: 'group-hover:decoration-accent',
+  secondary: 'group-hover:decoration-accent',
   warning: 'group-hover:decoration-warning',
   success: 'group-hover:decoration-success',
   danger: 'group-hover:decoration-danger',
@@ -77,29 +75,11 @@ const SIZE_TO_INFO_ICON_SIZE: Record<Exclude<Size, undefined>, number> = {
 
 const COLOR_CLASSES: Record<Exclude<Color, undefined>, string> = {
   default: 'text-foreground',
-  primary: 'text-primary',
-  secondary: 'text-secondary',
+  primary: 'text-accent',
+  secondary: 'text-accent',
   warning: 'text-warning',
   success: 'text-success',
   danger: 'text-danger',
-};
-
-const TEXT_COLOR_SUBTLE_CLASSES: Record<Exclude<Color, undefined>, string> = {
-  default: 'text-foreground/50',
-  primary: 'text-primary/60',
-  secondary: 'text-secondary/60',
-  warning: 'text-warning/60',
-  success: 'text-success/60',
-  danger: 'text-danger/60',
-};
-
-const ICON_COLOR_SUBTLE_CLASSES: Record<Exclude<Color, undefined>, string> = {
-  default: 'text-foreground/50',
-  primary: 'text-primary/90',
-  secondary: 'text-secondary/80',
-  warning: 'text-warning/80',
-  success: 'text-success/80',
-  danger: 'text-danger/90',
 };
 
 const DECORATION_COLOR_OPACITY_CLASSES: Record<
@@ -107,8 +87,8 @@ const DECORATION_COLOR_OPACITY_CLASSES: Record<
   string
 > = {
   default: 'decoration-foreground/50',
-  primary: 'decoration-primary/50',
-  secondary: 'decoration-secondary/50',
+  primary: 'decoration-accent/50',
+  secondary: 'decoration-accent/50',
   warning: 'decoration-warning/50',
   success: 'decoration-success/50',
   danger: 'decoration-danger/50',
@@ -120,23 +100,9 @@ type TextColorResult = {
   iconColorClasses: Record<string, boolean>;
 };
 
-const getTextColorClasses = (
-  color: Color,
-  isSubtle: boolean,
-  isTextColored: boolean,
-): TextColorResult => {
+const getTextColorClasses = (color: Color): TextColorResult => {
   if (!color) return { textColorClasses: {}, iconColorClasses: {} };
   const colorKey = color as Exclude<Color, undefined>;
-
-  if (isSubtle) {
-    return {
-      textColorClasses: isTextColored
-        ? { [TEXT_COLOR_SUBTLE_CLASSES[colorKey]]: true }
-        : { [TEXT_COLOR_SUBTLE_CLASSES.default]: true },
-      iconColorClasses: { [ICON_COLOR_SUBTLE_CLASSES[colorKey]]: true },
-    };
-  }
-
   return {
     textColorClasses: {},
     iconColorClasses: { [COLOR_CLASSES[colorKey]]: true },
@@ -185,9 +151,11 @@ const StatusWrapper: React.FC<{
 
   if (isClickable) {
     return (
-      <Popover placement="bottom">
-        <PopoverTrigger>{children}</PopoverTrigger>
-        <PopoverContent>{helpContent}</PopoverContent>
+      <Popover>
+        <Popover.Trigger>{children}</Popover.Trigger>
+        <Popover.Content placement="bottom">
+          <Popover.Dialog>{helpContent}</Popover.Dialog>
+        </Popover.Content>
       </Popover>
     );
   }
@@ -207,7 +175,6 @@ export const Status: React.FC<StatusProps> = ({
   helpContent,
   isClickable = false,
   isTextColored = false,
-  isSubtle = false,
   isShowBackground = false,
   size = 'md',
 }) => {
@@ -217,18 +184,22 @@ export const Status: React.FC<StatusProps> = ({
   const IconComponent = iconProp ?? intentDefaults?.icon ?? null;
   const hasHelp = !!helpContent;
 
-  const { textColorClasses, iconColorClasses } = getTextColorClasses(
-    color,
-    isSubtle,
-    isTextColored,
-  );
+  const { textColorClasses, iconColorClasses } = getTextColorClasses(color);
 
   return (
     <StatusWrapper helpContent={helpContent} isClickable={isClickable}>
       <Chip
         color={isTextColored ? color : 'default'}
-        variant={isShowBackground ? 'flat' : 'light'}
+        variant={isShowBackground ? 'soft' : 'tertiary'}
         size={size}
+        className={cn({
+          'gap-0.25': true,
+          'px-0': !isShowBackground,
+          // 'px-1.5': isShowBackground,
+          'cursor-pointer': hasHelp && isClickable,
+          'cursor-help': hasHelp && !isClickable,
+          group: hasHelp && isClickable,
+        })}
         classNames={{
           base: cn({
             'gap-0.25': true,

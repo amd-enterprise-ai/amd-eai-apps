@@ -3,19 +3,16 @@
 // SPDX-License-Identifier: MIT
 
 import { Skeleton } from '@amdenterpriseai/components';
-import { cn } from '@heroui/react';
-import type { Selection } from '../Select/Select';
+import type { SortDescriptor } from '@heroui/react';
 import {
-  SortDescriptor,
-  Table,
-  TableBody,
-  TableCell,
-  TableColumn,
-  TableHeader,
-  TableRow,
-  getKeyValue,
-} from './TablePrimitive';
-import React, { Key, useCallback, useMemo, useState } from 'react';
+  Checkbox as HeroUICheckbox,
+  Table as HeroUITable,
+  cn,
+} from '@heroui/react';
+import { useCallback, useMemo, useState } from 'react';
+import type { Key, ReactNode } from 'react';
+
+import type { Selection } from '../Select/Select';
 
 import {
   ACTIONS_COLUMN,
@@ -23,22 +20,24 @@ import {
   getActionsColumnRenderer,
 } from '../Dropdown/table-actions';
 
-import { ActionItem, TableColumns } from '@amdenterpriseai/types';
-import { CustomComparatorConfig } from '@amdenterpriseai/types';
-import { PageFrameSize } from '@amdenterpriseai/types';
-import { SortDirection } from '@amdenterpriseai/types';
+import {
+  ActionItem,
+  TableColumns,
+  PageFrameSize,
+  SortDirection,
+} from '@amdenterpriseai/types';
 
 import TablePagination from './TablePagination';
+import TableEmptyState from './TableEmptyState';
 
 export type TableVariant = 'default' | 'transparent';
 
-interface Props<T, K extends keyof T, C> {
+interface Props<T extends object, C> {
   data: T[];
   total: number;
   pageSize?: PageFrameSize;
   page?: number;
   columns: TableColumns<C>;
-  customComparator?: CustomComparatorConfig<T, K>;
   className?: string;
   defaultSortByField: C;
   defaultSortDirection?: SortDirection;
@@ -50,7 +49,7 @@ interface Props<T, K extends keyof T, C> {
   selectedKeys?: Selection;
   isSelectable?: boolean;
   onSelectionChange?: (keys: Selection) => void;
-  customRenderers?: Record<string, (item: T) => React.ReactNode | string>;
+  customRenderers?: Record<string, (item: T) => ReactNode | string>;
   onRowPressed?: (id: string) => void;
   rowActions?: ActionItem<T>[] | ((item: T) => ActionItem<T>[]);
   isRowDisabled?: (item: T) => boolean;
@@ -60,7 +59,7 @@ interface Props<T, K extends keyof T, C> {
   tableVariant?: TableVariant;
 }
 
-const BaseDataTable = <T, K extends keyof T, C>({
+const BaseDataTable = <T extends object, C>({
   data,
   total,
   pageSize,
@@ -76,7 +75,7 @@ const BaseDataTable = <T, K extends keyof T, C>({
   idKey,
   defaultSortByField,
   defaultSortDirection,
-  isFetching,
+  isFetching: _isFetching,
   isLoading,
   isSelectable,
   translation,
@@ -85,8 +84,9 @@ const BaseDataTable = <T, K extends keyof T, C>({
   rowActions,
   isRowDisabled,
   tableVariant = 'default',
-}: Props<T, K, C>) => {
+}: Props<T, C>) => {
   const t = translation;
+  const heroVariant = tableVariant === 'transparent' ? 'secondary' : 'primary';
 
   const [sortedBy, setSortedBy] = useState<SortDescriptor>({
     column: defaultSortByField as string,
@@ -140,167 +140,187 @@ const BaseDataTable = <T, K extends keyof T, C>({
     columns.push(ACTIONS_COLUMN);
   }
 
-  const cellRenderer = (item: T, columnKey: Key): React.ReactNode | string => {
+  // v3 collections (React Aria Components) require an explicit `id`; the v2 code
+  // identified columns via `key`, so derive `id` from it. Exactly one column
+  // must be the row header for accessibility.
+  const columnsWithId = columns.map((column, index) => ({
+    ...column,
+    id: column.key as string,
+    isRowHeader: index === 0,
+  }));
+
+  const renderHeaderContent = (
+    column: (typeof columnsWithId)[number],
+  ): ReactNode =>
+    column.key ? (
+      <div className="inline-flex flex-col text-sm gap-0 h-full">
+        {t(
+          `list.${translationKeyPrefix ? `${translationKeyPrefix}.` : ''}headers.${column.key as string}.title`,
+        )}
+
+        {!!column.hasDescription && (
+          <div className="text-muted font-light text-xs">
+            {t(
+              `list.${translationKeyPrefix ? `${translationKeyPrefix}.` : ''}headers.${column.key as string}.description`,
+            )}
+          </div>
+        )}
+      </div>
+    ) : null;
+
+  const cellRenderer = (
+    item: T,
+    columnKey: Key,
+    rowDisabled: boolean,
+  ): ReactNode | string => {
     if (customRenderers?.[columnKey as string]) {
       return customRenderers[columnKey as string](item);
-    } else if ((columnKey as string) === ACTIONS_COLUMN_KEY && !!rowActions) {
-      const rowDisabled = isRowDisabled
-        ? isRowDisabled(item)
-        : (computedDisabledKeys?.has(item[idKey] as string | number) ?? false);
+    } else if ((columnKey as string) === ACTIONS_COLUMN_KEY && rowActions) {
       return getActionsColumnRenderer(rowActions, item, rowDisabled);
     }
-    return getKeyValue(item, columnKey as string);
+    return (item as Record<string, unknown>)[columnKey as string] as ReactNode;
   };
 
-  const emptyDataPlaceholder: T[] = useMemo(
-    () =>
-      Array(frameSize)
-        .fill(0)
-        .map(
-          (_, row) =>
-            ({
-              [idKey as string]: `row-${row}`,
-            }) as T,
-        ),
-    [idKey, frameSize],
+  const placeholderRowCount = pageSize ?? frameSize;
+  const items = isLoading
+    ? (Array.from(
+        { length: placeholderRowCount },
+        (_, row) =>
+          ({
+            [idKey as string]: `row-${row}`,
+          }) as T,
+      ) as T[])
+    : data;
+
+  const emptyStateText = t(
+    `list.${translationKeyPrefix ? `${translationKeyPrefix}.` : ''}empty.description`,
   );
-  // TODO: Remove the shallow copy of the data when HeroUI is updated
-  // HeroUI Table caches cell render results and skips re-invoking them when
-  // only disabledKeys changes. Shallow-copying each item produces new object
-  // references that the collection treats as changed, forcing cellRenderer to
-  // be called again with the current isRowDisabled result.
-  const tableItems = useMemo(
-    () =>
-      isLoading ? emptyDataPlaceholder : data.map((item) => ({ ...item })),
-    [isLoading, emptyDataPlaceholder, data, computedDisabledKeys],
+
+  const renderSelectionCheckbox = (
+    ariaLabel: string,
+    variant?: 'secondary',
+  ) => (
+    <HeroUICheckbox aria-label={ariaLabel} slot="selection" variant={variant}>
+      <HeroUICheckbox.Content>
+        <HeroUICheckbox.Control>
+          <HeroUICheckbox.Indicator />
+        </HeroUICheckbox.Control>
+      </HeroUICheckbox.Content>
+    </HeroUICheckbox>
   );
+
+  const paginationFooter =
+    total > PageFrameSize.SMALL && !isLoading ? (
+      <TablePagination
+        onFrameSizeChange={handleFrameSizeChange}
+        onPageChange={handlePageChange}
+        currentPage={page ?? currentPage}
+        frameSize={pageSize ?? frameSize}
+        translationKeyPrefix={translationKeyPrefix}
+        totalItems={total}
+        translation={translation}
+      />
+    ) : null;
 
   return (
     <div className={className}>
-      <Table
-        aria-label={
-          t(
-            `list.${translationKeyPrefix ? `${translationKeyPrefix}.` : ''}table.ariaLabel`,
-          ) || ''
-        }
-        shadow="none"
-        selectedKeys={selectedKeys}
-        disabledKeys={computedDisabledKeys}
-        selectionMode={isSelectable ? 'multiple' : 'none'}
-        onRowAction={
-          onRowPressed &&
-          ((id) => {
-            const rowDisabled =
-              computedDisabledKeys?.has(id as string | number) ?? false;
-            if (!rowDisabled) {
-              onRowPressed(id as string);
+      <HeroUITable.Root variant={heroVariant}>
+        <HeroUITable.ScrollContainer>
+          <HeroUITable.Content
+            aria-label={
+              t(
+                `list.${translationKeyPrefix ? `${translationKeyPrefix}.` : ''}table.ariaLabel`,
+              ) || ''
             }
-          })
-        }
-        onSelectionChange={onSelectionChange}
-        sortDescriptor={sortedBy}
-        onSortChange={handleSortChange}
-        classNames={{
-          wrapper: cn('px-0 py-0', {
-            'dark:bg-transparent': tableVariant === 'transparent',
-          }),
-          th: cn({
-            'dark:bg-default-200 dark:before:bg-default-200 dark:text-foreground py-2':
-              tableVariant === 'transparent',
-          }),
-          tr: cn({
-            'cursor-pointer': !!onRowPressed || isSelectable,
-            '[&:not([data-disabled=true]):hover>td]:before:opacity-70':
-              !isLoading,
-            '[&:last-child>td]:border-b-0': true,
-            '[&:first-child>td:first-child]:before:rounded-ss-xl [&:first-child>td:last-child]:before:rounded-se-xl': true,
-            '[&:last-child>td:first-child]:before:rounded-es-xl [&:last-child>td:last-child]:before:rounded-ee-xl': true,
-            '[&[data-disabled=true]]:cursor-not-allowed [&[data-disabled=true]>td:not(:last-child)]:opacity-50': true,
-          }),
-          td: cn(
-            {
-              'border-b border-default-100': tableVariant !== 'transparent',
-              'dark:border-b dark:border-default-200/50':
-                tableVariant === 'transparent',
-              'before:-z-[1]': true,
-              'before:bg-default-100': true,
-              '[&:first-child]:before:rounded-s-none [&:last-child]:before:rounded-e-none': true,
-            },
-            tableVariant === 'transparent' &&
-              'dark:bg-transparent dark:before:bg-default-200 dark:before:opacity-0 py-3',
-          ),
-        }}
-        bottomContent={
-          total > PageFrameSize.SMALL &&
-          !isLoading && (
-            <TablePagination
-              onFrameSizeChange={handleFrameSizeChange}
-              onPageChange={handlePageChange}
-              currentPage={page ?? currentPage}
-              frameSize={pageSize ?? frameSize}
-              translationKeyPrefix={translationKeyPrefix}
-              totalItems={total}
-              translation={translation}
-            />
-          )
-        }
-      >
-        <TableHeader columns={columns}>
-          {(column) => (
-            <TableColumn
-              className={`align-middle ${column.hasDescription ? 'h-14' : ''} ${column.className || ''}`}
-              key={column.key as string}
-              width={column.width}
-              maxWidth={column.maxWidth}
-              minWidth={column.minWidth}
-              allowsSorting={column.sortable}
-            >
-              {column.key ? (
-                <div className="inline-flex flex-col">
-                  <div className="uppercase">
-                    {t(
-                      `list.${translationKeyPrefix ? `${translationKeyPrefix}.` : ''}headers.${column.key as string}.title`,
-                    )}
-                  </div>
-                  {!!column.hasDescription && (
-                    <div className="uppercase text-default-500 text-xs">
-                      {t(
-                        `list.${translationKeyPrefix ? `${translationKeyPrefix}.` : ''}headers.${column.key as string}.description`,
-                      )}
-                    </div>
-                  )}
-                </div>
-              ) : null}
-            </TableColumn>
-          )}
-        </TableHeader>
-        <TableBody
-          emptyContent={t(
-            `list.${translationKeyPrefix ? `${translationKeyPrefix}.` : ''}empty.description`,
-          )}
-          items={tableItems}
-          isLoading={isFetching}
-        >
-          {(item) => (
-            <TableRow key={`${item[idKey]}`}>
-              {(columnKey) => (
-                <TableCell>
-                  {isLoading ? (
-                    <Skeleton
-                      key={`skeleton-${String(columnKey)}`}
-                      className="w-3/5 rounded-lg"
-                    >
-                      <div className="h-4 w-3/5 rounded-lg bg-default-200" />
-                    </Skeleton>
-                  ) : (
-                    cellRenderer(item, columnKey)
-                  )}
-                </TableCell>
+            disabledKeys={computedDisabledKeys}
+            onRowAction={
+              onRowPressed && ((id: Key) => onRowPressed(id as string))
+            }
+            onSelectionChange={onSelectionChange}
+            onSortChange={handleSortChange}
+            selectedKeys={selectedKeys}
+            selectionMode={isSelectable ? 'multiple' : 'none'}
+            sortDescriptor={sortedBy}
+          >
+            <HeroUITable.Header>
+              {isSelectable && (
+                <HeroUITable.Column className="pr-0" id="selection" width={40}>
+                  {renderSelectionCheckbox('Select all')}
+                </HeroUITable.Column>
               )}
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
+              <HeroUITable.Collection items={columnsWithId}>
+                {(column: (typeof columnsWithId)[number]) => (
+                  <HeroUITable.Column
+                    allowsSorting={column.sortable}
+                    className={column.className}
+                    id={column.id}
+                    isRowHeader={column.isRowHeader}
+                    maxWidth={column.maxWidth}
+                    minWidth={column.minWidth}
+                    width={column.width}
+                  >
+                    {column.sortable
+                      ? ({
+                          sortDirection,
+                        }: {
+                          sortDirection?: 'ascending' | 'descending';
+                        }) => (
+                          <HeroUITable.SortableColumnHeader
+                            sortDirection={sortDirection}
+                          >
+                            {renderHeaderContent(column)}
+                          </HeroUITable.SortableColumnHeader>
+                        )
+                      : renderHeaderContent(column)}
+                  </HeroUITable.Column>
+                )}
+              </HeroUITable.Collection>
+            </HeroUITable.Header>
+            <HeroUITable.Body
+              items={items}
+              dependencies={[computedDisabledKeys]}
+              renderEmptyState={() => <TableEmptyState text={emptyStateText} />}
+            >
+              {(item: T) => {
+                const rowDisabled =
+                  computedDisabledKeys?.has(item[idKey] as string | number) ??
+                  false;
+                return (
+                  <HeroUITable.Row
+                    id={`${item[idKey]}`}
+                    className={cn({
+                      'cursor-pointer': onRowPressed && !isLoading,
+                    })}
+                  >
+                    {isSelectable && (
+                      <HeroUITable.Cell className="pr-0">
+                        {renderSelectionCheckbox(
+                          `Select row ${item[idKey]}`,
+                          'secondary',
+                        )}
+                      </HeroUITable.Cell>
+                    )}
+                    <HeroUITable.Collection items={columnsWithId}>
+                      {(column: (typeof columnsWithId)[number]) => (
+                        <HeroUITable.Cell className={column.className}>
+                          {isLoading ? (
+                            <Skeleton className="h-4 w-3/5 rounded-lg" />
+                          ) : (
+                            cellRenderer(item, column.id, rowDisabled)
+                          )}
+                        </HeroUITable.Cell>
+                      )}
+                    </HeroUITable.Collection>
+                  </HeroUITable.Row>
+                );
+              }}
+            </HeroUITable.Body>
+          </HeroUITable.Content>
+        </HeroUITable.ScrollContainer>
+        {paginationFooter && (
+          <HeroUITable.Footer>{paginationFooter}</HeroUITable.Footer>
+        )}
+      </HeroUITable.Root>
     </div>
   );
 };

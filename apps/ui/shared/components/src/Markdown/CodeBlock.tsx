@@ -26,7 +26,7 @@ interface Props {
 
 export const MarkdownCodeBlock: FC<Props> = memo(
   ({ language, value, allowDownload = true }) => {
-    const { t } = useTranslation('common');
+    const { t } = useTranslation('sharedComponents');
     const { theme } = useTheme();
     const [isCopied, setIsCopied] = useState<Boolean>(false);
 
@@ -50,7 +50,7 @@ export const MarkdownCodeBlock: FC<Props> = memo(
         true,
       )}${fileExtension}`;
       const fileName = window.prompt(
-        (t('Enter file name' as any) as string) || '',
+        t('CodeBlock.enterFileName') || '',
         suggestedFileName,
       );
 
@@ -72,10 +72,10 @@ export const MarkdownCodeBlock: FC<Props> = memo(
     };
     return (
       <div className="codeblock group relative font-sans text-base my-4 group">
-        <div className="absolute group-hover:visible invisible rounded-md right-3 top-3 text-default-800 bg-default-100">
+        <div className="absolute group-hover:visible invisible rounded-md right-3 top-3 text-foreground bg-default">
           <div className="flex items-center gap-1 text-sm font-light py-1 px-3">
             <button
-              className="flex gap-1 items-center rounded bg-none hover:text-primary"
+              className="flex gap-1 items-center rounded bg-none hover:text-accent"
               onClick={copyToClipboard}
             >
               {isCopied ? (
@@ -85,8 +85,8 @@ export const MarkdownCodeBlock: FC<Props> = memo(
                     stroke={2}
                     className="text-success rounded-full"
                   />
-                  <span className="text-secondary">
-                    {t('Copied!' as any) as string}
+                  <span className="text-accent">
+                    {t('actions.copy.copied')}
                   </span>
                 </>
               ) : (
@@ -96,10 +96,10 @@ export const MarkdownCodeBlock: FC<Props> = memo(
                 </>
               )}
             </button>
-            <div className="h-full w-px bg-default-900"></div>
+            <div className="h-full w-px bg-foreground"></div>
             {allowDownload && (
               <button
-                className="flex gap-1 items-center rounded bg-none hover:text-primary"
+                className="flex gap-1 items-center rounded bg-none hover:text-accent"
                 onClick={downloadAsFile}
               >
                 <IconDownload size={16} stroke={2} />{' '}

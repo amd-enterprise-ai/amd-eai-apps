@@ -124,17 +124,7 @@ export const NonDismissible: Story = () => {
 
 type ModalSize = NonNullable<ComponentProps<typeof Modal>['size']>;
 
-const MODAL_SIZES: ModalSize[] = [
-  'xs',
-  'sm',
-  'md',
-  'lg',
-  'xl',
-  '2xl',
-  '3xl',
-  '4xl',
-  '5xl',
-];
+const MODAL_SIZES: ModalSize[] = ['xs', 'sm', 'md', 'lg', 'full', 'cover'];
 
 export const Sizes: Story = () => {
   const [openSize, setOpenSize] = useState<ModalSize | null>(null);
@@ -159,9 +149,10 @@ export const Sizes: Story = () => {
           }
         >
           <p>
-            The <code>size</code> prop accepts every HeroUI modal width from{' '}
-            <code>xs</code> through <code>5xl</code> and defaults to{' '}
-            <code>xl</code>.
+            The <code>size</code> prop accepts HeroUI v3 modal widths:{' '}
+            <code>xs</code>, <code>sm</code>, <code>md</code>, <code>lg</code>,{' '}
+            <code>full</code>, and <code>cover</code>. It defaults to{' '}
+            <code>lg</code>.
           </p>
         </Modal>
       )}
@@ -178,7 +169,7 @@ type PlaygroundArgs = {
 };
 
 export const Playground: Story<PlaygroundArgs> = ({
-  size = 'xl',
+  size = 'lg',
   title = 'Playground Modal',
   subTitle = 'Tweak the controls to explore the adapter API',
   isDismissible = true,
@@ -222,7 +213,7 @@ export const Playground: Story<PlaygroundArgs> = ({
 };
 
 Playground.args = {
-  size: 'xl',
+  size: 'lg',
   title: 'Playground Modal',
   subTitle: 'Tweak the controls to explore the adapter API',
   isDismissible: true,

@@ -8,7 +8,7 @@ import pytest
 
 from api_common.exceptions import NotFoundException
 from app.minio.client import MinioClient
-from app.models.utils import delete_from_s3, get_finetuned_model_weights_path
+from app.models.utils import delete_from_s3, delete_object_from_s3, get_finetuned_model_weights_path
 
 
 def test_get_finetuned_model_weights_path_basic() -> None:
@@ -65,3 +65,22 @@ async def test_delete_from_s3_handles_not_found_gracefully() -> None:
     with patch("asyncio.to_thread", side_effect=async_to_thread):
         with pytest.raises(NotFoundException, match="S3 object not found"):
             await delete_from_s3("test-namespace/models/missing/weights.bin", mock_minio_client)
+
+
+@pytest.mark.asyncio
+async def test_delete_object_from_s3_success() -> None:
+    """Test delete_object_from_s3 deletes one exact object key."""
+    object_key = "test-namespace/finetuned-models/model-a/run-1/"
+    mock_minio_client = MagicMock(spec=MinioClient)
+    mock_minio_client.delete_object = MagicMock(spec=[], return_value=None)
+
+    with (
+        patch("asyncio.to_thread", side_effect=lambda fn, **kwargs: fn(**kwargs)) as mock_to_thread,
+        patch("app.models.utils.MINIO_BUCKET", "test-bucket"),
+    ):
+        await delete_object_from_s3(object_key, mock_minio_client, "Test Model")
+
+    mock_to_thread.assert_called_once_with(
+        mock_minio_client.delete_object, bucket_name="test-bucket", object_name=object_key
+    )
+    mock_minio_client.delete_object.assert_called_once_with(bucket_name="test-bucket", object_name=object_key)

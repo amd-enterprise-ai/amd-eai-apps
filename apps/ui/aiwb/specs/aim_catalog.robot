@@ -23,14 +23,14 @@ Resource            resources/workloads.resource
 Resource            resources/aiwb_aims.resource
 Resource            resources/airm_projects.resource
 
-Suite Teardown      Clean Up All Created Projects
+Suite Teardown      Run Keywords    Clean Up All Created AIWB Secrets    AND    Clean Up All Created Projects
 Test Setup          Open test browser
 Test Teardown       Close test browser
 
 
 *** Test Cases ***
 # =============================================================================
-# Browse Catalog UI (SDA-2364, SDA-3121)
+# Browse Catalog UI
 # =============================================================================
 
 AIM catalog page displays model cards with metadata
@@ -73,12 +73,12 @@ Incompatible models are visually distinguished in catalog
     Then unsupported models should be visually distinguished
 
 # =============================================================================
-# Deploy Through Wizard (SDA-2368, SDA-2878, SDA-3134)
+# Deploy Through Wizard
 # =============================================================================
 
-Deploy drawer shows model info and deployment settings
-    [Documentation]    Verify that opening the deploy drawer for an AIM shows the model
-    ...                title, description, version selector, and deployment settings section.
+Deploy wizard shows model info and deployment steps
+    [Documentation]    Verify that opening the deploy wizard for an AIM shows the model
+    ...                title, description, version selector, and deployment steps.
     [Tags]    ui    aims    deploy    catalog
 
     Given a ready project with user access exists
@@ -86,13 +86,13 @@ Deploy drawer shows model info and deployment settings
     And user is logged in
     And project "${TEST_PROJECT}[name]" is selected
     And user is on models page
-    When user opens deploy drawer for "${TEST_AIM_DISPLAY_NAME}"
-    Then deploy drawer should be open
-    And deploy drawer should show model info for "${TEST_AIM_DISPLAY_NAME}"
-    And deploy drawer should show version and settings
+    When user opens deploy wizard for "${TEST_AIM_DISPLAY_NAME}"
+    Then deploy wizard should be open
+    And deploy wizard should show model info for "${TEST_AIM_DISPLAY_NAME}"
+    And deploy wizard should show version and steps
 
-Deploy drawer exposes advanced runtime profile overrides
-    [Documentation]    The catalog deploy drawer offers advanced runtime profile overrides
+Deploy wizard exposes advanced runtime profile overrides
+    [Documentation]    The catalog deploy wizard offers advanced runtime profile overrides
     ...                (precision, accelerator, count) so users can deploy onto partitioned
     ...                clusters. Verify the advanced section expands and surfaces the override
     ...                fields. Override propagation to the AIMService and inference pod is
@@ -104,12 +104,46 @@ Deploy drawer exposes advanced runtime profile overrides
     And user is logged in
     And project "${TEST_PROJECT}[name]" is selected
     And user is on models page
-    When user opens deploy drawer for "${TEST_AIM_DISPLAY_NAME}"
-    And user expands advanced profile parameters in the deploy drawer
-    Then the deploy drawer should offer advanced profile overrides
+    When user opens deploy wizard for "${TEST_AIM_DISPLAY_NAME}"
+    And user expands advanced profile parameters in the deploy wizard
+    Then the deploy wizard should offer advanced profile overrides
+
+Deploy wizard warns when a model has no optimized profile for the selection
+    [Documentation]    A model whose profiles are all unoptimized can still be deployed,
+    ...                but the wizard must surface that tradeoff before the user commits
+    ...                to it. Verify the Target step's collapsed summary shows the
+    ...                unoptimized-profile warning once that step is completed.
+    [Tags]    ui    aims    deploy    profile    catalog
+
+    Given a ready project with user access exists
+    And an AIM exists in system    unoptimized
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    And user is on models page
+    When user opens deploy wizard for "${TEST_AIM_DISPLAY_NAME}"
+    And user completes the performance step in the deploy wizard
+    Then the deployment summary should show an unoptimized profile warning
+
+Deployed model uses the image pull secret the user picked by name
+    [Documentation]    Verify that a user can pick a private-registry credential by the name
+    ...                they gave it when deploying a model, and that the running model is
+    ...                given that credential.
+    [Tags]    ui    aims    deploy    secrets    kubectl    gpu
+
+    Given a ready project with user access exists
+    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And an AIM exists in system
+    And the selected model has no deployment in the project
+    And an image pull secret "aim-registry" exists in the project
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    And user is on models page
+    When user deploys "${TEST_AIM_DISPLAY_NAME}" with image pull secret "aim-registry"
+    Then the deployed model should use the selected image pull secret
+    [Teardown]    Run Keywords    Remove AIM deployment if present    AND    Close test browser
 
 # =============================================================================
-# Deployment Status & Management (SDA-2383)
+# Deployment Status & Management
 # =============================================================================
 
 Deployed models list shows active deployments with status
@@ -118,7 +152,8 @@ Deployed models list shows active deployments with status
     [Tags]    ui    aims    workloads    deployed    gpu
 
     Given a ready project with user access exists
-    And AIM is deployed
+    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And AIM is deployed without custom deployment name and running
     And user is logged in
     And project "${TEST_PROJECT}[name]" is selected
     And user is on models page
@@ -171,13 +206,31 @@ AIM details page shows logs and metrics access
     [Tags]    ui    aims    workloads    details    gpu
 
     Given a ready project with user access exists
-    And AIM is deployed
+    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And AIM is deployed without custom deployment name and running
     And user is logged in
     And project "${TEST_PROJECT}[name]" is selected
     And user is on workloads page
     When user opens inference workload details
-    Then workload details should show logs button
+    Then AIM details title should show default model name when no custom deployment name is set
+    And workload details should show logs button
     And workload details should show performance metric
+
+AIM details page title prefers custom deployment name
+    [Documentation]    Verify that when an inference deployment is created with an explicit
+    ...                custom deployment name, the AIM details title shows that user-facing
+    ...                name instead of the model's default name.
+    [Tags]    ui    aims    workloads    details    display-name    gpu
+
+    Given a ready project with user access exists
+    And an AIM exists in system
+    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    And AIM is deployed with custom deployment name and running    ${TEST_AIM_DISPLAY_NAME} Deployment
+    And user is on workloads page
+    When user opens inference workload details
+    Then AIM details title should show custom deployment name
 
 Deleted AIM URL renders historical details
     [Documentation]    A user navigating to a stale URL of a deleted AIM deployment
@@ -255,7 +308,7 @@ CPU accelerator filter does not flip supported models to unsupported
     Then unsupported banner count should not exceed baseline
 
 # =============================================================================
-# Request Missing Model (EAI-5623)
+# Request Missing Model
 # =============================================================================
 
 Request model card links user to support mailto

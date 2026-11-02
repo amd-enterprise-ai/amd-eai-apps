@@ -39,6 +39,20 @@ class AIMServiceStatus(StrEnum):
     DELETED = "Deleted"
 
 
+class AIMArtifactStatus(StrEnum):
+    """Status of an AIMArtifact resource.
+
+    CRD enum: Pending, Progressing, Ready, Degraded, Failed, NotAvailable.
+    """
+
+    PENDING = "Pending"
+    PROGRESSING = "Progressing"
+    READY = "Ready"
+    DEGRADED = "Degraded"
+    FAILED = "Failed"
+    NOT_AVAILABLE = "NotAvailable"
+
+
 class OptimizationMetric(StrEnum):
     """Performance optimization metrics for AIM deployments."""
 
@@ -55,11 +69,13 @@ class AIMVersionPolicy(StrEnum):
     - PINNED: match profiles whose `status.version` equals the model's image tag.
     - LATEST: match only the latest available `status.version`.
     - ALL: match profiles at any version.
+    - ANY: deprecated alias of ALL, kept for backward compatibility with the CRD.
     """
 
     PINNED = "pinned"
     LATEST = "latest"
     ALL = "all"
+    ANY = "any"
 
 
 class AcceleratorType(StrEnum):
@@ -70,3 +86,45 @@ class AcceleratorType(StrEnum):
 
     CPU = "cpu"
     GPU = "gpu"
+
+
+class ResolutionScope(StrEnum):
+    """Scope at which aim-engine resolved a reference.
+
+    CRD enum shared by `status.resolvedModel` / `status.resolvedProfile`
+    (AIMService) and `status.resolvedParent` (AIMArtifact).
+    """
+
+    NAMESPACE = "Namespace"
+    CLUSTER = "Cluster"
+    MERGED = "Merged"
+    UNKNOWN = "Unknown"
+
+
+class AdapterMode(StrEnum):
+    """How an AIMService admits LoRA adapters (`spec.adapterMode`).
+
+    STATIC pins the service to the adapters declared at creation; DYNAMIC lets
+    the engine load and unload them while the service runs. The CRD defaults to
+    STATIC and makes the field immutable once set, so a deployment created
+    without it can never move to DYNAMIC.
+    """
+
+    STATIC = "static"
+    DYNAMIC = "dynamic"
+
+
+class AdapterState(StrEnum):
+    """Per-adapter lifecycle state on `AIMService.status.adapters[]`.
+
+    Mirrors the CRD enum exactly. AIWB reports these verbatim and derives
+    nothing from them: the engine owns the progression, including whether an
+    adapter the runtime refused (LOAD_REJECTED) is retried.
+    """
+
+    PENDING = "Pending"
+    DOWNLOADING = "Downloading"
+    DOWNLOADED = "Downloaded"
+    DELETING = "Deleting"
+    LOADED = "Loaded"
+    LOAD_REJECTED = "LoadRejected"

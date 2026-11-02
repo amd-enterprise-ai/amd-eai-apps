@@ -4,15 +4,22 @@
 
 import { FormInput, FormSelect, SelectItem } from '@amdenterpriseai/components';
 import { useEffect, useMemo } from 'react';
+import { useTranslation } from 'next-i18next';
 import type { FieldValues, Path, UseFormReturn } from 'react-hook-form';
 
 import {
+  acceleratorTypeKey,
   getDefaultAcceleratorDeviceId,
-  RUNTIME_PROFILE_ACCELERATOR_TYPE_OPTIONS,
   supportedAcceleratorCounts,
   toAcceleratorSelectOptions,
+  toAcceleratorTypeSelectOptions,
 } from '@/lib/app/runtimeProfileCatalog';
 import type { ClusterAccelerator } from '@/types/cluster';
+
+const MODEL_ACCELERATOR_TRANSLATION_PREFIXES = [
+  'customModels.import.steps.runtime.catalog',
+  'customModels.profiles.drawer.catalog',
+] as const;
 
 type Props<T extends FieldValues> = {
   form: UseFormReturn<T>;
@@ -34,6 +41,12 @@ type Props<T extends FieldValues> = {
   acceleratorPlaceholder: string;
   acceleratorCountLabel: string;
   isDisabled?: boolean;
+  /**
+   * True when a runtime matrix governs but offers no valid combination. An empty
+   * count list then means "no valid choice", not "not loaded yet", so the count
+   * renders as an empty disabled select rather than a free numeric input.
+   */
+  isConstrained?: boolean;
 };
 
 export function RuntimeProfileAcceleratorFields<T extends FieldValues>({
@@ -49,17 +62,87 @@ export function RuntimeProfileAcceleratorFields<T extends FieldValues>({
   acceleratorPlaceholder,
   acceleratorCountLabel,
   isDisabled = false,
+  isConstrained = false,
 }: Props<T>) {
-  const acceleratorOptions = toAcceleratorSelectOptions(accelerators);
+  const { t } = useTranslation('models');
+  const acceleratorTypeOptions = useMemo(
+    () => toAcceleratorTypeSelectOptions(accelerators),
+    [accelerators],
+  );
+  const selectedAcceleratorType = form.watch(acceleratorTypeField) as
+    | string
+    | undefined;
+  const acceleratorsForType = useMemo(() => {
+    if (!selectedAcceleratorType) {
+      return accelerators;
+    }
+    return accelerators.filter(
+      (entry) =>
+        acceleratorTypeKey(entry.acceleratorType) ===
+        acceleratorTypeKey(selectedAcceleratorType),
+    );
+  }, [accelerators, selectedAcceleratorType]);
+  const acceleratorModelLabel = useMemo(
+    () =>
+      (model: string): string => {
+        for (const prefix of MODEL_ACCELERATOR_TRANSLATION_PREFIXES) {
+          const key = `${prefix}.modelAccelerators.${model}`;
+          const translated = String(t(key as never));
+          if (translated !== key) {
+            return translated;
+          }
+        }
+        for (const prefix of MODEL_ACCELERATOR_TRANSLATION_PREFIXES) {
+          const key = `${prefix}.modelAccelerator`;
+          const fallback = String(t(key as never, { model } as never));
+          if (fallback !== key) {
+            return fallback;
+          }
+        }
+        return model;
+      },
+    [t],
+  );
+
+  const acceleratorOptions = useMemo(
+    () =>
+      toAcceleratorSelectOptions(acceleratorsForType, acceleratorModelLabel),
+    [acceleratorsForType, acceleratorModelLabel],
+  );
+
   useEffect(() => {
-    const defaultDeviceId = getDefaultAcceleratorDeviceId(accelerators);
+    if (acceleratorTypeOptions.length === 0) {
+      return;
+    }
+    const currentType = acceleratorTypeKey(
+      form.getValues(acceleratorTypeField) as string,
+    );
+    const isCurrentTypeValid = acceleratorTypeOptions.some(
+      (option) => option.key === currentType,
+    );
+    if (!isCurrentTypeValid) {
+      form.setValue(
+        acceleratorTypeField,
+        acceleratorTypeOptions[0].key as never,
+        {
+          shouldValidate: true,
+        },
+      );
+    }
+  }, [acceleratorTypeField, acceleratorTypeOptions, form]);
+
+  useEffect(() => {
+    const defaultDeviceId = getDefaultAcceleratorDeviceId(acceleratorsForType);
     const current = form.getValues(acceleratorField) as string;
-    if (!current && defaultDeviceId) {
+    const isCurrentStillValid = acceleratorsForType.some(
+      (entry) => entry.deviceId === current,
+    );
+    if ((!current || !isCurrentStillValid) && defaultDeviceId) {
       form.setValue(acceleratorField, defaultDeviceId as never, {
         shouldValidate: true,
       });
     }
-  }, [acceleratorField, accelerators, form]);
+  }, [acceleratorField, acceleratorsForType, form]);
 
   // Cap the supported counts by how many of the selected device the cluster can
   // actually allocate; if that filter empties the list (incomplete capacity
@@ -89,10 +172,7 @@ export function RuntimeProfileAcceleratorFields<T extends FieldValues>({
     if (countOptions.includes(Number(rawCount))) {
       return;
     }
-    // Store the select's string key (downstream normalization coerces to int);
-    // a numeric value would not match the string SelectItem keys, leaving the
-    // select with nothing highlighted.
-    form.setValue(acceleratorCountField, String(countOptions[0]) as never, {
+    form.setValue(acceleratorCountField, countOptions[0] as never, {
       shouldDirty: false,
     });
   }, [countOptions, rawCount, acceleratorCountField, form]);
@@ -109,11 +189,9 @@ export function RuntimeProfileAcceleratorFields<T extends FieldValues>({
           isDisabled={isDisabled}
           data-testid="custom-model-import-accelerator-type"
         >
-          <>
-            {RUNTIME_PROFILE_ACCELERATOR_TYPE_OPTIONS.map((option) => (
-              <SelectItem key={option.key}>{option.label}</SelectItem>
-            ))}
-          </>
+          {acceleratorTypeOptions.map((option) => (
+            <SelectItem key={option.key}>{option.label}</SelectItem>
+          ))}
         </FormSelect>
         <FormSelect<T>
           form={form}
@@ -121,30 +199,28 @@ export function RuntimeProfileAcceleratorFields<T extends FieldValues>({
           label={acceleratorLabel}
           placeholder={acceleratorPlaceholder}
           isRequired
-          isDisabled={isDisabled || acceleratorOptions.length === 0}
+          isDisabled={
+            isDisabled || isConstrained || acceleratorOptions.length === 0
+          }
           data-testid="custom-model-import-accelerator"
         >
-          <>
-            {acceleratorOptions.map((option) => (
-              <SelectItem key={option.key}>{option.label}</SelectItem>
-            ))}
-          </>
+          {acceleratorOptions.map((option) => (
+            <SelectItem key={option.key}>{option.label}</SelectItem>
+          ))}
         </FormSelect>
       </div>
-      {countOptions.length > 0 ? (
+      {countOptions.length > 0 || isConstrained ? (
         <FormSelect<T>
           form={form}
           name={acceleratorCountField}
           label={acceleratorCountLabel}
           isRequired
-          isDisabled={isDisabled}
+          isDisabled={isDisabled || isConstrained}
           data-testid="custom-model-import-accelerator-count"
         >
-          <>
-            {countOptions.map((count) => (
-              <SelectItem key={String(count)}>{String(count)}</SelectItem>
-            ))}
-          </>
+          {countOptions.map((count) => (
+            <SelectItem key={String(count)}>{String(count)}</SelectItem>
+          ))}
         </FormSelect>
       ) : (
         <FormInput<T>

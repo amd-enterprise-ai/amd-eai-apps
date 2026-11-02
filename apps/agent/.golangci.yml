@@ -3,31 +3,14 @@
 # SPDX-License-Identifier: MIT
 
 version: "2"
-
 run:
   timeout: 5m
   allow-parallel-runners: true
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-  goconst:
-    min-len: 2
-    min-occurrences: 2
-  gocyclo:
-    min-complexity: 15
-  govet:
-    enable:
-      - shadow
-  lll:
-    line-length: 160
-  misspell:
-    locale: US
-  staticcheck:
-    checks: ["all"]
-
 linters:
+  # errcheck, govet, ineffassign, staticcheck and unused are part of v2's
+  # "standard" default set, but they are listed explicitly (as in the v1 config)
+  # so the effective ruleset stays obvious and is not silently changed by future
+  # default-set changes.
   enable:
     - copyloopvar
     - dupl
@@ -43,20 +26,66 @@ linters:
     - unconvert
     - unparam
     - unused
-
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+      # v2's goconst scans test files by default. Enabling that here surfaces
+      # 100+ findings across the agent's tests, which is a cleanup of its own
+      # rather than part of a linter-runtime upgrade. Deliberately out of scope.
+      ignore-tests: true
+    gocyclo:
+      min-complexity: 15
+    govet:
+      enable:
+        - shadow
+    lll:
+      line-length: 160
+    misspell:
+      locale: US
+    staticcheck:
+      # v2 merged gosimple (S*), stylecheck (ST*) and quickfix (QF*) into
+      # staticcheck. Under v1 gosimple was enabled by default, so S* checks
+      # already ran here; stylecheck was not, and quickfix did not exist.
+      # Excluding ST* and QF* keeps "all" from newly enabling two categories
+      # this codebase was never linted against.
+      checks:
+        - all
+        - -QF*
+        - -ST*
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - lll
+        path: _test\.go$
+      - linters:
+          - errcheck
+        path: _test\.go$
+        text: Error return value.*is not checked
+    # v1 anchored every excluded directory as (^|/)name($|/); v2 matches these
+    # patterns against the whole relative path, so an unanchored "bin" would
+    # also silence any package whose path merely contains it. Anchor them
+    # explicitly. Everything below tmp is v1's exclude-dirs-use-default set,
+    # which v2 no longer applies on its own.
+    paths:
+      - (^|/)vendor($|/)
+      - (^|/)bin($|/)
+      - (^|/)tmp($|/)
+      - (^|/)third_party($|/)
+      - (^|/)testdata($|/)
+      - (^|/)examples($|/)
+      - (^|/)Godeps($|/)
+      - (^|/)builtin($|/)
 issues:
-  fix: false
   max-issues-per-linter: 100
   max-same-issues: 50
-  exclude-rules:
-    - linters:
-        - lll
-      path: _test\.go$
-    - linters:
-        - errcheck
-      text: "Error return value.*is not checked"
-      path: _test\.go$
-  exclude-dirs:
-    - vendor
-    - bin
-    - tmp
+  fix: false

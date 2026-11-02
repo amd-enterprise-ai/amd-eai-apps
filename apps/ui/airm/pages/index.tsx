@@ -22,10 +22,10 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { getServerSession } from 'next-auth';
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import router from 'next/router';
 
 import { fetchClusterStatistics } from '@/services/app';
+import { getPageTranslations } from '@/utils/i18n';
 import {
   fetchGPUDeviceUtilization,
   fetchGPUMemoryUtilization,
@@ -243,7 +243,6 @@ const DashboardPage: React.FC<Props> & WithDocumentationLink = ({
             : t('common:charts.nodata');
         }}
         isLoading={isGPUMemoryUsageChartLoading}
-        loadingText={t('common:charts.loading') || ''}
       />
     ),
     [isGPUMemoryUsageChartLoading, memoryChartData, t],
@@ -272,7 +271,6 @@ const DashboardPage: React.FC<Props> & WithDocumentationLink = ({
             : t('common:charts.nodata');
         }}
         isLoading={isGPUDeviceUsageChartLoading}
-        loadingText={t('common:charts.loading') || ''}
       />
     ),
     [deviceChartData, isGPUDeviceUsageChartLoading, t],
@@ -293,7 +291,7 @@ const DashboardPage: React.FC<Props> & WithDocumentationLink = ({
       </h2>
 
       <div className="flex items-start gap-4 w-full">
-        <Card className="border border-default-200 shadow-sm rounded-sm dark:bg-default-100 grow h-full overflow-visible">
+        <Card>
           <CardHeader className="pb-2">
             <span className="text-sm font-semibold text-foreground">
               {t('allocationAndWorkloads.consumptionByProject.title')}
@@ -356,7 +354,7 @@ const DashboardPage: React.FC<Props> & WithDocumentationLink = ({
           isFetching={isGpuClusterChartsFetching}
           lastFetchedTimestamp={gpuClusterChartsLastUpdated}
         />
-        <Card className="border border-default-200 shadow-sm rounded-sm dark:bg-default-100">
+        <Card>
           <CardHeader className="pb-2">
             <span className="text-sm font-semibold text-foreground">
               {t('allocationAndWorkloads.charts.gpuMemoryUtilization.title')}
@@ -364,7 +362,7 @@ const DashboardPage: React.FC<Props> & WithDocumentationLink = ({
           </CardHeader>
           <CardBody className="pt-0 mt-4">{memoryUtilizationChart}</CardBody>
         </Card>
-        <Card className="border border-default-200 shadow-sm rounded-sm dark:bg-default-100">
+        <Card>
           <CardHeader className="pb-2">
             <span className="text-sm font-semibold text-foreground">
               {t('allocationAndWorkloads.charts.gpuDeviceUtilization.title')}
@@ -408,11 +406,7 @@ export async function getServerSideProps(context: any) {
 
     return {
       props: {
-        ...(await serverSideTranslations(locale, [
-          'common',
-          'sharedComponents',
-          'dashboard',
-        ])),
+        ...(await getPageTranslations(locale, ['dashboard'])),
         clusterStats,
       },
     };

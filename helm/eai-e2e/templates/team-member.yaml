@@ -1,0 +1,52 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+{{- if .Values.teamMember.enabled }}
+{{- $script := .Files.Get "files/provision-team-member.py" }}
+{{/*
+The Job name carries a digest of the rendered pod template plus the script it runs.
+This chart is deployed with `helm template | kubectl apply`, so Helm hooks do not run
+and a Job's pod template is immutable: re-applying an unchanged chart has to be a
+no-op, while any change has to produce a NEW Job name rather than an apply that fails
+on an immutable field.
+
+Hashing the rendered template, rather than a hand-listed set of inputs, is what makes
+that guarantee hold: every value reaching the pod spec is covered automatically, so a
+field added later cannot silently fall outside the digest. The script is hashed
+alongside it because the pod mounts the ConfigMap by a fixed name, so a script change
+alone leaves the pod template byte-identical.
+*/}}
+{{- $podTemplate := include "eai-e2e.teamMemberPodTemplate" . }}
+{{- $revision := printf "%s|%s" $podTemplate $script | sha256sum | trunc 8 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: e2e-team-member-provisioner
+  namespace: {{ .Values.teamMember.namespace }}
+  labels:
+    {{- include "eai-e2e.labels" . | nindent 4 }}
+data:
+  provision-team-member.py: |
+{{ $script | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: e2e-team-member-{{ $revision }}
+  namespace: {{ .Values.teamMember.namespace }}
+  labels:
+    {{- include "eai-e2e.labels" . | nindent 4 }}
+spec:
+  # The script owns a bounded 300s retry loop for transient Keycloak startup failures.
+  # Controller retries would multiply that budget past the workflow's 600s wait and leave
+  # a Job running after CI had already reported failure.
+  backoffLimit: 0
+  # Janitor only: the E2E workflow recreates its own Job every run, so nothing depends on
+  # this expiring. It reaps Jobs from superseded revisions, whose digest-derived names no
+  # later run touches, while leaving the last one readable for a day of debugging.
+  ttlSecondsAfterFinished: 86400
+  template:
+{{ $podTemplate | indent 4 }}
+{{- end }}

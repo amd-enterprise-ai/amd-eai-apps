@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 //
 // SPDX-License-Identifier: MIT
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import { generateMockProjectSecretsWithParentSecret } from '@/__mocks__/utils/secrets-mock';
 
@@ -58,17 +58,20 @@ describe('ProjectSecretsTable', () => {
     expect(screen.getByText('My Secret 1')).toBeInTheDocument();
   });
 
-  it('status has popup with more details for Unknown status', () => {
+  it('status has popup with more details for Unknown status', async () => {
     const secrets = generateMockProjectSecretsWithParentSecret(1);
     secrets[0].status = ProjectSecretStatus.UNKNOWN;
     secrets[0].statusReason = 'something went wrong';
 
     setup({ projectSecrets: secrets });
 
-    const statusElement = screen.getByText(
-      'secretStatus.Unknown',
-    ).parentElement;
-    expect(statusElement).toHaveAttribute('aria-haspopup', 'dialog');
+    const statusTrigger = screen.getByRole('button', {
+      name: 'secretStatus.Unknown',
+    });
+    await act(async () => {
+      fireEvent.click(statusTrigger);
+    });
+    expect(screen.getByText('something went wrong')).toBeInTheDocument();
   });
 
   it('status does not have popup with for non-error status', () => {
@@ -78,7 +81,7 @@ describe('ProjectSecretsTable', () => {
 
     setup({ projectSecrets: secrets });
 
-    const statusElement = screen.getByText('secretStatus.Synced').parentElement;
-    expect(statusElement).not.toHaveAttribute('aria-haspopup');
+    const statusLabel = screen.getByText('secretStatus.Synced');
+    expect(statusLabel.closest('[aria-haspopup]')).toBeNull();
   });
 });

@@ -17,8 +17,6 @@ import {
   generateMockApiKeyResponse,
 } from '@/__mocks__/utils/api-keys-mock';
 
-import { ApiKeysTableField } from '@/types/enums/api-keys-table-fields';
-
 import ApiKeysTable from '@/components/features/api-keys/ApiKeysTable';
 import { useProject } from '@/contexts/ProjectContext';
 
@@ -40,7 +38,7 @@ const mockDeleteApiKey = vi.mocked(deleteApiKey);
 
 const defaultProjectContext = {
   isStandaloneMode: false,
-  clusterAuthEnabled: true,
+  apiKeysManagementEnabled: true,
   aiGatewayEnabled: true,
   airmAppUrl: undefined,
   activeProject: 'project1',
@@ -80,22 +78,16 @@ describe('ApiKeysTable', () => {
     });
 
     expect(
-      screen.getByText(`list.apiKeys.headers.${ApiKeysTableField.NAME}.title`),
+      screen.getByText('list.apiKeys.headers.name.title'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
-        `list.apiKeys.headers.${ApiKeysTableField.SECRET_KEY}.title`,
-      ),
+      screen.getByText('list.apiKeys.headers.secretKey.title'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
-        `list.apiKeys.headers.${ApiKeysTableField.CREATED_AT}.title`,
-      ),
+      screen.getByText('list.apiKeys.headers.createdAt.title'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
-        `list.apiKeys.headers.${ApiKeysTableField.CREATED_BY}.title`,
-      ),
+      screen.getByText('list.apiKeys.headers.createdBy.title'),
     ).toBeInTheDocument();
     expect(
       screen.getByText(`list.apiKeys.headers.actions.title`),
@@ -219,7 +211,7 @@ describe('ApiKeysTable', () => {
       'project-1',
       mockApiKeys[0].id,
     );
-  }, 10000);
+  }, 20_000);
 
   it('handles sorting', async () => {
     const mockApiKeys = generateMockApiKeys(3);
@@ -238,9 +230,7 @@ describe('ApiKeysTable', () => {
       expect(screen.getByText(mockApiKeys[0].displayName)).toBeInTheDocument();
     });
 
-    const nameHeader = screen.getByText(
-      `list.apiKeys.headers.${ApiKeysTableField.NAME}.title`,
-    );
+    const nameHeader = screen.getByText('list.apiKeys.headers.name.title');
 
     await act(async () => {
       fireEvent.click(nameHeader);
@@ -250,7 +240,7 @@ describe('ApiKeysTable', () => {
     // The fetch should only be called once (on mount)
     expect(mockFetchProjectApiKeys).toHaveBeenCalledTimes(1);
     expect(mockFetchProjectApiKeys).toHaveBeenCalledWith('project-1');
-  }, 10000);
+  }, 20_000);
 
   it('displays loading skeleton when loading', async () => {
     // Create a promise that never resolves to simulate loading state

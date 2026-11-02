@@ -135,6 +135,7 @@ async def apply_manifest(
     namespace: str,
     submitter: str,
     extra_labels: dict[str, str] | None = None,
+    extra_annotations: dict[str, str] | None = None,
 ) -> None:
     """Apply Kubernetes manifest with workload metadata injection.
 
@@ -150,6 +151,7 @@ async def apply_manifest(
         namespace: Kubernetes namespace
         submitter: User identifier (e.g. email) who submitted the workload
         extra_labels: Additional labels to inject into primary workload resources (Job/Deployment)
+        extra_annotations: Additional annotations to inject into primary workload resources
 
     Raises:
         RuntimeError: If applying manifest fails
@@ -199,6 +201,8 @@ async def apply_manifest(
         doc["metadata"]["annotations"][SUBMITTER_ANNOTATION] = submitter
         if kind in {DEPLOYMENT_RESOURCE, JOB_RESOURCE}:
             doc["metadata"]["annotations"][DISPLAY_NAME_ANNOTATION] = workload.display_name
+            if extra_annotations:
+                doc["metadata"]["annotations"].update(extra_annotations)
 
         name = doc["metadata"].get("name", "unknown")
         logger.debug(f"Applying {kind}/{name} with workload-id {workload.id}")

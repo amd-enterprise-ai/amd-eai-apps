@@ -4,13 +4,15 @@
 
 import { ChartTimeSelector } from '@amdenterpriseai/components';
 import { TimeRangePeriod } from '@amdenterpriseai/types';
-import { TimeRange, TimeSeriesResponse } from '@amdenterpriseai/types';
+import { TimeRange } from '@amdenterpriseai/types';
 import { getCurrentTimeRange } from '@amdenterpriseai/utils/app';
 import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
+  CPUCoreUsageCard,
   GPUDeviceUsageCard,
   GPUMemoryUsageCard,
+  SystemMemoryUsageCard,
 } from '@/components/features/projects';
 import InferenceRequestsCard from './InferenceRequestsCard';
 import { ScalarMetricCard, ScalarMetricConfig } from './ScalarMetricCard';
@@ -26,7 +28,7 @@ import {
   formatSeconds,
   formatTokens,
 } from '@amdenterpriseai/utils/app';
-import { InferenceMetricsColors } from '@/types/enums/inference-metrics';
+import { InferenceMetricsColors } from '@/types/metrics';
 
 const LATENCY_METRICS: TimeseriesMetricConfig[] = [
   {
@@ -113,69 +115,163 @@ export const InferenceMetrics: React.FC<InferenceMetricsProps> = ({
     setTimeRange(getCurrentTimeRange(currentTimePeriod.current));
   }, []);
 
-  const { data: gpuDeviceData, isLoading: isGpuDeviceLoading } =
-    useQuery<TimeSeriesResponse>({
-      queryKey: [
-        'project',
-        namespace,
-        'workload',
+  const { data: gpuDeviceData, isLoading: isGpuDeviceLoading } = useQuery({
+    queryKey: [
+      'project',
+      namespace,
+      'workload',
+      workloadId,
+      'metrics',
+      'gpu_device_utilization',
+      podName,
+      {
+        start: timeRange.start.toISOString(),
+        end: timeRange.end.toISOString(),
+      },
+    ],
+    queryFn: () =>
+      getTimeseriesMetric({
         workloadId,
-        'metrics',
-        'gpu_device_utilization',
-        podName,
-        {
-          start: timeRange.start.toISOString(),
-          end: timeRange.end.toISOString(),
-        },
-      ],
-      queryFn: () =>
-        getTimeseriesMetric({
-          workloadId,
-          namespace: namespace!,
-          start: timeRange.start,
-          end: timeRange.end,
-          metric: 'gpu_device_utilization',
-          podName: podName,
-        }),
-      enabled: !!namespace,
-    });
+        namespace: namespace!,
+        start: timeRange.start,
+        end: timeRange.end,
+        metric: 'gpu_device_utilization',
+        podName: podName,
+      }),
+    enabled: !!namespace,
+  });
 
-  const { data: gpuMemoryData, isLoading: isGpuMemoryLoading } =
-    useQuery<TimeSeriesResponse>({
-      queryKey: [
-        'project',
-        namespace,
-        'workload',
+  const { data: gpuMemoryData, isLoading: isGpuMemoryLoading } = useQuery({
+    queryKey: [
+      'project',
+      namespace,
+      'workload',
+      workloadId,
+      'metrics',
+      'gpu_memory_utilization',
+      podName,
+      {
+        start: timeRange.start.toISOString(),
+        end: timeRange.end.toISOString(),
+      },
+    ],
+    queryFn: () =>
+      getTimeseriesMetric({
         workloadId,
-        'metrics',
-        'gpu_memory_utilization',
-        podName,
-        {
-          start: timeRange.start.toISOString(),
-          end: timeRange.end.toISOString(),
-        },
-      ],
-      queryFn: () =>
-        getTimeseriesMetric({
-          workloadId,
-          namespace: namespace!,
-          start: timeRange.start,
-          end: timeRange.end,
-          metric: 'gpu_memory_utilization',
-          podName: podName,
-        }),
-      enabled: !!namespace,
-    });
+        namespace: namespace!,
+        start: timeRange.start,
+        end: timeRange.end,
+        metric: 'gpu_memory_utilization',
+        podName: podName,
+      }),
+    enabled: !!namespace,
+  });
 
   const gpuDeviceChartData = useMemo(() => {
-    const values = gpuDeviceData?.data?.[0]?.values ?? [];
+    const values = (gpuDeviceData?.data?.[0]?.values ?? []).map((point) => ({
+      timestamp: point.timestamp,
+      value: point.value ?? null,
+    }));
     return { numerator: values, denominator: [] };
   }, [gpuDeviceData]);
 
   const gpuMemoryChartData = useMemo(() => {
-    const values = gpuMemoryData?.data?.[0]?.values ?? [];
+    const values = (gpuMemoryData?.data?.[0]?.values ?? []).map((point) => ({
+      timestamp: point.timestamp,
+      value: point.value ?? null,
+    }));
     return { numerator: values, denominator: [] };
   }, [gpuMemoryData]);
+
+  const { data: cpuUsageData, isLoading: isCpuUsageLoading } = useQuery({
+    queryKey: [
+      'project',
+      namespace,
+      'workload',
+      workloadId,
+      'metrics',
+      'cpu_usage',
+      podName,
+      {
+        start: timeRange.start.toISOString(),
+        end: timeRange.end.toISOString(),
+      },
+    ],
+    queryFn: () =>
+      getTimeseriesMetric({
+        workloadId,
+        namespace: namespace!,
+        start: timeRange.start,
+        end: timeRange.end,
+        metric: 'cpu_usage',
+        podName: podName,
+      }),
+    enabled: !!namespace,
+  });
+
+  const { data: systemMemoryData, isLoading: isSystemMemoryLoading } = useQuery(
+    {
+      queryKey: [
+        'project',
+        namespace,
+        'workload',
+        workloadId,
+        'metrics',
+        'system_memory_usage',
+        podName,
+        {
+          start: timeRange.start.toISOString(),
+          end: timeRange.end.toISOString(),
+        },
+      ],
+      queryFn: () =>
+        getTimeseriesMetric({
+          workloadId,
+          namespace: namespace!,
+          start: timeRange.start,
+          end: timeRange.end,
+          metric: 'system_memory_usage',
+          podName: podName,
+        }),
+      enabled: !!namespace,
+    },
+  );
+
+  const cpuUsageChartData = useMemo(() => {
+    const series = cpuUsageData?.data ?? [];
+    const used = series.find((s) => s.metadata?.label === 'cpu_usage');
+    const allocated = series.find((s) => s.metadata?.label === 'cpu_available');
+    return {
+      numerator: (used?.values ?? []).map((point) => ({
+        timestamp: point.timestamp,
+        value: point.value ?? null,
+      })),
+      denominator: (allocated?.values ?? []).map((point) => ({
+        timestamp: point.timestamp,
+        value: point.value ?? null,
+      })),
+    };
+  }, [cpuUsageData]);
+
+  const systemMemoryChartData = useMemo(() => {
+    const series = systemMemoryData?.data ?? [];
+    const used = series.find(
+      (s) => s.metadata?.label === 'system_memory_usage',
+    );
+    const allocated = series.find(
+      (s) => s.metadata?.label === 'system_memory_available',
+    );
+    return {
+      numerator: (used?.values ?? []).map((point) => ({
+        timestamp: point.timestamp,
+        value: point.value ?? null,
+      })),
+      denominator: (allocated?.values ?? []).map((point) => ({
+        timestamp: point.timestamp,
+        value: point.value ?? null,
+      })),
+    };
+  }, [systemMemoryData]);
 
   if (!namespace) return null;
 
@@ -225,6 +321,20 @@ export const InferenceMetrics: React.FC<InferenceMetricsProps> = ({
             <GPUMemoryUsageCard
               data={gpuMemoryChartData}
               isLoading={isGpuMemoryLoading}
+              width={280}
+            />
+          </div>
+          <div className="min-w-0">
+            <CPUCoreUsageCard
+              data={cpuUsageChartData}
+              isLoading={isCpuUsageLoading}
+              width={280}
+            />
+          </div>
+          <div className="min-w-0">
+            <SystemMemoryUsageCard
+              data={systemMemoryChartData}
+              isLoading={isSystemMemoryLoading}
               width={280}
             />
           </div>

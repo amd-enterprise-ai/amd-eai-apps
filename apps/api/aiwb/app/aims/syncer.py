@@ -94,7 +94,7 @@ async def sync_aim_services(session: AsyncSession, kube_client: KubernetesClient
                 logger.debug(f"Skipping AIMService {service.metadata.name} - missing namespace")
                 continue
 
-            model_name = service.spec.model.get("name")
+            model_name = service.spec.model.name
             if not model_name:
                 logger.debug(f"Skipping AIMService {service.metadata.name} - missing model name")
                 continue
@@ -105,7 +105,7 @@ async def sync_aim_services(session: AsyncSession, kube_client: KubernetesClient
                     logger.debug(f"Skipping AIMService {service.metadata.name} - AIM {model_name} not found")
                     continue
 
-                # Per ADR 006b §3 the optimization metric lives in
+                # The optimization metric lives in
                 # spec.profile.selector.metric (v1alpha2), not the legacy
                 # spec.overrides.metric (v1alpha1). When the profile is
                 # auto-resolved or chosen by name there's no metric to record.

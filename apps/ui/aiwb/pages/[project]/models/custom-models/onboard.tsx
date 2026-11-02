@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: MIT
 
 import type { GetServerSidePropsContext } from 'next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import {
   DOCS_WORKBENCH_BASE,
@@ -12,6 +11,7 @@ import {
 import type { PageBreadcrumbs } from '@amdenterpriseai/types';
 
 import CustomModelImportPage from '@/components/features/models/CustomModelImport';
+import { getPageTranslations } from '@/lib/server/i18n';
 
 interface Props {
   pageBreadcrumb?: PageBreadcrumbs;
@@ -25,11 +25,7 @@ export async function getServerSideProps(context: GetServerSidePropsContext) {
   const locale = context.locale || 'en';
   const project = context.params?.project as string;
 
-  const translations = await serverSideTranslations(locale, [
-    'common',
-    'models',
-    'sharedComponents',
-  ]);
+  const translations = await getPageTranslations(locale, ['models']);
 
   const breadcrumb: PageBreadcrumbs = [
     {

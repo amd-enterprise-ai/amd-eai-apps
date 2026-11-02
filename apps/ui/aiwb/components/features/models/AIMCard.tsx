@@ -2,10 +2,12 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useCallback, useId, useMemo, useState } from 'react';
 import {
   ActionButton,
+  ActionsDropdown,
   Alert,
+  Button,
   ButtonGroup,
   Card,
   CardFooter,
@@ -13,10 +15,11 @@ import {
   Divider,
   DropdownActionItem,
   Link,
-  NestedDropdown,
   Status,
   Tooltip,
+  cn,
 } from '@amdenterpriseai/components';
+import { useElementOverflow } from '@amdenterpriseai/hooks';
 
 import { useTranslation } from 'next-i18next';
 import { ModelIcon } from '@/components/shared/ModelIcons';
@@ -35,7 +38,9 @@ import {
   AIMWorkloadStatus,
   ParsedAIM,
 } from '@/types/aims';
-import { getMetricTranslationKey } from '@/lib/app/aims';
+import { getMetricTranslationKey, getModelCapability } from '@/lib/app/aims';
+
+const DESCRIPTION_CLAMPED_LINES = 3;
 
 interface Props {
   aggregatedAim: AggregatedAIM;
@@ -59,50 +64,37 @@ export const AIMCard = ({
   onUndeploy,
 }: Props) => {
   const tags = aggregatedAim.aggregated.tags ?? [];
+  const description = aggregatedAim.aggregated.description.short;
   const { t } = useTranslation(['models']);
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
-  const [isDescriptionLong, setIsDescriptionLong] = useState(false);
-  const descriptionRef = useRef<HTMLDivElement>(null);
+  const descriptionId = useId();
 
-  // CSS-based overflow detection: check if content overflows when clamped to 3 lines
-  useEffect(() => {
-    const checkOverflow = () => {
-      if (!descriptionRef.current) return;
-
-      const element = descriptionRef.current;
-      const isClamped = element.classList.contains('line-clamp-3');
-
-      if (isClamped) {
-        // When clamped, compare scrollHeight to clientHeight
-        // If scrollHeight > clientHeight, content overflows
-        setIsDescriptionLong(element.scrollHeight > element.clientHeight);
-      } else {
-        // When expanded, temporarily apply clamp to check if it would overflow
-        element.classList.add('line-clamp-3');
-        const wouldOverflow = element.scrollHeight > element.clientHeight;
-        element.classList.remove('line-clamp-3');
-        setIsDescriptionLong(wouldOverflow);
+  const measureDescriptionOverflow = useCallback(
+    (element: HTMLParagraphElement) => {
+      if (!description) return false;
+      if (!isDescriptionExpanded) {
+        return element.scrollHeight > element.clientHeight;
       }
-    };
 
-    // Re-check when card size changes (observe parent container for width changes)
-    const resizeObserver = new ResizeObserver(() => {
-      checkOverflow();
-    });
-
-    // Use requestAnimationFrame to ensure layout is complete
-    const frameId = requestAnimationFrame(() => {
-      checkOverflow();
-      if (descriptionRef.current?.parentElement) {
-        resizeObserver.observe(descriptionRef.current.parentElement);
+      // When expanded, the clamp class is removed, so clientHeight no longer
+      // reflects the clamped size. Estimate the clamped height from the
+      // computed line-height instead of toggling the class, which would
+      // mutate the element being observed and can trigger a ResizeObserver
+      // feedback loop.
+      const parsedLineHeight = Number.parseFloat(
+        getComputedStyle(element).lineHeight,
+      );
+      if (Number.isNaN(parsedLineHeight)) {
+        return element.scrollHeight > element.clientHeight;
       }
-    });
-
-    return () => {
-      cancelAnimationFrame(frameId);
-      resizeObserver.disconnect();
-    };
-  }, [aggregatedAim.aggregated.description.short, isDescriptionExpanded]);
+      return (
+        element.scrollHeight > parsedLineHeight * DESCRIPTION_CLAMPED_LINES
+      );
+    },
+    [description, isDescriptionExpanded],
+  );
+  const { elementRef: descriptionRef, isOverflowing: isDescriptionLong } =
+    useElementOverflow(measureDescriptionOverflow);
 
   const allDeployments = useMemo(() => {
     const deployments: Array<{
@@ -127,14 +119,13 @@ export const AIMCard = ({
     return deployments;
   }, [aggregatedAim.parsedAIMs]);
 
-  const getDeploymentStatusIntent = (status: AIMServiceStatus): Intent => {
-    if (status === AIMServiceStatus.RUNNING) {
+  const getDeploymentStatusIntent = (
+    status: AIMServiceStatus | undefined,
+  ): Intent => {
+    if (status === 'Running') {
       return Intent.SUCCESS;
     }
-    if (
-      status === AIMServiceStatus.PENDING ||
-      status === AIMServiceStatus.STARTING
-    ) {
+    if (status === 'Pending' || status === 'Starting') {
       return Intent.PENDING;
     }
     return Intent.WARNING;
@@ -148,7 +139,7 @@ export const AIMCard = ({
 
       allDeployments.forEach(({ service, imageVersion, parsedAim }) => {
         const serviceId = service.id as string;
-        const rawMetric = service.spec.overrides?.metric;
+        const rawMetric = service.spec?.profile?.selector?.metric;
         const metricLabel = t(
           getMetricTranslationKey(
             typeof rawMetric === 'string' ? rawMetric : null,
@@ -158,7 +149,7 @@ export const AIMCard = ({
           .filter(Boolean)
           .join(' • ');
 
-        const isRunning = service.status.status === AIMServiceStatus.RUNNING;
+        const isRunning = service.status?.status === 'Running';
 
         // Create nested actions for each deployment
         const nestedActions: DropdownActionItem[] = [
@@ -170,11 +161,15 @@ export const AIMCard = ({
         ];
 
         if (isRunning) {
-          nestedActions.push({
-            key: `chat-${serviceId}`,
-            label: t('aimCatalog.actions.chatWithModel.label'),
-            onPress: () => onChatWithModel(serviceId),
-          });
+          // Speech-to-text deployments have no chat surface, so don't offer the
+          // chat-playground action for them.
+          if (getModelCapability(parsedAim.tags) !== 'transcription') {
+            nestedActions.push({
+              key: `chat-${serviceId}`,
+              label: t('aimCatalog.actions.chatWithModel.label'),
+              onPress: () => onChatWithModel(serviceId),
+            });
+          }
           nestedActions.push({
             key: `connect-${serviceId}`,
             label: t('aimCatalog.actions.connect.label'),
@@ -187,16 +182,16 @@ export const AIMCard = ({
           });
         }
 
+        const serviceNamespace = service.metadata.namespace;
         nestedActions.push({
           key: `undeploy-${serviceId}`,
           label: t('aimCatalog.actions.undeploy.label'),
           color: 'danger',
+          // Undeploy targets a namespaced URL; without a namespace the request
+          // would be malformed, so disable the action rather than send an empty one.
+          isDisabled: !serviceNamespace,
           onPress: () =>
-            onUndeploy(
-              service.metadata.namespace,
-              serviceId,
-              service.metadata.name,
-            ),
+            onUndeploy(serviceNamespace!, serviceId, service.metadata.name),
         });
 
         // Add deployment as parent item with nested actions
@@ -208,7 +203,7 @@ export const AIMCard = ({
           actions: nestedActions,
           startContent: (
             <Status
-              intent={getDeploymentStatusIntent(service.status.status)}
+              intent={getDeploymentStatusIntent(service.status?.status)}
               size="md"
             />
           ),
@@ -259,40 +254,16 @@ export const AIMCard = ({
     aggregatedAim.deploymentCounts[AIMWorkloadStatus.DEGRADED] > 0;
 
   return (
-    <Card
-      className={`flex-1 dark:bg-default-100/50 p-1 grid grid-cols-1 ${
-        isSupported
-          ? 'grid-rows-[1fr_auto_auto]'
-          : 'grid-rows-[auto_1fr_auto_auto]'
-      }`}
-      shadow="sm"
-      radius="md"
-      classNames={{
-        header: `flex items-center justify-between min-h-0`,
-        footer: `flex flex-nowrap gap-2 justify-between items-start`,
-      }}
-    >
-      {!isSupported && (
-        <div
-          data-testid="unsupported-banner"
-          role="alert"
-          className="-mx-1 -mt-1"
-        >
+    <Card className={`p-0 grid grid-cols-1 grid-rows-[1fr_auto_auto] gap-0`}>
+      <CardHeader>
+        {!isSupported && (
           <Alert
-            color="danger"
-            variant="flat"
-            hideIconWrapper={true}
-            icon={
-              <span className="text-sm font-bold text-danger dark:text-danger-400">
-                <IconAlertTriangle />
-              </span>
-            }
-            classNames={{
-              base: 'rounded-t-md rounded-bl-none rounded-br-none bg-danger/20 dark:bg-danger/30 border-b border-danger px-0.5 py-0.5 text-danger dark:text-danger-400',
-              description: 'text-xs text-inherit',
-            }}
+            data-testid="unsupported-banner"
+            status="danger"
+            icon={<IconAlertTriangle />}
+            className="w-full rounded-b-none px-2 py-1 gap-2 shadow-none"
             description={
-              <>
+              <span className="text-xs">
                 {t('aimCatalog.unsupported.message')}{' '}
                 <Link
                   href={t('aimCatalog.unsupported.linkUrl', {
@@ -305,15 +276,16 @@ export const AIMCard = ({
                   {t('aimCatalog.unsupported.linkText')}
                 </Link>
                 .
-              </>
+              </span>
             }
           />
-        </div>
-      )}
+        )}
 
-      <CardHeader>
         <div
-          className={`flex gap-4 h-full ${!isSupported ? 'opacity-50' : ''}`}
+          className={cn(
+            'p-5 flex flex-col gap-2',
+            !isSupported ? 'opacity-50' : '',
+          )}
         >
           <div className="flex items-start flex-col gap-1 w-full">
             <div className="flex flex-row gap-2 items-start w-full">
@@ -343,7 +315,12 @@ export const AIMCard = ({
                 )}
                 {hasActiveDeployments && (
                   <Tooltip content={t('aimCatalog.card.hasDeploymentsTooltip')}>
-                    <span data-testid="aim-card-has-deployments">
+                    {/* biome-ignore lint/a11y/useSemanticElements: the element describes status rather than performing an action. */}
+                    <span
+                      data-testid="aim-card-has-deployments"
+                      role="button"
+                      tabIndex={0}
+                    >
                       <Status
                         label={t('aimCatalog.card.hasDeployments')}
                         intent={
@@ -384,7 +361,12 @@ export const AIMCard = ({
                     content={t('aimCatalog.tooltips.hfTokenRequired')}
                     delay={300}
                   >
-                    <span className="cursor-help underline decoration-dotted flex items-center gap-0.5">
+                    {/* biome-ignore lint/a11y/useSemanticElements: the element reveals supplemental text rather than performing an action. */}
+                    <span
+                      className="cursor-help underline decoration-dotted flex items-center gap-0.5"
+                      role="button"
+                      tabIndex={0}
+                    >
                       <IconLock size={12} />
                       {t('aimCatalog.card.gated')}
                     </span>
@@ -394,43 +376,42 @@ export const AIMCard = ({
             </div>
             <p
               ref={descriptionRef}
-              className={`text-sm transition-colors ${
-                isDescriptionExpanded ? '' : 'line-clamp-3'
-              } ${
-                isDescriptionLong
-                  ? 'cursor-pointer hover:text-foreground/80'
-                  : ''
-              }`}
-              onClick={
-                isDescriptionLong
-                  ? () => setIsDescriptionExpanded(!isDescriptionExpanded)
-                  : undefined
-              }
-              role={isDescriptionLong ? 'button' : undefined}
-              tabIndex={isDescriptionLong ? 0 : undefined}
-              aria-expanded={
-                isDescriptionLong ? isDescriptionExpanded : undefined
-              }
-              onKeyDown={
-                isDescriptionLong
-                  ? (e) => {
-                      if (e.key === 'Enter' || e.key === 'Space') {
-                        e.preventDefault();
-                        setIsDescriptionExpanded(!isDescriptionExpanded);
-                      }
-                    }
-                  : undefined
-              }
+              id={descriptionId}
+              className={`text-sm ${isDescriptionExpanded ? '' : 'line-clamp-3'}`}
             >
-              {aggregatedAim.aggregated.description.short}
+              {description}
             </p>
+            {isDescriptionLong && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onPress={() =>
+                  setIsDescriptionExpanded((expanded) => !expanded)
+                }
+                aria-expanded={isDescriptionExpanded}
+                aria-controls={descriptionId}
+                endContent={
+                  <IconChevronDown
+                    size={14}
+                    className={cn(
+                      'transition-transform duration-200',
+                      isDescriptionExpanded ? 'rotate-180' : '',
+                    )}
+                  />
+                }
+                className="self-start -ml-2 mt-1 h-auto min-h-0 px-2 text-xs"
+              >
+                {isDescriptionExpanded
+                  ? t('aimCatalog.card.showLess')
+                  : t('aimCatalog.card.showMore')}
+              </Button>
+            )}
           </div>
         </div>
       </CardHeader>
-
       <Divider />
       <CardFooter className="flex flex-col">
-        <div className="flex flex-row justify-between items-center w-full">
+        <div className="flex p-5 pt-3 flex-row justify-between items-center w-full">
           <TruncatedTagsRow
             tags={tags}
             formatMoreCount={(count) =>
@@ -450,7 +431,7 @@ export const AIMCard = ({
                 {t('aimCatalog.actions.deploy.label')}
               </ActionButton>
               {allDeployments.length > 0 ? (
-                <NestedDropdown actions={cardActions}>
+                <ActionsDropdown actions={cardActions}>
                   <ActionButton
                     primary
                     color="primary"
@@ -461,7 +442,7 @@ export const AIMCard = ({
                     }
                     icon={<IconChevronDown size={16} />}
                   />
-                </NestedDropdown>
+                </ActionsDropdown>
               ) : (
                 <ActionButton
                   primary

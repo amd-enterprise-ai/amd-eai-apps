@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 import {
-  Select,
+  FormSelect,
   SelectItem,
   DrawerForm,
   FormFieldComponent,
@@ -98,7 +98,7 @@ const CreateProjectModal: React.FC<Props> = ({
             .min(2, t('modal.create.form.name.validation.length') || '')
             .max(41, t('modal.create.form.name.validation.length') || '')
             .regex(
-              /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/,
+              /^[a-z0-9]+(-[a-z0-9]+)*$/,
               t('modal.create.form.name.validation.format') || '',
             )
             .refine(
@@ -259,27 +259,25 @@ const CreateProjectModal: React.FC<Props> = ({
                 isRequired: true,
                 placeholder: t('modal.create.form.cluster.placeholder'),
                 component: (formElemProps) => (
-                  <Select
+                  <FormSelect
                     data-testid="cluster-select"
-                    labelPlacement="outside"
                     placeholder={t('modal.create.form.cluster.placeholder')}
-                    variant="bordered"
                     disabledKeys={onboardedClusters
                       .filter((c) => c.status === 'unhealthy')
                       .map((c) => c.id)}
-                    selectedKeys={formElemProps?.value}
                     disallowEmptySelection
                     {...formElemProps}
-                    isInvalid={
-                      !!form.formState.errors[ProjectFormFields.CLUSTER_ID]
-                    }
                   >
                     {onboardedClusters.map((cluster: Cluster) => (
-                      <SelectItem data-testid={cluster.id} key={cluster.id}>
+                      <SelectItem
+                        data-testid={cluster.id}
+                        key={cluster.id}
+                        textValue={cluster.name}
+                      >
                         {cluster.name}
                       </SelectItem>
                     ))}
-                  </Select>
+                  </FormSelect>
                 ),
               }}
               form={form}

@@ -4,7 +4,11 @@
 
 import { describe, expect, it } from 'vitest';
 
+import type { CustomProfileResponse } from '@/lib/app/custom-profiles';
 import {
+  customProfileToFormValues,
+  formValuesToCustomProfileCreate,
+  formValuesToCustomProfilePatch,
   formValuesToProfileOverrides,
   formValuesToProfilePatch,
   imageRefToFamilyTag,
@@ -12,6 +16,7 @@ import {
   profileOverridesToFormValues,
   profileOverridesToOnboardBody,
   RuntimeProfileYamlError,
+  type CustomProfileFormInput,
 } from '@/lib/app/runtimeProfileMappers';
 import type { AimImageFamily, ClusterAccelerator } from '@/types/cluster';
 import { AUTOMATIC_IMAGE_FAMILY_ID } from '@/types/runtime-profile';
@@ -32,10 +37,18 @@ const imageFamilies: AimImageFamily[] = [
 ];
 
 const accelerators: ClusterAccelerator[] = [
-  { deviceId: '74a1', productName: 'AMD Instinct MI300X', allocatableCount: 8 },
+  {
+    acceleratorType: 'gpu',
+    acceleratorVendor: 'amd',
+    deviceId: '74a1',
+    productName: 'AMD Instinct MI300X',
+    allocatableCount: 8,
+    acceleratorModel: 'MI300X',
+  },
 ];
 
 const previewFields = {
+  sourceType: 'huggingFace' as const,
   repoId: 'org/model',
   revision: 'main',
   sha: 'abc',
@@ -177,7 +190,7 @@ describe('runtimeProfileMappers', () => {
     ]);
   });
 
-  it('passes an unknown accelerator value through unchanged', () => {
+  it('leaves acceleratorModel empty when the form device id is not in the catalog', () => {
     const body = profileOverridesToOnboardBody(
       formValuesToProfileOverrides(
         {
@@ -196,7 +209,7 @@ describe('runtimeProfileMappers', () => {
       imageFamilies,
       accelerators,
     );
-    expect(body.customProfile?.acceleratorModel).toBe('MI325X');
+    expect(body.customProfile?.acceleratorModel).toBe('');
   });
 });
 
@@ -301,7 +314,7 @@ describe('profileOverridesToFormValues', () => {
     });
   });
 
-  it('falls back to legacy engineArgsYaml/envVarsYaml fields for older imports', () => {
+  it('falls back to the catalog default when persisted acceleratorModel is unrecognized', () => {
     const values = profileOverridesToFormValues(
       {
         acceleratorModel: '74a1',
@@ -390,5 +403,215 @@ describe('formValuesToProfilePatch', () => {
       accelerators,
     );
     expect(customProfile.acceleratorCount).toBe(4);
+  });
+});
+
+const profileFormValues: CustomProfileFormInput = {
+  displayName: '  High speed  ',
+  containerImage: 'aim-base',
+  containerVersion: '0.11',
+  acceleratorType: 'gpu',
+  accelerator: '74a1',
+  // The count select stores its key as a string.
+  acceleratorCount: '8',
+  modelPrecision: 'fp8',
+  metric: 'latency',
+  engineArgsYaml: '',
+  envVarsYaml: '',
+};
+
+describe('formValuesToCustomProfileCreate', () => {
+  it('emits the narrowing axes as typed fields, resolving the device id and image', () => {
+    expect(
+      formValuesToCustomProfileCreate(
+        profileFormValues,
+        imageFamilies,
+        accelerators,
+      ),
+    ).toEqual({
+      displayName: 'High speed',
+      acceleratorModel: 'MI300X',
+      acceleratorCount: 8,
+      precision: 'fp8',
+      metric: 'latency',
+      image: 'amdenterpriseai/aim-base:0.11',
+      customProfile: { acceleratorType: 'gpu' },
+    });
+  });
+
+  it('parses engine args into a mapping and env vars into named entries', () => {
+    const request = formValuesToCustomProfileCreate(
+      {
+        ...profileFormValues,
+        engineArgsYaml: 'max-model-len: 32768',
+        envVarsYaml: 'VLLM_LOGGING_LEVEL: DEBUG',
+      },
+      imageFamilies,
+      accelerators,
+    );
+
+    expect(request.customProfile).toEqual({
+      acceleratorType: 'gpu',
+      engineArgs: { 'max-model-len': 32768 },
+      engineEnv: [{ name: 'VLLM_LOGGING_LEVEL', value: 'DEBUG' }],
+    });
+  });
+
+  it('rejects engine args that are not a YAML mapping', () => {
+    expect(() =>
+      formValuesToCustomProfileCreate(
+        { ...profileFormValues, engineArgsYaml: '- not: a mapping' },
+        imageFamilies,
+        accelerators,
+      ),
+    ).toThrow(RuntimeProfileYamlError);
+  });
+});
+
+describe('formValuesToCustomProfilePatch', () => {
+  it('resets cleared configuration fields with an explicit null', () => {
+    const request = formValuesToCustomProfilePatch(
+      profileFormValues,
+      imageFamilies,
+      accelerators,
+    );
+
+    expect(request.customProfile).toEqual({
+      acceleratorType: 'gpu',
+      engineArgs: null,
+      engineEnv: null,
+    });
+  });
+
+  it('sends the complete desired state so selector and overrides stay in step', () => {
+    const request = formValuesToCustomProfilePatch(
+      { ...profileFormValues, acceleratorCount: 4 },
+      imageFamilies,
+      accelerators,
+    );
+
+    expect(request).toMatchObject({
+      displayName: 'High speed',
+      acceleratorModel: 'MI300X',
+      acceleratorCount: 4,
+      precision: 'fp8',
+      metric: 'latency',
+      image: 'amdenterpriseai/aim-base:0.11',
+    });
+  });
+});
+
+describe('customProfileToFormValues', () => {
+  // engineEnv reads back as the map the server collapsed it to on write, not as
+  // the [{name, value}] entries the drawer sent.
+  const savedProfile: CustomProfileResponse = {
+    name: 'high-speed-7f3b6c8e',
+    displayName: 'High speed',
+    isDefault: false,
+    resourceName: 'high-speed-7f3b6c8e',
+    selector: {
+      acceleratorModel: 'MI300X',
+      acceleratorCount: 8,
+      metric: 'latency',
+      precision: 'fp8',
+    },
+    customProfile: {
+      image: 'amdenterpriseai/aim-base:0.11',
+      engineArgs: { 'max-model-len': 32768 },
+      engineEnv: { VLLM_LOGGING_LEVEL: 'DEBUG' },
+    },
+  };
+
+  it('hydrates the form from authored intent', () => {
+    expect(
+      customProfileToFormValues(savedProfile, imageFamilies, accelerators),
+    ).toEqual({
+      displayName: 'High speed',
+      containerImage: 'aim-base',
+      containerVersion: '0.11',
+      acceleratorType: 'gpu',
+      accelerator: '74a1',
+      acceleratorCount: 8,
+      modelPrecision: 'fp8',
+      metric: 'latency',
+      engineArgsYaml: 'max-model-len: 32768',
+      envVarsYaml: 'VLLM_LOGGING_LEVEL: DEBUG',
+    });
+  });
+
+  it('prefers authored intent over the effective derived configuration', () => {
+    const values = customProfileToFormValues(
+      {
+        ...savedProfile,
+        profile: {
+          metadata: { name: 'derived' },
+          spec: {
+            aimId: 'aim-1',
+            metric: 'throughput',
+            precision: 'fp16',
+            acceleratorModel: 'MI300X',
+            acceleratorCount: 1,
+          },
+        },
+      },
+      imageFamilies,
+      accelerators,
+    );
+
+    expect(values.metric).toBe('latency');
+    expect(values.modelPrecision).toBe('fp8');
+    expect(values.acceleratorCount).toBe(8);
+  });
+
+  it('reads env vars written as entries by an older client', () => {
+    const values = customProfileToFormValues(
+      {
+        ...savedProfile,
+        customProfile: {
+          ...savedProfile.customProfile,
+          engineEnv: [{ name: 'VLLM_LOGGING_LEVEL', value: 'DEBUG' }],
+        },
+      },
+      imageFamilies,
+      accelerators,
+    );
+
+    expect(values.envVarsYaml).toBe('VLLM_LOGGING_LEVEL: DEBUG');
+  });
+
+  it('falls back to the derived configuration when nothing was authored', () => {
+    const values = customProfileToFormValues(
+      {
+        name: 'default',
+        displayName: 'Default',
+        isDefault: true,
+        resourceName: 'llama-3-8b-default',
+        profile: {
+          metadata: { name: 'derived' },
+          spec: {
+            aimId: 'aim-1',
+            metric: 'throughput',
+            precision: 'fp16',
+            acceleratorModel: 'MI300X',
+            acceleratorCount: 1,
+            acceleratorType: 'gpu',
+            image: 'amdenterpriseai/aim-base:0.11',
+          },
+        },
+      },
+      imageFamilies,
+      accelerators,
+    );
+
+    expect(values).toMatchObject({
+      displayName: 'Default',
+      containerImage: 'aim-base',
+      metric: 'throughput',
+      modelPrecision: 'fp16',
+      acceleratorCount: 1,
+      accelerator: '74a1',
+      engineArgsYaml: '',
+      envVarsYaml: '',
+    });
   });
 });

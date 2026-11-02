@@ -9,7 +9,13 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_common.exceptions import ConflictException, NotFoundException
-from app.overlays.repository import delete_overlay, get_overlay, insert_overlay, list_overlays
+from app.overlays.repository import (
+    delete_overlay,
+    delete_overlays_absent_from_chart,
+    get_overlay,
+    insert_overlay,
+    list_overlays,
+)
 from app.overlays.schemas import OverlayUpdate
 from app.overlays.service import update_overlay
 from tests import factory
@@ -380,3 +386,63 @@ async def test_generic_vs_model_specific_overlay_distinction(db_session: AsyncSe
     specific = overlays_by_type["model/specific-config"]
     assert specific.id == specific_overlay.id
     assert specific.overlay["type"] == "specific"
+
+
+@pytest.mark.asyncio
+async def test_delete_overlays_absent_from_chart(db_session: AsyncSession) -> None:
+    """A registered overlay the chart no longer ships is removed."""
+    chart = await factory.create_chart(db_session, name=f"prune-chart-{uuid4()}")
+    kept = await factory.create_overlay(db_session, chart_id=chart.id, canonical_name="model/kept", created_by="system")
+    stale = await factory.create_overlay(
+        db_session, chart_id=chart.id, canonical_name="model/stale", created_by="system"
+    )
+
+    deleted = await delete_overlays_absent_from_chart(db_session, chart.id, keep_ids=[kept.id], creator="system")
+
+    assert deleted == [stale.id]
+    remaining = await list_overlays(db_session, chart_id=chart.id)
+    assert [o.id for o in remaining] == [kept.id]
+
+
+@pytest.mark.asyncio
+async def test_delete_overlays_absent_from_chart_spares_other_creators(db_session: AsyncSession) -> None:
+    """Overlays added through the API survive pruning of registered ones."""
+    chart = await factory.create_chart(db_session, name=f"prune-chart-{uuid4()}")
+    user_overlay = await factory.create_overlay(
+        db_session, chart_id=chart.id, canonical_name="model/user-added", created_by="user@example.com"
+    )
+
+    deleted = await delete_overlays_absent_from_chart(db_session, chart.id, keep_ids=[], creator="system")
+
+    assert deleted == []
+    remaining = await list_overlays(db_session, chart_id=chart.id)
+    assert [o.id for o in remaining] == [user_overlay.id]
+
+
+@pytest.mark.asyncio
+async def test_delete_overlays_absent_from_chart_spares_generic_overlays(db_session: AsyncSession) -> None:
+    """An overlay without a canonical name cannot be traced to a file, so it is never pruned."""
+    chart = await factory.create_chart(db_session, name=f"prune-chart-{uuid4()}")
+    generic = await factory.create_overlay(db_session, chart_id=chart.id, canonical_name=None, created_by="system")
+
+    deleted = await delete_overlays_absent_from_chart(db_session, chart.id, keep_ids=[], creator="system")
+
+    assert deleted == []
+    remaining = await list_overlays(db_session, chart_id=chart.id)
+    assert [o.id for o in remaining] == [generic.id]
+
+
+@pytest.mark.asyncio
+async def test_delete_overlays_absent_from_chart_spares_other_charts(db_session: AsyncSession) -> None:
+    """Pruning one chart leaves another chart's registered overlays alone."""
+    chart = await factory.create_chart(db_session, name=f"prune-chart-{uuid4()}")
+    other_chart = await factory.create_chart(db_session, name=f"other-chart-{uuid4()}")
+    other_overlay = await factory.create_overlay(
+        db_session, chart_id=other_chart.id, canonical_name="model/elsewhere", created_by="system"
+    )
+
+    deleted = await delete_overlays_absent_from_chart(db_session, chart.id, keep_ids=[], creator="system")
+
+    assert deleted == []
+    remaining = await list_overlays(db_session, chart_id=other_chart.id)
+    assert [o.id for o in remaining] == [other_overlay.id]

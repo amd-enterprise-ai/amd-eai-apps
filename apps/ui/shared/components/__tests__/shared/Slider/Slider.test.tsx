@@ -88,4 +88,88 @@ describe('Slider adapter', () => {
     );
     expect(screen.getByRole('slider')).toBeDisabled();
   });
+
+  it('renders mark labels when marks are provided', () => {
+    render(
+      <Slider
+        aria-label="Marked slider"
+        value={2}
+        minValue={0}
+        maxValue={8}
+        marks={[{ value: 4, label: 'req' }]}
+        data-testid="slider"
+      />,
+    );
+    const mark = screen.getByText('req');
+    expect(mark).toBeInTheDocument();
+    expect(mark).toHaveClass('text-sm');
+    expect(mark).toHaveClass('text-muted');
+  });
+
+  it('calls onChange with mark value when a mark is clicked', () => {
+    const handleChange = vi.fn();
+    render(
+      <Slider
+        aria-label="Marked slider"
+        value={2}
+        minValue={0}
+        maxValue={8}
+        marks={[{ value: 4, label: 'req' }]}
+        onChange={handleChange}
+        data-testid="slider"
+      />,
+    );
+    fireEvent.click(screen.getByText('req'));
+    expect(handleChange).toHaveBeenCalledWith(4);
+  });
+
+  it('renders description text', () => {
+    render(
+      <Slider
+        aria-label="Described slider"
+        value={50}
+        minValue={0}
+        maxValue={100}
+        description="Select a value between 0 and 100"
+        data-testid="slider"
+      />,
+    );
+    expect(
+      screen.getByText('Select a value between 0 and 100'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders error message when invalid', () => {
+    render(
+      <Slider
+        aria-label="Invalid slider"
+        value={25}
+        minValue={0}
+        maxValue={100}
+        isInvalid
+        errorMessage="Value must be at least 50"
+        data-testid="slider"
+      />,
+    );
+    const errorText = screen.getByText('Value must be at least 50');
+    expect(errorText).toBeInTheDocument();
+    expect(errorText).toHaveClass('text-danger');
+  });
+
+  it('hides error message when not invalid', () => {
+    render(
+      <Slider
+        aria-label="Valid slider"
+        value={75}
+        minValue={0}
+        maxValue={100}
+        isInvalid={false}
+        errorMessage="Value must be at least 50"
+        data-testid="slider"
+      />,
+    );
+    expect(
+      screen.queryByText('Value must be at least 50'),
+    ).not.toBeInTheDocument();
+  });
 });

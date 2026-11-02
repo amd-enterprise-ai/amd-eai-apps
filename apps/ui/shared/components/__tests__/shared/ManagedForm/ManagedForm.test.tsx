@@ -13,6 +13,7 @@
 
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { createRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { FormField } from '@amdenterpriseai/types';
 
@@ -503,5 +504,49 @@ describe('ManagedForm', () => {
       expect.objectContaining({ name: 'Bob' }),
     );
     expect(mockOnFormSuccess.mock.calls[0][0]).not.toHaveProperty('email');
+  });
+
+  it('does not submit an ancestor form from a portalled child form', async () => {
+    const outerSuccess = vi.fn();
+    const outerFailure = vi.fn();
+    const innerSuccess = vi.fn();
+    const portalRoot = document.createElement('div');
+    document.body.appendChild(portalRoot);
+
+    render(
+      <ManagedForm<SampleFormData>
+        onFormSuccess={outerSuccess}
+        onFormFailure={outerFailure}
+        validationSchema={sampleFormSchema}
+        defaultValues={{ name: '', email: '' }}
+        renderFields={() =>
+          createPortal(
+            <ManagedForm<{ token: string }>
+              showSubmitButton
+              submitButtonText="Create token"
+              onFormSuccess={innerSuccess}
+              validationSchema={z.object({ token: z.string().min(1) })}
+              defaultValues={{ token: 'hf_token' }}
+              renderFields={(form) => (
+                <FormFieldComponent<{ token: string }>
+                  formField={{ name: 'token', label: 'Token' }}
+                  form={form}
+                />
+              )}
+            />,
+            portalRoot,
+          )
+        }
+      />,
+    );
+
+    await act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create token' }));
+    });
+
+    expect(innerSuccess).toHaveBeenCalledWith({ token: 'hf_token' });
+    expect(outerSuccess).not.toHaveBeenCalled();
+    expect(outerFailure).not.toHaveBeenCalled();
+    portalRoot.remove();
   });
 });

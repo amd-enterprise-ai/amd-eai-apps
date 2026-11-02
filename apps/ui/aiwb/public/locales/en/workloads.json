@@ -11,6 +11,7 @@
       "timeline": "Timeline",
       "modelAndDataset": "Model and dataset",
       "capabilities": "Capabilities",
+      "loraAdapters": "LoRA adapters",
       "output": "Output",
       "status": "Status"
     },
@@ -33,7 +34,31 @@
       "externalHost": "External host",
       "internalHost": "Internal host",
       "host": "Host",
+      "maxSupportedLoraRank": "Max supported LoRA rank",
       "notManagedByWorkbench": "This AIM was not deployed through Workbench. To use it with API keys and external access, please deploy it from the Workbench UI instead."
+    },
+    "loraAdapters": {
+      "empty": "No LoRA adapters",
+      "metadataUnavailable": "Attached LoRA adapter details are temporarily unavailable.",
+      "copyName": "Copy name",
+      "rank": "rank {{rank}}",
+      "rankUnavailable": "rank unavailable",
+      "edit": {
+        "action": "Edit",
+        "title": "Edit LoRA adapters",
+        "description": "Select ready, compatible LoRAs with a trained rank no greater than {{rank}}.",
+        "modelUnavailable": "The deployed model's identity could not be resolved, so compatible LoRAs cannot be listed.",
+        "modelUnreadable": "The deployed model's details could not be loaded, so compatible LoRAs cannot be listed. Close this and try again.",
+        "profileCannotServeAdapters": "This deployment is running a profile that cannot serve LoRA adapters, so none can be attached to it.",
+        "profileWeightsUnknown": "The profile this deployment is running does not identify the model weights it serves, so compatible LoRAs cannot be listed.",
+        "servabilityUnknown": "Whether this deployment can serve these LoRA adapters could not be determined, so the attachments cannot be changed right now. Close this and try again.",
+        "attachmentsNotReady": "These attached LoRA adapters are not ready yet, so they cannot be re-submitted: {{names}}. They stay attached and stay selected — clear them if you mean to detach them, or try again once their weights are confirmed.",
+        "willDetach": "The following attached LoRA adapters are no longer eligible and will be detached if you apply: {{names}}.",
+        "cancel": "Cancel",
+        "apply": "Apply",
+        "success": "LoRA adapters are being updated.",
+        "error": "Failed to update LoRA adapters. Please try again."
+      }
     },
     "metrics": {
       "inferenceRequests": {
@@ -92,7 +117,6 @@
     "breadcrumb": "Workload details"
   },
   "status": {
-    "Added": "Added",
     "Pending": "Pending",
     "Starting": "Starting",
     "Running": "Running",
@@ -101,9 +125,6 @@
     "Degraded": "Degraded",
     "Deleting": "Deleting",
     "Deleted": "Deleted",
-    "DeleteFailed": "Delete Failed",
-    "Downloading": "Downloading",
-    "Terminated": "Terminated",
     "Unknown": "Unknown"
   },
   "type": {
@@ -131,11 +152,14 @@
       "displayName": {
         "title": "Name"
       },
+      "description": {
+        "title": "Description"
+      },
       "id": {
         "title": "ID"
       },
       "canonicalName": {
-        "title": "Canonical Name"
+        "title": "Canonical name"
       },
       "vram": {
         "title": "VRAM"
@@ -159,7 +183,7 @@
         "title": "Model",
         "id": "ID",
         "name": "Name",
-        "canonicalName": "Canonical Name"
+        "canonicalName": "Canonical name"
       },
       "dataset": {
         "title": "Dataset",
@@ -176,7 +200,7 @@
       "aim": {
         "title": "AIM",
         "id": "ID",
-        "canonicalName": "Canonical Name",
+        "canonicalName": "Canonical name",
         "description": "Description",
         "image": "Image",
         "resourceName": "Resource name",
@@ -209,7 +233,7 @@
         "label": "Statuses"
       },
       "search": {
-        "placeholder": "Search by name..."
+        "placeholder": "Search"
       }
     },
     "actions": {
@@ -245,14 +269,14 @@
           "description": "Viewings logs for workload {{workload}}",
           "streaming": "Enable streaming",
           "logLevelFilter": {
-            "label": "Log Level",
+            "label": "Log level",
             "allLevels": "All levels"
           },
           "loading": "Loading logs…",
           "noLogs": "No logs available",
           "noEvents": "No events available",
           "logTypeFilter": {
-            "label": "Log Type",
+            "label": "Log type",
             "workload": "Workload",
             "event": "Events"
           },

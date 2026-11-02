@@ -17,11 +17,11 @@ import { APIRequestError } from '@amdenterpriseai/utils/app';
 import { useProject } from '@/contexts/ProjectContext';
 import {
   CustomModelDeleteConflictError,
+  customModelDeployTarget,
   deleteCustomModel,
   listCustomModels,
 } from '@/lib/app/custom-models';
-import { AggregatedAIM, AIMStatus, ParsedAIM } from '@/types/aims';
-import { OnboardPhase } from '@/types/custom-models';
+import { AggregatedAIM, OnboardPhase, ParsedAIM } from '@/types/aims';
 import { Model } from '@/types/models';
 
 import { CustomModelCard } from './CustomModelCard';
@@ -40,9 +40,10 @@ const STATUS_FILTER_PREDICATES: Record<
   string,
   (phase: OnboardPhase | undefined) => boolean
 > = {
-  onboarding: (phase) => phase !== 'Ready' && phase !== 'Failed',
-  ready: (phase) => phase === 'Ready',
-  failed: (phase) => phase === 'Failed',
+  onboarding: (phase) =>
+    phase !== OnboardPhase.READY && phase !== OnboardPhase.FAILED,
+  ready: (phase) => phase === OnboardPhase.READY,
+  failed: (phase) => phase === OnboardPhase.FAILED,
 };
 
 /**
@@ -212,6 +213,17 @@ const CustomModels = () => {
     [router, projectPath],
   );
 
+  const handleViewProfiles = useCallback(
+    (aggregatedAim: AggregatedAIM) => {
+      router.push(
+        projectPath(
+          `/models/custom-models/${encodeURIComponent(aggregatedAim.repository)}/profiles`,
+        ),
+      );
+    },
+    [router, projectPath],
+  );
+
   const deleteCustomModelMutation = useMutation({
     mutationFn: async ({
       project,
@@ -301,8 +313,8 @@ const CustomModels = () => {
     [activeProject, aggregatedForDeletion, deleteCustomModelMutation],
   );
 
-  // The remaining "..." menu callbacks are intentionally stubbed for now
-  // (EAI-6124). They will be wired to real flows in follow-up tickets; until
+  // The remaining "..." menu callbacks are intentionally stubbed for now.
+  // They will be wired to real flows in follow-up tickets; until
   // then, surface a "coming soon" toast instead of writing to the production
   // console so the menu is exercisable in QA without leaking implementation
   // noise to users.
@@ -323,32 +335,12 @@ const CustomModels = () => {
     [deployDisclosure],
   );
 
-  // The custom deploy drawer targets a single AIM version. Pick the same
-  // default the catalog drawer uses: the latest READY release, else any READY
-  // version, else the first available — so deploying from a family card lands
-  // on the most sensible version. ParsedAIM.model is the AIMModel CR name that
-  // the deploy request is keyed on.
-  const deployAim: ParsedAIM | null = useMemo(() => {
-    if (!aimForDeployment) return null;
-    return (
-      aimForDeployment.latestAim ??
-      aimForDeployment.parsedAIMs.find((a) => a.status === AIMStatus.READY) ??
-      aimForDeployment.parsedAIMs[0] ??
-      null
-    );
-  }, [aimForDeployment]);
-
-  const deployModel: Model | null = useMemo(
-    () =>
-      deployAim
-        ? {
-            name: deployAim.title,
-            canonicalName: deployAim.canonicalName,
-            resourceName: deployAim.model,
-          }
-        : null,
-    [deployAim],
+  const deployTarget = useMemo(
+    () => (aimForDeployment ? customModelDeployTarget(aimForDeployment) : null),
+    [aimForDeployment],
   );
+  const deployAim = deployTarget?.aim ?? null;
+  const deployModel = deployTarget?.model ?? null;
 
   if (isLoading) {
     return (
@@ -415,6 +407,7 @@ const CustomModels = () => {
               aggregatedAim={aggregatedAim}
               onDeploy={handleDeploy}
               onModelSettings={handleEditModel}
+              onProfiles={handleViewProfiles}
               onDelete={handleOpenDeleteModal}
             />
           ))}
@@ -447,6 +440,7 @@ const CustomModels = () => {
           model={deployModel}
           namespace={activeProject}
           sourceUri={deployAim?.sourceUri}
+          supportsProfileSelection
         />
       )}
     </div>

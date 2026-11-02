@@ -25,7 +25,7 @@ export const StatusError: React.FC<Props> = ({
         ? secondaryStatusReasons[0]
         : null,
     );
-  const { t } = useTranslation('common');
+  const { t } = useTranslation('sharedComponents');
   const [currentIndex, setCurrentIndex] = useState(0);
 
   return (
@@ -33,7 +33,7 @@ export const StatusError: React.FC<Props> = ({
       <div>{t('status.description')}</div>
 
       {statusReason ? (
-        <div className="text-sm bg-default-200 my-2 p-1 whitespace-pre-line">
+        <div className="text-sm bg-default-hover my-2 p-1 whitespace-pre-line">
           <code>{statusReason}</code>
         </div>
       ) : null}
@@ -45,7 +45,7 @@ export const StatusError: React.FC<Props> = ({
           {currentReason ? (
             <>
               <span>{currentReason.key}</span>
-              <div className="text-sm bg-default-200 my-1 p-1 whitespace-pre-line">
+              <div className="text-sm bg-default-hover my-1 p-1 whitespace-pre-line">
                 <code>{currentReason.description}</code>
               </div>
             </>

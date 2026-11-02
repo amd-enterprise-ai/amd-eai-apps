@@ -80,7 +80,9 @@ describe('ProjectSecrets', () => {
       screen.getByText('list.headers.updatedAt.title'),
     ).toBeInTheDocument();
 
-    expect(screen.getByText('list.filter.type.label')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /list\.filter\.type/ }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByText('list.filter.scope.label'),
     ).not.toBeInTheDocument();
@@ -248,11 +250,10 @@ describe('ProjectSecrets', () => {
 
     fireEvent.click(actionButton);
 
-    const deleteAction = screen.getByText(
-      'list.actions.delete.projectSecret.label',
-    );
-    expect(deleteAction).toBeInTheDocument();
-    expect(deleteAction.parentNode).toHaveAttribute('data-disabled', 'true');
+    const deleteAction = screen.getByRole('menuitem', {
+      name: 'list.actions.delete.projectSecret.label',
+    });
+    expect(deleteAction).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('delete button shows secrets delete confirm modal ', () => {
@@ -326,7 +327,7 @@ describe('ProjectSecrets', () => {
     act(() => {
       fireEvent.click(
         screen.getByRole('button', {
-          name: 'data.refresh',
+          name: 'actions.refresh.title',
         }),
       );
     });

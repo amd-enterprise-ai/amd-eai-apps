@@ -48,15 +48,19 @@ Create AIWB Secret
 List AIWB Secrets
     [Documentation]    List all secrets in a project via AIWB API.
     ...    Optionally filter by useCase query parameter.
+    ...    ``page`` and ``page_size`` select a page (API default 1/10, max page size 100).
     ...
     ...    Args:
     ...    project (str): Project identifier (workbench namespace name)
     ...    use_case (str): Optional useCase filter
+    ...    page (int): Optional page number to request
+    ...    page_size (int): Optional page size to request
     ...    expected_status (int/str): Expected HTTP status code
     ...
     ...    Returns:
     ...    response: API response containing the list of secrets
-    [Arguments]    ${project}    ${use_case}=${None}    ${expected_status}=any
+    [Arguments]    ${project}    ${use_case}=${None}    ${page}=${None}
+    ...    ${page_size}=${None}    ${expected_status}=any
     Create api session    aiwb
 
     ${endpoint}=    AIWB Secrets Endpoint    ${project}
@@ -65,6 +69,8 @@ List AIWB Secrets
     IF    $use_case is not None
         Set To Dictionary    ${params}    useCase=${use_case}
     END
+    IF    $page is not None    Set To Dictionary    ${params}    page=${page}
+    IF    $page_size is not None    Set To Dictionary    ${params}    pageSize=${page_size}
 
     Log    GET ${endpoint} params=${params}    DEBUG
 

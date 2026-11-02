@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
+from datetime import datetime
+
 from prometheus_client.core import GaugeMetricFamily
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +13,8 @@ from ..clusters.schemas import ClusterWithResources
 from ..clusters.service import get_cluster_with_resources
 from ..projects.models import Project
 from ..utilities.enums import GPUVendor
-from .constants import DEFAULT_CATCH_ALL_QUOTA_NAME
+from .constants import DEFAULT_CATCH_ALL_QUOTA_NAME, PENDING_QUOTA_PROVISIONING_GRACE
+from .enums import QuotaStatus
 from .messaging import ClusterQuotaAllocation, ClusterQuotasAllocationMessage
 from .models import Quota
 from .schemas import QuotaCreate, QuotaUpdate
@@ -80,6 +83,29 @@ def validate_quota_against_available_cluster_resources(
 def does_quota_match_allocation(quota: Quota, quota_allocation: ClusterQuotaAllocation) -> bool:
     quota_field = quota.__dict__
     return all(v == quota_field.get(k) for k, v in quota_allocation.model_dump().items() if k in quota_field)
+
+
+def is_within_provisioning_grace(quota: Quota, message_updated_at: datetime) -> bool:
+    """Whether the cluster is still expected to be applying this quota.
+
+    A PENDING quota has been accepted by the API but not yet confirmed by the cluster, so a
+    snapshot taken during that window describes the state before the change: the quota is
+    either absent (its ClusterQueue does not exist yet) or still carries its previous
+    allocation. Neither means the quota is broken. Once the grace expires a quota the cluster
+    never applied does fail, so a ClusterQueue that never materializes is not hidden forever.
+
+    The window is measured across two hosts and therefore assumes their clocks are
+    synchronized: message_updated_at is stamped by the cluster agent, while quota.updated_at is
+    stamped by this API on create and update (cluster-driven transitions restamp it with the
+    agent's own timestamp). An agent running more than the grace ahead of the API collapses the
+    window and fails quotas early; one running behind widens it. Clusters and the API are
+    expected to share an NTP source, so this is an operational invariant rather than something
+    the comparison can recover from on its own.
+    """
+    return (
+        quota.status == QuotaStatus.PENDING
+        and (message_updated_at - quota.updated_at) < PENDING_QUOTA_PROVISIONING_GRACE
+    )
 
 
 def quota_failure_message_mismatch(quota_allocation: ClusterQuotaAllocation) -> str:

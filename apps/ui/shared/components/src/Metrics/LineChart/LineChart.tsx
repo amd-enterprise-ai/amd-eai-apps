@@ -9,6 +9,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { cn } from '@heroui/react';
 import { IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
+import { useTranslation } from 'next-i18next';
 import React from 'react';
 
 import { useOnWindowResize } from '@amdenterpriseai/hooks';
@@ -526,12 +527,13 @@ interface LineChartProps extends React.HTMLAttributes<HTMLDivElement> {
 
 const LineChart = React.forwardRef<HTMLDivElement, LineChartProps>(
   (props, ref) => {
+    const { t } = useTranslation('sharedComponents');
     const {
       data = [],
       categories = [],
       index,
       isLoading = false,
-      loadingText = 'Loading...',
+      loadingText = t('data.loading'),
       colors = AvailableChartColors,
       valueFormatter = (value: number) => value.toString(),
       tooltipValueFormatter = (value: number) => value.toFixed(2),

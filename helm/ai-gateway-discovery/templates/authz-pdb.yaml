@@ -1,0 +1,23 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# Keep at least one authorizer serving during voluntary disruptions (node drain, rollout). Without
+# this a drain could evict both replicas at once, and because every calling SecurityPolicy is
+# failOpen:false, that window denies all workloads and header-less inference.
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-authz
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}-authz
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: authz
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Release.Name }}-authz
+      app.kubernetes.io/instance: {{ .Release.Name }}

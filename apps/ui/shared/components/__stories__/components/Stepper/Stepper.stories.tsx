@@ -5,7 +5,7 @@
 import type { Story, StoryDefault } from '@ladle/react';
 import { useState } from 'react';
 
-import Stepper from '../../../src/Stepper/Stepper';
+import { Stepper } from '../../../src/Stepper';
 
 export default {
   title: 'Components/Stepper',
@@ -50,6 +50,35 @@ export const ManySteps: Story = () => (
   </div>
 );
 
+export const WizardFlow: Story = () => (
+  <div className="w-full max-w-5xl px-6">
+    <Stepper
+      step={1}
+      steps={[
+        { label: 'Model' },
+        { label: 'Personalization' },
+        { label: 'Target' },
+        { label: 'Scaling' },
+        { label: 'Access' },
+        { label: 'Check' },
+      ]}
+    />
+  </div>
+);
+
+export const LongLabels: Story = () => (
+  <div className="w-full max-w-2xl">
+    <Stepper
+      step={1}
+      steps={[
+        { label: 'Connect cluster' },
+        { label: 'Configure networking' },
+        { label: 'Verify deployment' },
+      ]}
+    />
+  </div>
+);
+
 export const Interactive: Story = () => {
   const [step, setStep] = useState(0);
   return (
@@ -61,9 +90,31 @@ export const Interactive: Story = () => {
           onPress: () => setStep(i),
         }))}
       />
-      <p className="text-sm text-default-500">
-        Click any step label to jump to it (current step: {step + 1}).
+      <p className="text-sm text-muted">
+        Click any step to jump to it (current step: {step + 1}).
       </p>
     </div>
   );
+};
+
+type PlaygroundArgs = {
+  step: number;
+};
+
+export const Playground: Story<PlaygroundArgs> = ({ step = 1 }) => (
+  <div className="w-full max-w-2xl">
+    <Stepper step={step} steps={threeSteps} />
+  </div>
+);
+
+Playground.args = {
+  step: 1,
+};
+
+Playground.argTypes = {
+  step: {
+    control: { type: 'select' },
+    options: [0, 1, 2],
+    defaultValue: 1,
+  },
 };

@@ -276,29 +276,29 @@ func ensureRoleBinding(ctx context.Context, c client.Client, ns *corev1.Namespac
 			Name:      rbName,
 			Namespace: ns.Name,
 			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "v1",
+				APIVersion: coreV1APIVersion,
 				Kind:       "Namespace",
 				Name:       ns.Name,
 				UID:        ns.UID,
 			}},
 		},
 		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
+			APIGroup: rbacv1.GroupName,
 			Kind:     "ClusterRole",
 			Name:     "airm-project-member",
 		},
 		Subjects: []rbacv1.Subject{
 			// Backwards compatibility, since the prefix was previously 'oidc'
 			{
-				Kind:     "Group",
+				Kind:     rbacv1.GroupKind,
 				Name:     "oidc" + ns.Name,
-				APIGroup: "rbac.authorization.k8s.io",
+				APIGroup: rbacv1.GroupName,
 			},
 			// The kubernetes cluster applies an OIDC prefix of 'oidc:', so we adjust the group to expect that
 			{
-				Kind:     "Group",
+				Kind:     rbacv1.GroupKind,
 				Name:     "oidc:" + ns.Name,
-				APIGroup: "rbac.authorization.k8s.io",
+				APIGroup: rbacv1.GroupName,
 			},
 		},
 	}

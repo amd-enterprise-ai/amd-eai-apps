@@ -11,7 +11,7 @@ import pytest
 import yaml
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.charts.registration import normalize_api_files, register_workloads
+from app.charts.registration import REGISTRATION_CREATOR, normalize_api_files, register_workloads
 
 
 def make_session_scope_cm(session: AsyncMock | None = None) -> tuple[AsyncMock, AsyncMock]:
@@ -59,6 +59,7 @@ def write_overlay(tmp_path: Path, name: str, text: str) -> Path:
 
 
 @pytest.mark.asyncio
+@patch("app.charts.registration.delete_overlays_absent_from_chart", autospec=True)
 @patch("app.charts.registration.update_overlay", autospec=True)
 @patch("app.charts.registration.create_overlay", autospec=True)
 @patch("app.charts.registration.list_overlays", autospec=True)
@@ -76,11 +77,13 @@ async def test_updates_existing_chart_and_overlay(
     mock_list_overlays: AsyncMock,
     mock_create_overlay: AsyncMock,
     mock_update_overlay: AsyncMock,
+    mock_prune_overlays: AsyncMock,
     tmp_path: Path,
     db_session: AsyncSession,
 ) -> None:
     cm, _session = make_session_scope_cm(db_session)
     session_scope_mock.return_value = cm
+    mock_prune_overlays.return_value = []
 
     chart_id = uuid4()
     overlay_id = uuid4()
@@ -111,6 +114,7 @@ async def test_updates_existing_chart_and_overlay(
 
 
 @pytest.mark.asyncio
+@patch("app.charts.registration.delete_overlays_absent_from_chart", autospec=True)
 @patch("app.charts.registration.update_overlay", autospec=True)
 @patch("app.charts.registration.create_overlay", autospec=True)
 @patch("app.charts.registration.list_overlays", autospec=True)
@@ -128,11 +132,13 @@ async def test_updates_existing_chart_creates_overlay_when_missing(
     mock_list_overlays: AsyncMock,
     mock_create_overlay: AsyncMock,
     mock_update_overlay: AsyncMock,
+    mock_prune_overlays: AsyncMock,
     tmp_path: Path,
     db_session: AsyncSession,
 ) -> None:
     cm, _session = make_session_scope_cm(db_session)
     session_scope_mock.return_value = cm
+    mock_prune_overlays.return_value = []
 
     chart_id = uuid4()
 
@@ -158,6 +164,64 @@ async def test_updates_existing_chart_creates_overlay_when_missing(
 
 
 @pytest.mark.asyncio
+@patch("app.charts.registration.delete_overlays_absent_from_chart", autospec=True)
+@patch("app.charts.registration.update_overlay", autospec=True)
+@patch("app.charts.registration.create_overlay", autospec=True)
+@patch("app.charts.registration.list_overlays", autospec=True)
+@patch("app.charts.registration.update_chart", autospec=True)
+@patch("app.charts.registration.create_chart", autospec=True)
+@patch("app.charts.registration.select_chart", autospec=True)
+@patch("app.charts.registration.get_registerable_workloads", autospec=True)
+@patch("app.charts.registration.session_ctx", autospec=True)
+async def test_generic_overlay_does_not_adopt_unrelated_canonical_overlay(
+    session_scope_mock: MagicMock,
+    mock_get_registerable_workloads: AsyncMock,
+    mock_select_chart: AsyncMock,
+    mock_create_chart: AsyncMock,
+    mock_update_chart: AsyncMock,
+    mock_list_overlays: AsyncMock,
+    mock_create_overlay: AsyncMock,
+    mock_update_overlay: AsyncMock,
+    mock_prune_overlays: AsyncMock,
+    tmp_path: Path,
+    db_session: AsyncSession,
+) -> None:
+    """A generic file (no `model:` field) must not adopt a stale canonical-named overlay's row.
+
+    list_overlays(canonical_name=None) returns every overlay for the chart, so registering a
+    generic file alongside an existing model-specific overlay must not pick that unrelated row
+    as "the existing overlay" for the generic file.
+    """
+    cm, _session = make_session_scope_cm(db_session)
+    session_scope_mock.return_value = cm
+    mock_prune_overlays.return_value = []
+
+    chart_id = uuid4()
+    stale_canonical_id = uuid4()
+    new_generic_id = uuid4()
+
+    overlay_path = write_overlay(tmp_path, "generic.yaml", "a: 1\n")
+    wl = make_workload(chart_name="Existing Chart", overlay_files=[(overlay_path, "overlays/generic.yaml")])
+
+    mock_get_registerable_workloads.return_value = [wl]
+    mock_select_chart.return_value = SimpleNamespace(id=chart_id)
+    mock_update_chart.return_value = SimpleNamespace(id=chart_id)
+    mock_list_overlays.return_value = [SimpleNamespace(id=stale_canonical_id, canonical_name="stale/model")]
+    mock_create_overlay.return_value = SimpleNamespace(id=new_generic_id)
+
+    await register_workloads()
+
+    mock_update_overlay.assert_not_awaited()
+    mock_create_overlay.assert_awaited_once_with(
+        session=ANY, chart_id=chart_id, overlay_data={"a": 1}, canonical_name=None, creator="system"
+    )
+    mock_prune_overlays.assert_awaited_once_with(
+        ANY, chart_id=chart_id, keep_ids=[new_generic_id], creator=REGISTRATION_CREATOR
+    )
+
+
+@pytest.mark.asyncio
+@patch("app.charts.registration.delete_overlays_absent_from_chart", autospec=True)
 @patch("app.charts.registration.update_overlay", autospec=True)
 @patch("app.charts.registration.create_overlay", autospec=True)
 @patch("app.charts.registration.list_overlays", autospec=True)
@@ -175,10 +239,12 @@ async def test_updates_chart_only_when_no_overlay_files(
     mock_list_overlays: AsyncMock,
     mock_create_overlay: AsyncMock,
     mock_update_overlay: AsyncMock,
+    mock_prune_overlays: AsyncMock,
     db_session: AsyncSession,
 ) -> None:
     cm, _session = make_session_scope_cm(db_session)
     session_scope_mock.return_value = cm
+    mock_prune_overlays.return_value = []
 
     chart_id = uuid4()
     wl = make_workload(chart_name="Existing Chart", overlay_files=[])
@@ -197,6 +263,7 @@ async def test_updates_chart_only_when_no_overlay_files(
 
 
 @pytest.mark.asyncio
+@patch("app.charts.registration.delete_overlays_absent_from_chart", autospec=True)
 @patch("app.charts.registration.update_overlay", autospec=True)
 @patch("app.charts.registration.create_overlay", autospec=True)
 @patch("app.charts.registration.list_overlays", autospec=True)
@@ -214,10 +281,12 @@ async def test_creates_new_chart_and_overlay(
     mock_list_overlays: AsyncMock,
     mock_create_overlay: AsyncMock,
     mock_update_overlay: AsyncMock,
+    mock_prune_overlays: AsyncMock,
     tmp_path: Path,
 ) -> None:
     cm, _session = make_session_scope_cm()
     session_scope_mock.return_value = cm
+    mock_prune_overlays.return_value = []
 
     new_chart_id = uuid4()
     overlay_dict = {"model": "brand/new", "z": 9}
@@ -242,6 +311,7 @@ async def test_creates_new_chart_and_overlay(
 
 
 @pytest.mark.asyncio
+@patch("app.charts.registration.delete_overlays_absent_from_chart", autospec=True)
 @patch("app.charts.registration.update_overlay", autospec=True)
 @patch("app.charts.registration.create_overlay", autospec=True)
 @patch("app.charts.registration.list_overlays", autospec=True)
@@ -259,10 +329,12 @@ async def test_invalid_overlay_yaml_raises_value_error_when_overlay_missing(
     mock_list_overlays: AsyncMock,
     mock_create_overlay: AsyncMock,
     mock_update_overlay: AsyncMock,
+    mock_prune_overlays: AsyncMock,
     tmp_path: Path,
 ) -> None:
     cm, _session = make_session_scope_cm()
     session_scope_mock.return_value = cm
+    mock_prune_overlays.return_value = []
 
     chart_id = uuid4()
     overlay_path = write_overlay(tmp_path, "bad.yaml", "not: valid: [")
@@ -281,6 +353,96 @@ async def test_invalid_overlay_yaml_raises_value_error_when_overlay_missing(
     mock_update_chart.assert_awaited_once()
     mock_create_overlay.assert_not_awaited()
     mock_update_overlay.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch("app.charts.registration.delete_overlays_absent_from_chart", autospec=True)
+@patch("app.charts.registration.update_overlay", autospec=True)
+@patch("app.charts.registration.create_overlay", autospec=True)
+@patch("app.charts.registration.list_overlays", autospec=True)
+@patch("app.charts.registration.update_chart", autospec=True)
+@patch("app.charts.registration.create_chart", autospec=True)
+@patch("app.charts.registration.select_chart", autospec=True)
+@patch("app.charts.registration.get_registerable_workloads", autospec=True)
+@patch("app.charts.registration.session_ctx", autospec=True)
+async def test_prunes_overlays_the_chart_no_longer_ships(
+    session_scope_mock: MagicMock,
+    mock_get_registerable_workloads: AsyncMock,
+    mock_select_chart: AsyncMock,
+    mock_create_chart: AsyncMock,
+    mock_update_chart: AsyncMock,
+    mock_list_overlays: AsyncMock,
+    mock_create_overlay: AsyncMock,
+    mock_update_overlay: AsyncMock,
+    mock_prune_overlays: AsyncMock,
+    tmp_path: Path,
+    db_session: AsyncSession,
+) -> None:
+    cm, _session = make_session_scope_cm(db_session)
+    session_scope_mock.return_value = cm
+
+    chart_id = uuid4()
+    shipped_id = uuid4()
+    stale_id = uuid4()
+
+    overlay_path = write_overlay(tmp_path, "shipped.yaml", "model: still/shipped\n")
+    wl = make_workload(chart_name="Existing Chart", overlay_files=[(overlay_path, "overlays/shipped.yaml")])
+
+    mock_get_registerable_workloads.return_value = [wl]
+    mock_select_chart.return_value = SimpleNamespace(id=chart_id)
+    mock_update_chart.return_value = SimpleNamespace(id=chart_id)
+    mock_list_overlays.return_value = [SimpleNamespace(id=shipped_id, canonical_name="still/shipped")]
+    mock_update_overlay.return_value = SimpleNamespace(id=shipped_id)
+    mock_prune_overlays.return_value = [stale_id]
+
+    await register_workloads()
+
+    mock_prune_overlays.assert_awaited_once_with(
+        ANY, chart_id=chart_id, keep_ids=[shipped_id], creator=REGISTRATION_CREATOR
+    )
+
+
+@pytest.mark.asyncio
+@patch("app.charts.registration.delete_overlays_absent_from_chart", autospec=True)
+@patch("app.charts.registration.update_overlay", autospec=True)
+@patch("app.charts.registration.create_overlay", autospec=True)
+@patch("app.charts.registration.list_overlays", autospec=True)
+@patch("app.charts.registration.update_chart", autospec=True)
+@patch("app.charts.registration.create_chart", autospec=True)
+@patch("app.charts.registration.select_chart", autospec=True)
+@patch("app.charts.registration.get_registerable_workloads", autospec=True)
+@patch("app.charts.registration.session_ctx", autospec=True)
+async def test_skips_pruning_when_no_recipe_files_are_discovered(
+    session_scope_mock: MagicMock,
+    mock_get_registerable_workloads: AsyncMock,
+    mock_select_chart: AsyncMock,
+    mock_create_chart: AsyncMock,
+    mock_update_chart: AsyncMock,
+    mock_list_overlays: AsyncMock,
+    mock_create_overlay: AsyncMock,
+    mock_update_overlay: AsyncMock,
+    mock_prune_overlays: AsyncMock,
+    db_session: AsyncSession,
+) -> None:
+    """A chart yielding no recipe files is left untouched rather than emptied.
+
+    Discovering nothing is indistinguishable from never having looked: a misconfigured
+    ALLOWED_CHART_PATHS or an incomplete checkout produces the same empty list as a chart that
+    genuinely dropped its recipes. Pruning on that reading wipes the whole registered catalog.
+    """
+    cm, _session = make_session_scope_cm(db_session)
+    session_scope_mock.return_value = cm
+
+    chart_id = uuid4()
+    wl = make_workload(chart_name="Existing Chart", overlay_files=[])
+
+    mock_get_registerable_workloads.return_value = [wl]
+    mock_select_chart.return_value = SimpleNamespace(id=chart_id)
+    mock_update_chart.return_value = SimpleNamespace(id=chart_id)
+
+    await register_workloads()
+
+    mock_prune_overlays.assert_not_awaited()
 
 
 # Tests for normalize_api_files function

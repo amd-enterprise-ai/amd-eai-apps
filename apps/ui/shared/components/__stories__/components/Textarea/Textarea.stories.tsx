@@ -33,3 +33,18 @@ export const Disabled: Story = () => (
     />
   </div>
 );
+export const Variants: Story = () => (
+  <div className="flex w-full max-w-md flex-col gap-4 p-4">
+    <Textarea
+      label="Primary"
+      placeholder="Page background"
+      minRows={3}
+      variant="primary"
+    />
+    <Textarea
+      label="Secondary (default)"
+      placeholder="Modal / drawer"
+      minRows={3}
+    />
+  </div>
+);

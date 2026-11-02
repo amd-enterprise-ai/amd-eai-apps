@@ -4,12 +4,13 @@
 import {
   DrawerForm,
   FormFieldComponent,
+  FormSelect,
   Link,
-  Select,
   SelectItem,
 } from '@amdenterpriseai/components';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
+import { DefaultValues } from 'react-hook-form';
 
 import { useTranslation } from 'next-i18next';
 
@@ -120,6 +121,20 @@ export const AddS3Storage: React.FC<Props> = ({
     [addStorage, project],
   );
 
+  const defaultFormValues = useMemo(
+    () =>
+      ({
+        name: '',
+        secretId: '',
+        bucketUrl: '',
+        accessKeyName: '',
+        secretKeyName: '',
+        projectIds: project ? [project.id] : [],
+        type: StorageType.S3,
+      }) as DefaultValues<AddS3StorageFormData>,
+    [project],
+  );
+
   const formSchema = useMemo(() => {
     const nameRegex = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/;
     return z.object({
@@ -197,15 +212,13 @@ export const AddS3Storage: React.FC<Props> = ({
       },
       isRequired: true,
       component: (formElemProps) => (
-        <Select
-          variant="bordered"
-          {...formElemProps}
-          disabledKeys={disabledSecretIds}
-        >
+        <FormSelect {...formElemProps} disabledKeys={disabledSecretIds}>
           {filteredSecrets.map((secret) => (
-            <SelectItem key={secret.id}>{secret.name}</SelectItem>
+            <SelectItem key={secret.id} textValue={secret.name}>
+              {secret.name}
+            </SelectItem>
           ))}
-        </Select>
+        </FormSelect>
       ),
     },
     {
@@ -232,18 +245,18 @@ export const AddS3Storage: React.FC<Props> = ({
       placeholder: t('form.add.field.projectIds.placeholder'),
       isRequired: false,
       component: (formElemProps) => (
-        <Select
+        <FormSelect
           selectionMode="multiple"
-          defaultSelectedKeys={project ? [project.id] : []}
-          variant="bordered"
           {...formElemProps}
           disabledKeys={disabledProjectIds}
           isDisabled={!!project}
         >
           {(project ? [project] : projects).map((proj) => (
-            <SelectItem key={proj.id}>{proj.name}</SelectItem>
+            <SelectItem key={proj.id} textValue={proj.name}>
+              {proj.name}
+            </SelectItem>
           ))}
-        </Select>
+        </FormSelect>
       ),
     },
   ];
@@ -280,12 +293,12 @@ export const AddS3Storage: React.FC<Props> = ({
             <FormFieldComponent<AddS3StorageFormData>
               key={field.name}
               formField={field}
-              errorMessage={form.formState.errors[field.name]?.message}
-              register={form.register}
+              form={form}
             />
           ))}
         </div>
       )}
+      defaultValues={defaultFormValues}
       validationSchema={formSchema}
     />
   );

@@ -27,11 +27,24 @@ import { useProject } from '@/contexts/ProjectContext';
 import { DATASET_FILESIZE_LIMIT } from '@/lib/app/datasets';
 import { displayBytesInOptimalUnit } from '@amdenterpriseai/utils/app';
 
-import { DatasetType } from '@/types/datasets';
-import { UploadDatasetFormData, UploadDatasetParams } from '@/types/datasets';
+import type { DatasetType } from '@/types/datasets';
 
 import { debounce } from 'lodash';
 import { ZodType, z } from 'zod';
+
+interface UploadDatasetFormData {
+  name: string;
+  description?: string;
+  datasetType: DatasetType;
+  file: File;
+}
+
+interface UploadDatasetParams {
+  name: string;
+  description: string;
+  datasetType: DatasetType;
+  file: File;
+}
 
 interface Props {
   onClose: () => void;
@@ -39,7 +52,7 @@ interface Props {
   isOpen: boolean;
 }
 
-const AVAILABLE_DATASET_TYPES = [DatasetType.Finetuning];
+const AVAILABLE_DATASET_TYPES: DatasetType[] = ['Fine-tuning'];
 
 export const DatasetUpload = ({ onClose, isOpen, refresh }: Props) => {
   const { toast } = useSystemToast();
@@ -82,7 +95,7 @@ export const DatasetUpload = ({ onClose, isOpen, refresh }: Props) => {
     uploadDatasetMutation({
       name: data.name,
       description: data.description ?? '',
-      datasetType: data.datasetType as DatasetType,
+      datasetType: data.datasetType,
       file: data.file,
     });
   };
@@ -183,11 +196,11 @@ export const DatasetUpload = ({ onClose, isOpen, refresh }: Props) => {
       renderFields={(form) => (
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1">
-            <p className="text-small dark:text-default-500 text-default-600">
+            <p className="text-sm dark:text-muted text-foreground">
               {t('modals.upload.body')}
             </p>
             <Link
-              className="text-small"
+              className="text-sm"
               href="https://enterprise-ai.docs.amd.com/en/latest/workbench/training/datasets.html#data-formats"
               target="_blank"
               rel="noopener noreferrer"

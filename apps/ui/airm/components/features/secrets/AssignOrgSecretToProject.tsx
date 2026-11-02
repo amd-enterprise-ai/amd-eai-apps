@@ -114,11 +114,7 @@ export const AssignOrgSecretToProject: React.FC<Props> = ({
       placeholder: t('form.assignOrgSecret.field.secretId.placeholder'),
       isRequired: false,
       component: (formElemProps) => (
-        <FormSelect
-          labelPlacement="outside"
-          variant="bordered"
-          {...formElemProps}
-        >
+        <FormSelect {...formElemProps}>
           {selectableSecrets.map((secret: Secret) => {
             return <SelectItem key={secret.id}>{secret.name}</SelectItem>;
           })}

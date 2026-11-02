@@ -13,24 +13,35 @@ import { PageLoader } from '@/components/shared/PageLoader';
 
 import { useTranslation } from 'next-i18next';
 
-import { Workload } from '@/types/workloads';
-import { WorkloadLogResponse } from '@/types/workloads';
-import type { ResourceMetrics } from '@/types/projects';
-import { LogLevel, LogType, WorkloadStatus } from '@/types/enums/workloads';
-import { WorkloadLogPagination } from '@/types/workloads';
+import type { LogLevel, Workload } from '@/types/workloads';
+import type { EnrichedWorkloadMetrics } from '@/types/projects';
+import type { components } from '@/types/api';
 
 import { useQuery } from '@tanstack/react-query';
 import { getWorkloadLogs } from '@/lib/app/workloads';
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { LogEntry } from '@/types/workloads';
 import { throttle } from 'lodash';
 import { useSystemToast } from '@amdenterpriseai/hooks';
 import { useWorkloadLogsStream } from '@/hooks/useWorkloadLogsStream';
 import Ansi from 'ansi-to-react';
 import { getLogLevelColor } from '@/lib/app/logs';
 
+type LogType = components['schemas']['LogType'];
+
+const LOG_LEVELS = [
+  'trace',
+  'debug',
+  'info',
+  'unknown',
+  'warning',
+  'error',
+  'critical',
+] as const satisfies readonly LogLevel[];
+const LOG_TYPES = ['workload', 'event'] as const satisfies readonly LogType[];
+const WORKLOAD_LOG_RANGE_MS = 24 * 60 * 60 * 1000;
+
 interface Props {
-  workload: Workload | ResourceMetrics | undefined;
+  workload: Workload | EnrichedWorkloadMetrics | undefined;
   isOpen: boolean;
   namespace: string;
 }
@@ -39,21 +50,19 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
   const { t } = useTranslation('workloads');
 
   const [isStreamingMode, setIsStreamingMode] = useState(false);
-  const [selectedLogLevel, setSelectedLogLevel] = useState<LogLevel>(
-    '' as LogLevel,
-  );
+  const [selectedLogLevel, setSelectedLogLevel] = useState<LogLevel | ''>('');
   const [selectedLogType, setSelectedLogType] = useState<LogType>(() =>
-    workload?.status === WorkloadStatus.PENDING
-      ? LogType.EVENT
-      : LogType.WORKLOAD,
+    workload?.status === 'Pending' ? 'event' : 'workload',
   );
   const [currentStartDate, setCurrentStartDate] = useState<string | undefined>(
     undefined,
   );
   const [pagination, setPagination] = useState<
-    WorkloadLogPagination | undefined
+    components['schemas']['PaginationMetadataResponse'] | undefined
   >(undefined);
-  const [allLogs, setAllLogs] = useState<LogEntry[]>([]);
+  const [allLogs, setAllLogs] = useState<components['schemas']['LogEntry'][]>(
+    [],
+  );
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const previousScrollTopRef = useRef<number>(0);
   const previousScrollHeightRef = useRef<number>(0);
@@ -62,8 +71,6 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
 
   const streamParams = useMemo(
     () => ({
-      direction: 'forward' as const,
-      limit: 1000,
       level: selectedLogLevel || undefined,
       logType: selectedLogType,
     }),
@@ -87,7 +94,7 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
     data: workloadLogsResponse,
     isLoading: isLogsLoading,
     error: logsError,
-  } = useQuery<WorkloadLogResponse | undefined>({
+  } = useQuery({
     queryKey: [
       'workloadLogs',
       namespace,
@@ -98,7 +105,11 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
     ],
     queryFn: async () => {
       if (!workloadId) return;
+      const end = new Date();
+      const start = new Date(end.getTime() - WORKLOAD_LOG_RANGE_MS);
       return await getWorkloadLogs(namespace!, workloadId, {
+        start: start.toISOString(),
+        end: end.toISOString(),
         direction: 'backward' as const,
         pageToken: currentStartDate,
         level: selectedLogLevel || undefined,
@@ -114,7 +125,7 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
         key: '',
         label: t('list.actions.logs.modal.logLevelFilter.allLevels'),
       },
-      ...Object.values(LogLevel).map((level) => ({
+      ...LOG_LEVELS.map((level) => ({
         key: level,
         label: level.toUpperCase(),
       })),
@@ -122,7 +133,7 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
   }, [t]);
 
   const logTypeOptions = useMemo(() => {
-    return Object.values(LogType).map((type) => ({
+    return LOG_TYPES.map((type) => ({
       key: type,
       label: t(`list.actions.logs.modal.logTypeFilter.${type}`),
     }));
@@ -156,7 +167,7 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
 
     if (scrollTop < scrollThreshold) {
       const throttledLoadMore = throttle(() => {
-        setCurrentStartDate(pagination?.pageToken);
+        setCurrentStartDate(pagination?.pageToken ?? undefined);
       }, 300);
       throttledLoadMore();
     }
@@ -170,12 +181,8 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
 
   const handleCleanup = useCallback(() => {
     clearLogsData();
-    setSelectedLogLevel('' as LogLevel);
-    setSelectedLogType(
-      workload?.status === WorkloadStatus.PENDING
-        ? LogType.EVENT
-        : LogType.WORKLOAD,
-    );
+    setSelectedLogLevel('');
+    setSelectedLogType(workload?.status === 'Pending' ? 'event' : 'workload');
     setIsStreamingMode(false);
 
     stopStreaming();
@@ -193,7 +200,8 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
   ]);
 
   const handleLogTypeChange = (logType: string) => {
-    setSelectedLogType(logType as LogType);
+    if (logType !== 'workload' && logType !== 'event') return;
+    setSelectedLogType(logType);
     clearLogsData();
   };
 
@@ -252,7 +260,7 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
     setIsStreamingMode(enabled);
   };
 
-  const handleLogLevelChange = (logLevel: LogLevel) => {
+  const handleLogLevelChange = (logLevel: LogLevel | '') => {
     setSelectedLogLevel(logLevel);
   };
 
@@ -330,16 +338,16 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
 
   if (!workload) {
     return (
-      <div className="p-4 text-default-600">
+      <div className="p-4 text-foreground">
         {t('list.actions.logs.modal.workloadNotFound')}
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-[70vh]">
+    <div className="flex flex-col h-full min-h-0">
       <div className="mb-4 shrink-0">
-        <div className="text-default-600 mb-4">
+        <div className="text-foreground mb-4">
           {t('list.actions.logs.modal.description', {
             workload: workload.displayName,
           })}
@@ -347,7 +355,6 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
         <div className="flex items-center gap-4">
           <div>
             <Select
-              size="sm"
               aria-label={t('list.actions.logs.modal.logTypeFilter.label')}
               placeholder={t('list.actions.logs.modal.logTypeFilter.label')}
               className="min-w-[130px]"
@@ -364,16 +371,17 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
           </div>
           <div>
             <Select
-              size="sm"
               aria-label={t('list.actions.logs.modal.logLevelFilter.label')}
               placeholder={t('list.actions.logs.modal.logLevelFilter.label')}
               className="min-w-[140px]"
               selectedKeys={selectedLogLevel ? [selectedLogLevel] : []}
               onSelectionChange={(keys) => {
-                const selectedKey = (Array.from(keys)[0] ?? '') as LogLevel;
+                const selectedKey = (Array.from(keys)[0] ?? '') as
+                  | LogLevel
+                  | '';
                 handleLogLevelChange(selectedKey);
               }}
-              isDisabled={selectedLogType === LogType.EVENT}
+              isDisabled={selectedLogType === 'event'}
             >
               {logLevelOptions.map((option) => (
                 <SelectItem key={option.key}>{option.label}</SelectItem>
@@ -418,13 +426,13 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
             className="flex justify-center items-center h-64 text-gray-500"
             data-testid="workload-logs-empty"
           >
-            {selectedLogType === LogType.EVENT
+            {selectedLogType === 'event'
               ? t('list.actions.logs.modal.noEvents')
               : t('list.actions.logs.modal.noLogs')}
           </div>
         ) : (
           <div className="space-y-0 leading-relaxed">
-            {currentLogs.map((log: LogEntry, index: number) => {
+            {currentLogs.map((log, index: number) => {
               const timestamp = new Date(log.timestamp).toLocaleString();
 
               return (
@@ -435,7 +443,7 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
                   <span className="text-gray-400 dark:text-gray-500 shrink-0">
                     {timestamp}
                   </span>
-                  {selectedLogType !== LogType.EVENT && (
+                  {selectedLogType !== 'event' && (
                     <span
                       className="uppercase font-semibold inline-block shrink-0"
                       style={{
@@ -444,7 +452,7 @@ const WorkloadLogs = ({ workload, isOpen, namespace }: Props) => {
                         textAlign: 'center',
                       }}
                     >
-                      {log.level === LogLevel.UNKNOWN ? '-' : log.level}
+                      {log.level === 'unknown' ? '-' : log.level}
                     </span>
                   )}
                   <div className="flex-1 break-all whitespace-pre-wrap text-gray-700 dark:text-gray-200">

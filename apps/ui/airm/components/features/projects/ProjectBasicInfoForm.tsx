@@ -5,7 +5,7 @@
 import {
   ManagedForm,
   FormFieldComponent,
-  Select,
+  FormSelect,
   SelectItem,
 } from '@amdenterpriseai/components';
 import { useSystemToast } from '@amdenterpriseai/hooks';
@@ -43,6 +43,16 @@ interface Props {
   cluster: Cluster;
 }
 
+/** Remount ManagedForm when server preemption config changes; useForm ignores defaultValues prop updates. */
+function serverGpuPreemptionSyncKey(
+  gpu: ProjectWithMembers['gpuPreemption'],
+): string {
+  if (!gpu.enabled) {
+    return 'disabled';
+  }
+  return `${gpu.policy}:${gpu.threshold}:${gpu.gracePeriod}`;
+}
+
 export const ProjectBasicInfoForm: React.FC<Props> = ({ project, cluster }) => {
   const { t } = useTranslation('projects');
   const { toast } = useSystemToast();
@@ -62,6 +72,11 @@ export const ProjectBasicInfoForm: React.FC<Props> = ({ project, cluster }) => {
       project.gpuPreemption,
       project.name,
     ],
+  );
+
+  const managedFormSyncKey = useMemo(
+    () => serverGpuPreemptionSyncKey(project.gpuPreemption),
+    [project.gpuPreemption],
   );
 
   const { mutate: updateProjectMutation, isPending: isUpdatingProject } =
@@ -119,6 +134,9 @@ export const ProjectBasicInfoForm: React.FC<Props> = ({ project, cluster }) => {
       name: ProjectFormFields.NAME,
       label: t('settings.form.basicInfo.name.label'),
       isReadOnly: true,
+      props: {
+        variant: 'primary' as const,
+      },
     },
     {
       name: ProjectFormFields.DESCRIPTION,
@@ -126,6 +144,7 @@ export const ProjectBasicInfoForm: React.FC<Props> = ({ project, cluster }) => {
       isRequired: true,
       placeholder: t('settings.form.basicInfo.description.placeholder'),
       props: {
+        variant: 'primary' as const,
         maxLength: 1024,
       },
     },
@@ -134,19 +153,16 @@ export const ProjectBasicInfoForm: React.FC<Props> = ({ project, cluster }) => {
       label: t('settings.form.basicInfo.cluster.label'),
       isRequired: false,
       component: (formElemProps) => (
-        <Select
+        <FormSelect
           data-testid="cluster-select"
-          labelPlacement="outside"
-          variant="bordered"
-          selectedKeys={formElemProps?.value}
-          defaultSelectedKeys={[clusterData.id]}
+          variant="primary"
           {...formElemProps}
           isDisabled
         >
           <SelectItem data-testid={clusterData.id} key={clusterData.id}>
             {clusterData.name}
           </SelectItem>
-        </Select>
+        </FormSelect>
       ),
     },
   ];
@@ -209,6 +225,7 @@ export const ProjectBasicInfoForm: React.FC<Props> = ({ project, cluster }) => {
 
   return (
     <ManagedForm<CreateProjectFormData>
+      key={managedFormSyncKey}
       isActioning={isUpdatingProject}
       className="flex flex-col w-full"
       defaultValues={defaultValues}
@@ -228,7 +245,7 @@ export const ProjectBasicInfoForm: React.FC<Props> = ({ project, cluster }) => {
                     key={field.name}
                     formField={field}
                     errorMessage={form.formState.errors[field.name]?.message}
-                    register={form.register}
+                    form={form}
                     defaultValue={
                       defaultValues[
                         field.name as keyof CreateProjectFormData

@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 import asyncio
+import contextlib
 import json
 import os
 from collections.abc import AsyncGenerator, Generator
@@ -17,6 +18,7 @@ import pytest
 import pytest_asyncio
 from fastapi import Request
 from filelock import FileLock
+from loguru import logger
 from prometheus_api_client import PrometheusConnect
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -93,6 +95,7 @@ def global_init_dependencies(monkeypatch):
 
     with (
         patch("app.init_db", autospec=True),
+        patch("app.refuse_disabled_store_with_existing_keys", autospec=True),
         patch("app.load_k8s_config", autospec=True),
         patch("app.init_kube_client", return_value=mock_kube_client),
         patch("app.start_pollers", autospec=True),
@@ -273,13 +276,27 @@ async def engine_and_session_maker(database_url: str) -> AsyncGenerator[tuple[An
     engine = create_async_engine(database_url, echo=False, poolclass=NullPool)
     session_local = async_sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-    # Set globals so get_session() works for router tests using TestClient
+    # Set globals so get_session() works for router tests using TestClient.
+    # Save and restore the previous values: this fixture is function-scoped and each
+    # test runs in its own event loop (asyncio_default_fixture_loop_scope=function).
+    # Disposing the engine below does not retire it — dispose() drops the current pool
+    # and a fresh one is built on next use — so leaving it installed in the module
+    # globals keeps it reachable after this test's loop is gone. The hazard is event
+    # loop affinity: a later get_session() would open asyncpg connections through an
+    # engine whose asyncio state belongs to a finished loop, binding them to whichever
+    # loop happens to be running then. Restoring confines each engine to the loop it
+    # was created on.
+    previous_engine = db_module.engine
+    previous_session_maker = db_module.session_maker
     db_module.engine = engine
     db_module.session_maker = session_local
 
-    yield engine, session_local
-
-    await engine.dispose()
+    try:
+        yield engine, session_local
+    finally:
+        db_module.engine = previous_engine
+        db_module.session_maker = previous_session_maker
+        await engine.dispose()
 
 
 @pytest_asyncio.fixture
@@ -287,32 +304,75 @@ async def db_session(engine_and_session_maker: tuple[Any, Any]) -> AsyncGenerato
     """
     Provide a transactional database session for each test.
 
-    Uses nested transactions (savepoints) to isolate tests. Each test gets a clean
-    database state through automatic rollback after the test completes.
+    Each test runs inside a single transaction that is rolled back at teardown, so
+    changes never leak between tests and the schema is never recreated per test.
 
     Architecture:
     1. Creates a new session from the session factory
-    2. Begins a transaction
-    3. Creates a nested transaction (savepoint) for test isolation
-    4. Yields the session to the test
-    5. Rolls back the savepoint after the test (discards all changes)
+    2. Begins one transaction
+    3. Yields the session to the test
+    4. Rolls back the transaction and closes the session afterwards (discards all changes)
 
     This pattern ensures:
     - Test isolation: Changes don't leak between tests
-    - Performance: Uses transactions instead of recreating schema
+    - Performance: Uses a transaction instead of recreating schema
     - Simplicity: Tests just use db_session without cleanup code
+
+    Isolation is not a structural guarantee: if rollback fails (see the defensive
+    teardown below), the connection is invalidated rather than rolled back, and
+    whatever the test wrote up to that point is not undone.
     """
     engine, session_local = engine_and_session_maker
 
-    async with session_local() as session:
-        async with session.begin():
-            # Savepoint provides test isolation
-            await session.begin_nested()
-
-            yield session
-
-            # Automatic rollback ensures test isolation
+    session = session_local()
+    # Open a single transaction explicitly and roll it back exactly once at teardown.
+    #
+    # The previous pattern nested `async with session.begin()` (a real transaction)
+    # around an explicit `begin_nested()` (a SAVEPOINT) and then called
+    # `await session.rollback()` inside the block. That rollback unwound the *whole*
+    # transaction stack, after which the `session.begin()` and `session_local()`
+    # context managers each ran their own teardown (commit-attempt / close) against a
+    # session whose connection was already being torn down. With NullPool the close
+    # releases the underlying asyncpg connection immediately, so whenever a teardown
+    # statement raced an in-flight close the run failed intermittently with
+    # asyncpg's "connection was closed in the middle of operation".
+    #
+    # A single transaction with one rollback leaves only one teardown path, so no two
+    # teardowns can race each other. The session is always closed in `finally`.
+    try:
+        await session.begin()
+        yield session
+    finally:
+        # Roll back everything the test did, guaranteeing isolation, and never leave an
+        # open transaction for the close to fight with.
+        #
+        # A test may hand the session back while its asyncpg connection is still busy.
+        # Code under test that fans out with `asyncio.gather` (without
+        # `return_exceptions=True`) re-raises the first sibling failure as soon as it
+        # happens, but the other coroutines are *not* cancelled — they keep running. If
+        # one of them is a DB query on this session, the caller unwinds and the test
+        # asserts on the exception while that query is still in flight, leaving the
+        # connection with an operation in progress. `rollback()` on such a connection
+        # raises asyncpg's "another operation is in progress".
+        #
+        # So tear down defensively. If rollback fails, invalidate the connection: under
+        # NullPool connections are never reused, so invalidation discards the poisoned
+        # one rather than crashing teardown, and no state can leak into another test.
+        # invalidate() and close() are suppressed for the same reason — they run on a
+        # connection already known to be unusable, and a teardown failure there would
+        # mask the test's real result. Healthy tests take the normal path and are still
+        # genuinely rolled back, so isolation is unchanged.
+        #
+        # This does not remove the race; it makes the teardown survive it.
+        try:
             await session.rollback()
+        except Exception:
+            logger.warning("db_session rollback failed, invalidating connection instead")
+            with contextlib.suppress(Exception):
+                await session.invalidate()
+        finally:
+            with contextlib.suppress(Exception):
+                await session.close()
 
 
 @pytest.fixture
@@ -328,39 +388,17 @@ def test_user() -> str:
 
 
 @pytest.fixture
-def mock_cluster_auth_client():  # type: ignore[misc]
+def mock_openbao_client() -> AsyncMock:  # type: ignore[misc]
     """
-    Mock ClusterAuthClient for testing API key service functions.
+    Mock OpenBaoClient for testing API key service functions.
 
-    Provides AsyncMock instance with common response patterns for cluster-auth operations.
-    Tests should configure return values for specific method calls as needed.
+    Provides AsyncMock instance with common response patterns for OpenBao operations.
+    Tests should configure return values or side_effect for specific method calls as needed.
     """
-
     mock = AsyncMock()
-
-    # Default responses for common operations
-    mock.create_api_key.return_value = {
-        "api_key": "amd_aim_api_key_hvs.abc123def456",
-        "key_id": "test-key-id-123",
-    }
-
-    mock.lookup_api_key.return_value = {
-        "ttl": "24h",
-        "expire_time": "2025-01-16T12:00:00Z",
-        "renewable": True,
-        "num_uses": 0,
-        "groups": [],
-        "entity_id": "test-entity-id",
-        "meta": {},
-    }
-
-    mock.revoke_api_key.return_value = {"status": "revoked"}
-    mock.renew_api_key.return_value = {"lease_duration": 86400}
-    mock.bind_api_key_to_group.return_value = {"groups": ["test-group"]}
-    mock.unbind_api_key_from_group.return_value = {"groups": []}
-    mock.create_group.return_value = {"id": "test-group-id", "name": "test-group"}
-    mock.delete_group.return_value = {"status": "deleted"}
-
+    mock.put_token.return_value = None
+    mock.get_token.return_value = "amd_aim_api_key_hvs.abc123"
+    mock.delete_token.return_value = None
     return mock
 
 
@@ -456,6 +494,7 @@ def mock_minio_client():
     client = MagicMock(spec=MinioClient)
     client.upload_object = MagicMock()
     client.download_object = MagicMock(return_value=b'{"text": "test"}\n{"text": "test2"}')
+    client.get_object_sizes = MagicMock(return_value={})
     _stat = MagicMock(size=len(b'{"text": "test"}\n{"text": "test2"}'))
     client.stat_object = MagicMock(return_value=_stat)
     inner = MagicMock()

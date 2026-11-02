@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatTemplateGpuCount,
   formatModelDeploymentSubtitle,
+  resolveModelDeploymentName,
 } from '@/lib/app/modelDeploymentDisplay';
 
 describe('formatTemplateGpuCount', () => {
@@ -77,5 +78,87 @@ describe('formatModelDeploymentSubtitle', () => {
       precision: 'fp16',
     });
     expect(result).toBe('1.0 · 8x GPU · fp16');
+  });
+
+  it('names the profile instead of its axes for a custom-model deployment', () => {
+    const result = formatModelDeploymentSubtitle(t as any, {
+      imageVersion: '1.0',
+      metric: 'latency',
+      templateGpuCount: 8,
+      acceleratorType: 'gpu',
+      precision: 'fp16',
+      profileDisplayName: 'High speed',
+    });
+    expect(result).toBe('High speed');
+  });
+
+  it('falls back to the axes when the profile label is absent', () => {
+    const result = formatModelDeploymentSubtitle(t as any, {
+      precision: 'fp16',
+      profileDisplayName: null,
+    });
+    expect(result).toBe('fp16');
+  });
+});
+
+describe('resolveModelDeploymentName', () => {
+  it('prefers the display name when it differs from the resource name', () => {
+    const result = resolveModelDeploymentName({
+      displayName: 'My Friendly Deployment',
+      resourceName: 'svc-llama-8b',
+      canonicalName: 'meta-llama/Llama-3.1-8B-Instruct',
+      imageVersion: '0.11.0',
+    });
+    expect(result).toBe('My Friendly Deployment');
+  });
+
+  it('falls back to canonical name with version when display equals resource', () => {
+    const result = resolveModelDeploymentName({
+      displayName: 'svc-llama-8b',
+      resourceName: 'svc-llama-8b',
+      canonicalName: 'meta-llama/Llama-3.1-8B-Instruct',
+      imageVersion: '0.11.0',
+    });
+    expect(result).toBe('meta-llama/Llama-3.1-8B-Instruct (0.11.0)');
+  });
+
+  it('falls back to canonical name without version when version is absent', () => {
+    const result = resolveModelDeploymentName({
+      displayName: 'svc-llama-8b',
+      resourceName: 'svc-llama-8b',
+      canonicalName: 'meta-llama/Llama-3.1-8B-Instruct',
+      imageVersion: '',
+    });
+    expect(result).toBe('meta-llama/Llama-3.1-8B-Instruct');
+  });
+
+  it('falls back to display name when canonical name is missing', () => {
+    const result = resolveModelDeploymentName({
+      displayName: 'svc display',
+      resourceName: 'svc-resource',
+      canonicalName: '',
+      imageVersion: '0.11.0',
+    });
+    expect(result).toBe('svc display');
+  });
+
+  it('does not return version-only label when canonical name is missing', () => {
+    const result = resolveModelDeploymentName({
+      displayName: 'svc-llama-8b',
+      resourceName: 'svc-llama-8b',
+      canonicalName: '',
+      imageVersion: '0.11.0',
+    });
+    expect(result).toBe('svc-llama-8b');
+  });
+
+  it('trims inputs before comparing and selecting', () => {
+    const result = resolveModelDeploymentName({
+      displayName: '  svc-llama-8b  ',
+      resourceName: 'svc-llama-8b',
+      canonicalName: '  meta-llama/Llama-3.1-8B-Instruct  ',
+      imageVersion: ' 0.11.0 ',
+    });
+    expect(result).toBe('meta-llama/Llama-3.1-8B-Instruct (0.11.0)');
   });
 });

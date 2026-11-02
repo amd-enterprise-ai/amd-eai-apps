@@ -49,7 +49,7 @@ const defaultRouter = {
 
 const defaultProjectContext = {
   isStandaloneMode: false,
-  clusterAuthEnabled: true,
+  apiKeysManagementEnabled: true,
   aiGatewayEnabled: true,
   airmAppUrl: undefined,
   activeProject: 'project-1',

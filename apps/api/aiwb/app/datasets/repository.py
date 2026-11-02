@@ -98,6 +98,17 @@ async def list_datasets(
     return result.scalars().all()
 
 
+async def get_all_datasets(session: AsyncSession) -> list[Dataset]:
+    """
+    Get every dataset across all namespaces.
+
+    Unscoped on purpose: callers auditing datasets against the namespaces that still exist have to
+    see the ones whose namespace does not, which a per-namespace query cannot reach.
+    """
+    result = await session.execute(select(Dataset).order_by(Dataset.namespace, Dataset.created_at))
+    return list(result.scalars().all())
+
+
 async def delete_dataset_by_id(session: AsyncSession, dataset_id: UUID, namespace: str) -> bool:
     """
     Delete a single dataset by ID within a namespace.

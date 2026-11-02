@@ -49,6 +49,51 @@ describe('Button adapter', () => {
     expect(screen.getByTestId('btn')).toBeInTheDocument();
     unmount();
   });
+
+  it('renders as an anchor when href is provided', () => {
+    render(
+      <Button href="/docs" data-testid="btn">
+        Documentation
+      </Button>,
+    );
+
+    const link = screen.getByTestId('btn');
+    expect(link.tagName).toBe('A');
+    expect(link).toHaveAttribute('href', '/docs');
+  });
+
+  it('opens external links in a new tab when isExternal is set', () => {
+    render(
+      <Button href="https://example.com/docs" isExternal data-testid="btn">
+        Documentation
+      </Button>,
+    );
+
+    const link = screen.getByTestId('btn');
+    expect(link).toHaveAttribute('href', 'https://example.com/docs');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('respects a caller-supplied render prop over href default', () => {
+    render(
+      <Button
+        href="/docs"
+        render={(props) => <span {...props} data-testid="custom-render" />}
+      >
+        Documentation
+      </Button>,
+    );
+
+    expect(screen.getByTestId('custom-render').tagName).toBe('SPAN');
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('renders as a button when href is not provided', () => {
+    render(<Button data-testid="btn">Click me</Button>);
+
+    expect(screen.getByTestId('btn').tagName).toBe('BUTTON');
+  });
 });
 
 describe('ButtonGroup adapter', () => {

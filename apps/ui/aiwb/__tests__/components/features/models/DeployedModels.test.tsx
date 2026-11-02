@@ -22,9 +22,7 @@ import {
   listAllInferenceDeployments,
 } from '@/lib/app/inference';
 
-import { WorkloadType } from '@amdenterpriseai/types';
-import { WorkloadStatus } from '@/types/enums/workloads';
-import { Workload } from '@/types/workloads';
+import type { Workload } from '@/types/workloads';
 import {
   AIM_DISPLAY_NAME_ANNOTATION,
   NAMESPACE_AIM_MODEL_LABEL,
@@ -38,9 +36,31 @@ import { Mock, vi } from 'vitest';
 /** next-i18next key resolved to the row overflow menu trigger (ThreeDotActionsDropdown aria-label). */
 const ROW_OVERFLOW_MENU_KEY = 'list.actions.label';
 
+const mockUseCustomProfileDeployments = vi.hoisted(() =>
+  vi.fn(() => ({
+    profileByServiceId: new Map(),
+    isLoading: false,
+  })),
+);
+
+vi.mock('@/hooks/useCustomProfileDeployments', () => ({
+  useCustomProfileDeployments: mockUseCustomProfileDeployments,
+}));
+
+/** Status filter trigger and option labels, as the pass-through `t` mock renders them. */
+const STATUS_FILTER_KEY = 'list.filters.status.label';
+const STATUS_OPTION_DELETING = 'workloads:status.Deleting';
+const STATUS_OPTION_DELETED = 'workloads:status.Deleted';
+
+const openStatusFilter = async () => {
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: STATUS_FILTER_KEY }));
+  });
+};
+
 vi.mock('@/lib/app/models', () => ({
   listAllProjectFineTunedModels: vi.fn(),
-  // FinetuneDrawer (rendered transitively) calls the single-page variant
+  // FinetuneWizard (rendered transitively) calls the single-page variant
   listProjectFineTunedModels: vi.fn().mockResolvedValue({
     data: [],
     pagination: { page: 1, pageSize: 10, total: 0 },
@@ -53,7 +73,6 @@ vi.mock('@/lib/app/workloads', () => ({
 
 vi.mock('@/lib/app/aims', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/app/aims')>()),
-  mapAIMServiceStatusToWorkloadStatus: vi.fn((s: string) => s),
   resolveAIMServiceDisplay: vi.fn(),
   // Profile fetches are now per-aimId (batched by the multi-aimId query
   // param). Default to empty so unrelated tests don't hit the network;
@@ -85,20 +104,28 @@ vi.mock('@amdenterpriseai/hooks', async (importOriginal) => ({
 
 // Mock next/router
 const mockPush = vi.fn();
+const { routerQuery } = vi.hoisted(() => ({
+  routerQuery: {} as Record<string, string | undefined>,
+}));
 vi.mock('next/router', () => ({
   useRouter: vi.fn(() => ({
     push: mockPush,
-    query: {},
+    query: routerQuery,
     pathname: '/models',
     asPath: '/models',
   })),
 }));
 
-// Mock translations
+// Mock translations. Special-cases the max-rank key so tests can assert on
+// the interpolated rank; every other key keeps the plain passthrough the
+// rest of this suite already relies on.
 vi.mock('next-i18next', () => ({
   Trans: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string, opts?: { rank?: number }) =>
+      key === 'profileSummary.maxRank'
+        ? `profileSummary.maxRank:${opts?.rank}`
+        : key,
     i18n: { language: 'en' },
   }),
 }));
@@ -115,7 +142,7 @@ vi.mock('@tabler/icons-react', async (importOriginal) => {
 });
 
 const mockInferenceWorkloads = mockWorkloads.filter(
-  (w) => w.type === WorkloadType.INFERENCE,
+  (w) => w.type === 'INFERENCE',
 );
 
 const createMockAimService = (
@@ -136,8 +163,6 @@ const createMockAimService = (
   spec: {
     model: { name: modelName },
     replicas: 1,
-    overrides: {},
-    cacheModel: false,
     routing: { annotations: {}, enabled: true },
     runtimeConfigName: 'default',
   },
@@ -165,6 +190,11 @@ describe('DeployedModels', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    delete routerQuery.deleted;
+    mockUseCustomProfileDeployments.mockReturnValue({
+      profileByServiceId: new Map(),
+      isLoading: false,
+    });
     mockListWorkloads.mockResolvedValue(mockInferenceWorkloads);
     mockListAllProjectFineTunedModels.mockResolvedValue(mockModels);
     mockGetAimServices.mockResolvedValue([]);
@@ -410,16 +440,19 @@ describe('DeployedModels', () => {
       expect(screen.getByText('Llama 7B Inference')).toBeInTheDocument();
     });
 
-    const rowActionButtons = screen.getAllByRole('button', {
-      name: ROW_OVERFLOW_MENU_KEY,
+    const rowActionButtons = await waitFor(() =>
+      screen.getAllByRole('button', { name: ROW_OVERFLOW_MENU_KEY }),
+    );
+    await act(async () => {
+      fireEvent.click(rowActionButtons[0]);
     });
-    fireEvent.click(rowActionButtons[0]); // First workload (Delete Failed Inference)
 
-    const undeployButton = screen.getByTestId('undeploy');
-    fireEvent.click(undeployButton);
+    const undeployButton = await screen.findByTestId('undeploy');
+    await act(async () => {
+      fireEvent.click(undeployButton);
+    });
 
-    // Verify confirmation modal opens
-    expect(screen.getByTestId('confirmation-modal')).toBeInTheDocument();
+    expect(await screen.findByTestId('confirmation-modal')).toBeInTheDocument();
   });
 
   it('routes workload deletion to the inference capability endpoint', async () => {
@@ -455,23 +488,19 @@ describe('DeployedModels', () => {
       fireEvent.click(confirmButton);
     });
 
-    // Post-EAI-6313 all deployed-model deletes route to the inference capability
+    // All deployed-model deletes route to the inference capability
     // endpoint; the legacy /workloads DELETE no longer exists.
     await waitFor(() => {
       expect(mockDeleteInferenceDeployment).toHaveBeenCalled();
     });
-  }, 10000);
+  }, 20_000);
 
   it('displays workspace workloads when workspace type is in filter', async () => {
     // Create a mock with a workspace workload
     const workspaceWorkload: Workload = {
       ...mockInferenceWorkloads[2], // Jupyter Workspace
-      type: WorkloadType.WORKSPACE,
-      status: WorkloadStatus.RUNNING,
-      output: {
-        externalHost: 'https://jupyter.example.com',
-        internalHost: 'https://jupyter.example.com',
-      },
+      type: 'WORKSPACE',
+      status: 'Running',
     };
 
     mockListWorkloads.mockResolvedValue([workspaceWorkload]);
@@ -606,8 +635,8 @@ describe('DeployedModels', () => {
     const deletedWorkload: Workload = {
       ...mockInferenceWorkloads[4], // Deleted Workload
       displayName: 'Deleted Model',
-      type: WorkloadType.INFERENCE, // Component only shows INFERENCE workloads
-      status: WorkloadStatus.FAILED,
+      type: 'INFERENCE', // Component only shows INFERENCE workloads
+      status: 'Failed',
     };
 
     mockListWorkloads.mockResolvedValue([deletedWorkload]);
@@ -644,8 +673,8 @@ describe('DeployedModels', () => {
       ...mockInferenceWorkloads.slice(0, 3), // Include some normal workloads
       {
         ...mockInferenceWorkloads[4],
-        type: WorkloadType.INFERENCE,
-        status: WorkloadStatus.DELETED, // This should be filtered out
+        type: 'INFERENCE',
+        status: 'Deleted', // This should be filtered out
         displayName: 'Deleted Model',
       },
     ];
@@ -668,6 +697,103 @@ describe('DeployedModels', () => {
       expect(screen.queryByText('Stable Diffusion XL')).not.toBeInTheDocument();
       expect(screen.queryByText('Deleted Model')).not.toBeInTheDocument();
     });
+
+    // Deleted rows are excluded server-side, not just hidden client-side.
+    // Asserted as an exact list because a negated matcher also passes against
+    // `undefined` — the very value that means "no server-side filter at all".
+    expect(mockListWorkloads).toHaveBeenCalledWith('project1', {
+      workloadType: ['INFERENCE'],
+      statusFilter: [
+        'Pending',
+        'Starting',
+        'Running',
+        'Complete',
+        'Failed',
+        'Unknown',
+        'Deleting',
+      ],
+    });
+
+    await openStatusFilter();
+
+    expect(screen.getByText(STATUS_OPTION_DELETING)).toBeInTheDocument();
+    expect(screen.queryByText(STATUS_OPTION_DELETED)).not.toBeInTheDocument();
+  });
+
+  it('lists deleted workloads when the URL opts in', async () => {
+    routerQuery.deleted = '1';
+    mockListWorkloads.mockResolvedValue([
+      {
+        ...mockInferenceWorkloads[4],
+        type: 'INFERENCE',
+        status: 'Deleted',
+        displayName: 'Deleted Model',
+      } as Workload,
+    ]);
+
+    await act(async () => {
+      render(<DeployedModels />, { wrapper });
+    });
+
+    await waitFor(() => {
+      expect(mockListWorkloads).toHaveBeenCalledWith('project1', {
+        workloadType: ['INFERENCE'],
+        statusFilter: undefined,
+      });
+    });
+
+    // The fetched row must be visible without the user touching the filter.
+    await waitFor(() => {
+      expect(screen.getByText('Deleted Model')).toBeInTheDocument();
+    });
+
+    await openStatusFilter();
+
+    const deletedOption = screen.getByText(STATUS_OPTION_DELETED);
+    expect(deletedOption).toBeInTheDocument();
+    // Pre-selected, not merely offered — otherwise the next filter interaction
+    // would drop the deleted rows the opt-in just fetched.
+    expect(deletedOption.closest('[role="option"]')).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('lists deleted workloads when the opt-in flips after mount', async () => {
+    // Navigating to `?deleted=1` reuses the already-mounted page, so the toolbar
+    // and the active filter have to re-seed rather than relying on a fresh mount.
+    mockListWorkloads.mockResolvedValue([
+      {
+        ...mockInferenceWorkloads[4],
+        type: 'INFERENCE',
+        status: 'Deleted',
+        displayName: 'Deleted Model',
+      } as Workload,
+    ]);
+
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<DeployedModels />, { wrapper });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Deleted Model')).not.toBeInTheDocument();
+    });
+
+    routerQuery.deleted = '1';
+    await act(async () => {
+      view.rerender(<DeployedModels />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Deleted Model')).toBeInTheDocument();
+    });
+
+    await openStatusFilter();
+
+    expect(
+      screen.getByText(STATUS_OPTION_DELETED).closest('[role="option"]'),
+    ).toHaveAttribute('aria-selected', 'true');
   });
 
   it('displays canonical names for all workloads with AIM or Model', async () => {
@@ -807,10 +933,10 @@ describe('DeployedModels', () => {
       const titles = screen.getAllByText('meta-llama/Llama-2-7B (1.0.0)');
       expect(titles.length).toBeGreaterThan(0);
       expect(
-        screen.getAllByText('performanceMetrics.values.throughput ·').length,
+        screen.getAllByText('performanceMetrics.values.throughput').length,
       ).toBeGreaterThan(0);
-      expect(screen.getAllByText('MI300X ·').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('8x GPU ·').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('MI300X').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('8x GPU').length).toBeGreaterThan(0);
       expect(screen.getAllByText('fp8').length).toBeGreaterThan(0);
     });
   });
@@ -886,6 +1012,69 @@ describe('DeployedModels', () => {
     });
   });
 
+  it('suppresses chat and uses the transcription snippet for a transcription deployment', async () => {
+    mockGetAimServices.mockResolvedValue([
+      createMockAimService('workload-11', 'whisper'),
+    ]);
+    mockListWorkloads.mockResolvedValue([]);
+    mockGetInferenceModel.mockRejectedValue(
+      new APIRequestError('not found', 404),
+    );
+    // The catalog model backing this deployment advertises a transcription tag.
+    mockResolveAIMServiceDisplay.mockImplementation(
+      (service: {
+        status?: { resolvedModel?: { name?: string } };
+        metadata?: { name?: string };
+      }) => ({
+        canonicalName: 'openai/whisper-large-v3',
+        imageVersion: '1.0.0',
+        metric: 'default',
+        title: 'Whisper',
+        name:
+          service.status?.resolvedModel?.name ?? service.metadata?.name ?? '',
+        tags: ['transcription'],
+      }),
+    );
+
+    await act(async () => {
+      render(<DeployedModels />, { wrapper });
+    });
+
+    await waitFor(() => {
+      expect(mockGetAimServices).toHaveBeenCalled();
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByRole('button', { name: ROW_OVERFLOW_MENU_KEY }).length,
+      ).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      fireEvent.click(
+        screen.getAllByRole('button', { name: ROW_OVERFLOW_MENU_KEY })[0],
+      );
+    });
+
+    // Connect stays available; the chat action is suppressed for transcription.
+    const connectAction = await screen.findByTestId('connect');
+    expect(screen.queryByTestId('chat')).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(connectAction);
+    });
+
+    // The modal receives the transcription capability, so the snippet targets
+    // the audio endpoint and offers no chat playground.
+    await waitFor(() => {
+      expect(document.body).toHaveTextContent('/v1/audio/transcriptions');
+    });
+    expect(document.body).not.toHaveTextContent('/v1/chat/completions');
+    expect(
+      screen.queryByText('actions.connect.modal.openChat'),
+    ).not.toBeInTheDocument();
+  });
+
   it('displays no data indicator for workload without AIM or Model', async () => {
     // Workload without a finetuning workload or aimId should show NoDataDisplay
     const workloadWithoutModelOrAim: Workload = {
@@ -893,17 +1082,15 @@ describe('DeployedModels', () => {
       name: 'Standalone Inference',
       displayName: 'Standalone Inference',
       createdBy: 'test-user',
+      updatedBy: null,
+      namespace: 'test-namespace',
+      description: null,
+      endpoints: {},
       chartId: 'chart-standalone',
-      type: WorkloadType.INFERENCE,
-      project: mockInferenceWorkloads[0].project,
+      type: 'INFERENCE',
       createdAt: '2023-01-15T00:00:00Z',
       updatedAt: '2023-01-15T01:00:00Z',
-      updatedBy: 'test-user',
-      status: WorkloadStatus.RUNNING,
-      allocatedResources: {
-        gpuCount: 1,
-        vram: 2147483648.0,
-      },
+      status: 'Running',
     };
 
     mockListWorkloads.mockResolvedValue([workloadWithoutModelOrAim]);
@@ -938,14 +1125,16 @@ describe('DeployedModels', () => {
       id: 'shared-deployment-id',
       displayName: 'Workload Display Name',
       name: 'workload-name',
-      type: WorkloadType.INFERENCE,
-      status: WorkloadStatus.FAILED,
+      type: 'INFERENCE',
+      status: 'Failed',
       createdBy: 'workload-user',
+      updatedBy: null,
+      namespace: 'test-namespace',
+      description: null,
+      endpoints: {},
       chartId: 'chart-shared',
       createdAt: '2023-01-01T00:00:00Z',
       updatedAt: '2023-01-01T01:00:00Z',
-      updatedBy: 'workload-user',
-      allocatedResources: { gpuCount: 1, vram: 2147483648.0 },
     };
 
     // AIM service with same id: status.status 'Running' maps to RUNNING; aimId is set.
@@ -986,5 +1175,66 @@ describe('DeployedModels', () => {
       expect(screen.getByTestId('chat')).toBeInTheDocument();
       expect(screen.getByTestId('connect')).toBeInTheDocument();
     });
+  });
+
+  it('shows the deployment max LoRA rank alongside a custom profile', async () => {
+    // Custom-profile axes (profileSummaryFields in lib/app/custom-profiles.ts)
+    // never carry maxLoraRank — only the deployment's own spec does — so this
+    // proves the row still composes it in rather than losing it behind the
+    // custom profile.
+    const customService = createMockAimService(
+      'workload-30',
+      'custom-model-rank',
+      {
+        metadata: {
+          name: 'wb-aim-custom-rank',
+          namespace: 'test-project',
+          uid: 'uid-workload-30',
+          labels: { [NAMESPACE_AIM_MODEL_LABEL]: 'true' },
+          annotations: { [AIM_DISPLAY_NAME_ANNOTATION]: 'My Custom Model' },
+          creationTimestamp: '2023-01-11T00:00:00Z',
+          ownerReferences: [],
+        },
+        spec: {
+          model: { name: 'custom-model-rank' },
+          replicas: 1,
+          routing: { annotations: {}, enabled: true },
+          runtimeConfigName: 'default',
+          adapterRuntime: { maxRank: 32 },
+        },
+      },
+    );
+    mockListWorkloads.mockResolvedValue([]);
+    mockGetAimServices.mockResolvedValue([customService]);
+    mockUseCustomProfileDeployments.mockReturnValue({
+      profileByServiceId: new Map([
+        [
+          'workload-30',
+          {
+            displayName: 'High speed',
+            profile: {
+              metric: null,
+              gpu: 'MI300X',
+              templateGpuCount: 1,
+              acceleratorType: 'gpu',
+              precision: 'fp16',
+            },
+          },
+        ],
+      ]),
+      isLoading: false,
+    });
+
+    await act(async () => {
+      render(<DeployedModels />, { wrapper });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('My Custom Model')).toBeInTheDocument();
+    });
+    // The custom profile's own axis and the deployment's max rank must both
+    // survive — proving the merge doesn't drop one for the other.
+    expect(screen.getByText('MI300X')).toBeInTheDocument();
+    expect(screen.getByText('profileSummary.maxRank:32')).toBeInTheDocument();
   });
 });

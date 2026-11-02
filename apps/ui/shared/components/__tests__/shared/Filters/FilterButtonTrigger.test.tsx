@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 import { IconFilter } from '@tabler/icons-react';
+import React from 'react';
 import { render, screen } from '@testing-library/react';
 
 import { FilterButtonTrigger } from '@amdenterpriseai/components';
@@ -100,22 +101,13 @@ describe('FilterButtonTrigger Component', () => {
   it('renders correctly with default props (inactive state)', () => {
     render(<FilterButtonTrigger {...defaultProps} />);
 
-    const triggerElement = screen.getByTestId('dropdown-trigger');
-    expect(triggerElement).toBeInTheDocument();
+    const input = screen.getByDisplayValue('Status');
+    expect(input).toBeInTheDocument();
+    expect(input).toHaveAttribute('readonly');
+    expect(input).toHaveAttribute('aria-hidden', 'true');
 
-    const buttonElement = screen.getByTestId('button');
-    expect(buttonElement).toBeInTheDocument();
-    expect(buttonElement).toHaveAttribute('data-variant', 'flat');
-    expect(buttonElement).toHaveAttribute('aria-label', 'Status');
-    expect(buttonElement).toHaveTextContent('Status');
-
-    // Badge should not be present when isActive is false
     const badgeElement = screen.queryByTestId('chip');
     expect(badgeElement).not.toBeInTheDocument();
-
-    // End content should contain chevron down icon
-    const endContent = screen.getByTestId('end-content');
-    expect(endContent).toBeInTheDocument();
   });
 
   it('renders badge when active with selected keys', () => {
@@ -127,12 +119,9 @@ describe('FilterButtonTrigger Component', () => {
       />,
     );
 
-    const buttonElement = screen.getByTestId('button');
-    expect(buttonElement).toHaveAttribute('data-variant', 'flat');
-
     const badgeElement = screen.getByTestId('chip');
     expect(badgeElement).toBeInTheDocument();
-    expect(badgeElement).toHaveAttribute('data-color', 'primary');
+    expect(badgeElement).toHaveAttribute('data-color', 'accent');
     expect(badgeElement).toHaveTextContent('2');
   });
 
@@ -159,78 +148,55 @@ describe('FilterButtonTrigger Component', () => {
     ).toBeInTheDocument();
   });
 
-  it('displays start content alongside label', () => {
+  it('displays icon when inactive', () => {
     const startContent = <IconFilter data-testid="filter-icon" />;
 
     render(
       <FilterButtonTrigger {...defaultProps} startContent={startContent} />,
     );
 
-    // Custom start content should be visible inside the button content
-    const filterIcon = screen.getByTestId('filter-icon');
-    expect(filterIcon).toBeInTheDocument();
-
-    const buttonElement = screen.getByTestId('button');
-    expect(buttonElement).toHaveTextContent('Status');
+    expect(screen.getByTestId('filter-icon')).toBeInTheDocument();
+    expect(screen.queryByTestId('chip')).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue('Status')).toBeInTheDocument();
   });
 
-  it('shows reset button when active and onReset is provided', () => {
-    const mockOnReset = vi.fn();
+  it('shows badge instead of icon when active', () => {
+    const startContent = <IconFilter data-testid="filter-icon" />;
 
     render(
       <FilterButtonTrigger
         {...defaultProps}
         isActive={true}
-        onReset={mockOnReset}
+        numberOfSelectedKeys={2}
+        startContent={startContent}
       />,
     );
 
-    const resetButton = screen.getByTestId('icon-button');
-    expect(resetButton).toBeInTheDocument();
-    expect(resetButton).toHaveAttribute('data-icon-only', 'true');
-    expect(resetButton).toHaveAttribute('aria-label', 'actions.clear.title');
-
-    // Main button should not have chevron down when reset is available
-    const endContent = screen.queryByTestId('end-content');
-    expect(endContent).toBeInTheDocument();
+    expect(screen.getByTestId('chip')).toBeInTheDocument();
+    expect(screen.queryByTestId('filter-icon')).not.toBeInTheDocument();
   });
 
-  it('calls onReset when reset button is clicked', () => {
-    const mockOnReset = vi.fn();
-
-    render(
+  it('hides chevron when clear button is shown', () => {
+    const { container } = render(
       <FilterButtonTrigger
         {...defaultProps}
         isActive={true}
-        onReset={mockOnReset}
+        showClearButton={true}
       />,
     );
 
-    const resetButton = screen.getByTestId('icon-button');
-    resetButton.click();
-
-    expect(mockOnReset).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('svg')).not.toBeInTheDocument();
   });
 
-  it('does not show reset button when not active', () => {
-    const mockOnReset = vi.fn();
-
-    render(
+  it('shows chevron when clear button is not shown', () => {
+    const { container } = render(
       <FilterButtonTrigger
         {...defaultProps}
-        isActive={false}
-        onReset={mockOnReset}
+        isActive={true}
+        showClearButton={false}
       />,
     );
 
-    const resetButton = screen.queryByTestId('icon-button');
-    expect(resetButton).not.toBeInTheDocument();
-  });
-
-  it('does not show reset button when active but onReset is not provided', () => {
-    render(<FilterButtonTrigger {...defaultProps} isActive={true} />);
-
-    const resetButton = screen.queryByTestId('icon-button');
-    expect(resetButton).not.toBeInTheDocument();
+    expect(container.querySelector('svg')).toBeInTheDocument();
   });
 });

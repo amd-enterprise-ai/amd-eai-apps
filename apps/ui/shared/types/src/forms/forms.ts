@@ -14,7 +14,6 @@ export type FormField<T> = {
     label: string;
     callback: () => void;
   };
-  classNames?: Record<string, any>;
   component?: React.ComponentType<any>;
   icon?: React.ComponentType<any>;
   props?: Record<string, any>;

@@ -16,7 +16,7 @@ export default {
 const StepBody = ({ title, body }: { title: string; body: string }) => (
   <div className="flex flex-col gap-2 py-4">
     <h3 className="text-lg font-semibold">{title}</h3>
-    <p className="text-sm text-default-500">{body}</p>
+    <p className="text-sm text-muted">{body}</p>
   </div>
 );
 
@@ -64,7 +64,7 @@ export const Basic: Story = () => {
         initialStep={0}
         steps={basicSteps}
         allowPrevious
-        size="2xl"
+        size="lg"
         title="Sample wizard"
       />
     </div>
@@ -112,7 +112,7 @@ export const WithCustomActions: Story = () => {
         onOpenChange={setIsOpen}
         initialStep={0}
         steps={steps}
-        size="xl"
+        size="lg"
         title="Custom actions"
       />
     </div>

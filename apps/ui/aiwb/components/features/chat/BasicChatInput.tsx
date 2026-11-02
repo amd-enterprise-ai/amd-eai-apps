@@ -308,11 +308,11 @@ export const BasicChatInput = ({
           {/* Drag-and-drop overlay */}
           {isDragOver && (
             <div
-              className="absolute inset-0 z-10 flex flex-row items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-primary bg-primary/10 pointer-events-none"
+              className="absolute inset-0 z-10 flex flex-row items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-accent bg-accent/10 pointer-events-none"
               data-testid="drag-overlay"
             >
-              <IconPhoto size={24} className="text-primary" />
-              <span className="text-primary font-medium text-sm">
+              <IconPhoto size={24} className="text-accent" />
+              <span className="text-accent font-medium text-sm">
                 {t('chatInput.dropImages')}
               </span>
             </div>
@@ -378,7 +378,7 @@ export const BasicChatInput = ({
 
         {allowRegenerate && !messageIsStreaming && (
           <button
-            className="absolute -top-4 shadow-lg left-0 right-0 mx-auto mb-3 flex w-fit items-center gap-3 rounded-lg bg-primary py-2 px-4 text-white md:mb-0 md:mt-2"
+            className="absolute -top-4 shadow-lg left-0 right-0 mx-auto mb-3 flex w-fit items-center gap-3 rounded-lg bg-accent py-2 px-4 text-white md:mb-0 md:mt-2"
             onClick={onRegenerate}
           >
             <IconRepeat size={16} /> {t('chatInput.regenerateResponse')}

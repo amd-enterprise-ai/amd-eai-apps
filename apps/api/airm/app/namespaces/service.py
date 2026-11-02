@@ -9,6 +9,7 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_common.exceptions import NotFoundException
+from api_common.slugs import slugify
 
 from ..clusters.models import Cluster
 from ..messaging.sender import MessageSender
@@ -31,9 +32,40 @@ from .repository import (
     delete_namespace,
     get_namespace_by_name_and_cluster,
     get_namespace_by_project_and_cluster,
+    get_namespaces_in_cluster,
     update_namespace_status,
 )
 from .utils import _build_namespace_manifest, namespace_failure_message_preemption_mismatch
+
+
+async def find_namespace_sharing_storage_prefix(session: AsyncSession, cluster_id: UUID, name: str) -> Namespace | None:
+    """The namespace in the cluster, if any, whose object-storage prefix `name` would also address.
+
+    Object storage is keyed by the slug of the namespace name, and slugging is lossy, so a name
+    is not confined to its own prefix just because it is unique. New names are required to be
+    slug-stable, which keeps them from colliding with each other — but rows predating that rule
+    are not, and a slug-stable new name can still land on a legacy one (`data-science` on an
+    existing `data--science`). This is what catches that case.
+
+    Slugging cannot be expressed in SQL, so the comparison happens over the cluster's namespaces
+    in Python, and no stored slug column exists for a unique index to back the check the way
+    `ix_namespaces_name_cluster` backs the raw-name check. The read therefore sits outside the
+    write with nothing to catch a loser — but not with another project create: two accepted names
+    are both slug-stable, and slug-stable names cannot slug alike. The only writer that can insert
+    a colliding row is `record_unmanaged_namespace`, which records namespaces the cluster agent
+    reports and is deliberately not validated, because a name already live in Kubernetes cannot be
+    refused. The namespace it records carries no `project-id` label on the cluster, and that label
+    is the single thing AIWB admits a caller on, so a pair created through that window is inert
+    rather than a cross-tenant read.
+
+    Namespaces are matched whatever their status, including ones a deleted project left behind.
+    Deleting a project does not delete the objects written under its prefix, so handing the prefix
+    to a differently-named project would hand it those objects — which is the same exposure this
+    is here to prevent.
+    """
+    namespaces = await get_namespaces_in_cluster(session, cluster_id)
+    slug = slugify(name)
+    return next((namespace for namespace in namespaces if slugify(namespace.name) == slug), None)
 
 
 async def create_namespace_for_project(

@@ -68,11 +68,16 @@ Validate scalar with range response structure
     Dictionary Should Contain Key    ${data}    range
 
 Validate workloads with metrics response structure
-    [Documentation]    Validates that a WorkloadsWithMetrics response contains pagination and data.
+    [Documentation]    Validates that a WorkloadsWithMetrics response contains data and a
+    ...    nested pagination object with page, pageSize, and total.
     [Arguments]    ${data}
 
     Dictionary Should Contain Key    ${data}    data
-    Dictionary Should Contain Key    ${data}    total
+    Dictionary Should Contain Key    ${data}    pagination
+    VAR    ${pagination}    ${data['pagination']}
+    Dictionary Should Contain Key    ${pagination}    page
+    Dictionary Should Contain Key    ${pagination}    pageSize
+    Dictionary Should Contain Key    ${pagination}    total
 
 Validate GPU device metric response structure
     [Documentation]    Validates that a GpuDeviceSingleMetricResponse contains expected fields.

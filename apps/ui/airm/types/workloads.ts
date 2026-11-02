@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-import type { ServerCollectionMetadata } from '@amdenterpriseai/types';
+import type { PaginationMetadata } from './pagination';
 import { WorkloadStatus } from './enums/workloads';
 
 import { WorkloadType } from '@amdenterpriseai/types';
@@ -45,11 +45,13 @@ export type WorkloadWithMetrics = Workload & {
 
 export type ProjectWorkloadsMetricsResponse = {
   data: WorkloadWithMetrics[];
-} & ServerCollectionMetadata;
+  pagination: PaginationMetadata;
+};
 
 export type ClusterWorkloadsMetricsResponse = {
   data: WorkloadWithMetrics[];
-} & ServerCollectionMetadata;
+  pagination: PaginationMetadata;
+};
 
 export type GpuDeviceInfo = {
   gpuId: string;

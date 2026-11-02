@@ -15,7 +15,7 @@ interface ErrorToastProps {
 }
 
 export const ErrorToast = ({ content, copyText }: ErrorToastProps) => {
-  const { t } = useTranslation('common');
+  const { t } = useTranslation('sharedComponents');
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,

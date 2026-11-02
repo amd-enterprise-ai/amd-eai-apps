@@ -86,7 +86,10 @@ export const SecretsTable: React.FC<Props> = ({
       [SecretsTableField.NAME]: (item: Secret) => {
         return (
           <Tooltip content={item.name} placement="top">
-            <div className={'max-w-64 truncate'}>{item.name}</div>
+            {/* biome-ignore lint/a11y/useSemanticElements: the element reveals the full name rather than performing an action. */}
+            <div className="max-w-64 truncate" role="button" tabIndex={0}>
+              {item.name}
+            </div>
           </Tooltip>
         );
       },

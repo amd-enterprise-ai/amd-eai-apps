@@ -17,8 +17,10 @@ import {
 } from '@/lib/app/api-keys';
 import { listAllInferenceDeployments } from '@/lib/app/inference';
 import { generateMockApiKey } from '@/__mocks__/utils/api-keys-mock';
-import type { ApiKeyMetrics } from '@/types/api-keys';
+import type { components } from '@/types/api';
 import type { AIMService } from '@/types/aims';
+
+type ApiKeyMetricsResponse = components['schemas']['ApiKeyMetricsResponse'];
 
 import ApiKeyMetricsDashboard, {
   computeFilteredStats,
@@ -46,6 +48,10 @@ vi.mock('@/lib/app/aims', async (importOriginal) => {
     ...actual,
     getAimClusterProfilesByAimIds: vi.fn().mockResolvedValue([]),
     getProjectAimProfilesByAimIds: vi.fn().mockResolvedValue([]),
+    getAimClusterProfileByName: vi.fn().mockResolvedValue({
+      metadata: { name: 'cluster-profile' },
+      spec: {},
+    }),
   };
 });
 
@@ -58,6 +64,59 @@ vi.mock('next/router', () => ({
 vi.mock('@/contexts/ProjectContext', () => ({
   useProject: () => ({ projectPath: (path: string) => `/project-1${path}` }),
 }));
+
+// Mock react-aria collection components that don't render correctly in JSDOM
+vi.mock('@amdenterpriseai/components', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@amdenterpriseai/components')>();
+  return {
+    ...actual,
+    Tabs: ({
+      children,
+      onSelectionChange,
+      selectedKey,
+      defaultSelectedKey,
+    }: any) => (
+      <div
+        data-testid="tabs"
+        data-selected-key={selectedKey ?? defaultSelectedKey}
+      >
+        {children}
+      </div>
+    ),
+    Tab: ({ key: tabKey, title, children }: any) => (
+      <div data-testid={`tab-${tabKey}`} data-title={title}>
+        {children}
+      </div>
+    ),
+    Select: ({
+      children,
+      onSelectionChange,
+      selectedKeys,
+      'aria-label': ariaLabel,
+      placeholder,
+      items,
+    }: any) => (
+      <select
+        aria-label={ariaLabel}
+        value={
+          selectedKeys ? (Array.from(selectedKeys)[0] as string) : undefined
+        }
+        onChange={(e) => onSelectionChange?.(new Set([e.target.value]))}
+      >
+        {items?.map((item: any) => (
+          <option key={item.key} value={item.key}>
+            {typeof children === 'function' ? item.key : item.key}
+          </option>
+        ))}
+        {typeof children !== 'function' && children}
+      </select>
+    ),
+    SelectItem: ({ children, value }: any) => (
+      <option value={value}>{children}</option>
+    ),
+  };
+});
 
 const mockFetchApiKeyDetails = vi.mocked(fetchApiKeyDetails);
 const mockFetchApiKeyMetrics = vi.mocked(fetchApiKeyMetrics);
@@ -80,21 +139,20 @@ const mockDeployment = (name: string): AIMService => ({
   spec: {
     model: { name },
     replicas: 1,
-    overrides: {},
-    cacheModel: false,
     runtimeConfigName: '',
   } as AIMService['spec'],
   status: {
-    status: 'Running' as AIMService['status']['status'],
+    status: 'Running',
+    resolvedProfile: { name: 'cluster-profile', scope: 'Cluster' },
     runtime: { currentReplicas: 1, desiredReplicas: 1 },
   },
-  clusterAuthGroupId: null,
+  statusValue: '',
   endpoints: {
     internal: `http://${name}-predictor.project-1.svc.cluster.local`,
   },
 });
 
-const mockMetrics: ApiKeyMetrics = {
+const mockMetrics: ApiKeyMetricsResponse = {
   stats: {
     totalRequests: 1500,
     successfulRequests: 1400,
@@ -163,8 +221,6 @@ describe('ApiKeyMetricsDashboard', () => {
     mockFetchApiKeyDetails.mockResolvedValue({
       ...generateMockApiKey(),
       ttl: '24h',
-      renewable: true,
-      numUses: 0,
       groups: [],
     });
     mockFetchApiKeyMetrics.mockResolvedValue(mockMetrics);
@@ -284,6 +340,18 @@ describe('ApiKeyMetricsDashboard', () => {
     await waitFor(() => {
       expect(
         screen.getByText('details.linkedDeployments.title'),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('shows default empty state when no linked deployments', async () => {
+    await act(async () => {
+      render(<ApiKeyMetricsDashboard {...defaultProps} />, { wrapper });
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('list.linkedDeployments.empty.description'),
       ).toBeInTheDocument();
     });
   });

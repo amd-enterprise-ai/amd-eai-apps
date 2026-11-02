@@ -42,47 +42,44 @@ export const ConfirmationModal: FC<Props> = ({
   onClose,
   confirmationButtonText,
 }) => {
-  const { t } = useTranslation('common');
+  const { t } = useTranslation('sharedComponents');
   return (
-    <div className="flex items-center justify-center text-default-900 rounded-lg">
-      <ModalPrimitive
-        data-testid="confirmation-modal"
-        hideCloseButton
-        isDismissable={!loading}
-        onClose={onClose}
-        isOpen={isOpen}
-      >
-        <ModalPrimitiveContent>
-          <ModalPrimitiveHeader className="flex flex-col gap-1">
-            {title}
-          </ModalPrimitiveHeader>
-          <ModalPrimitiveBody className="dark:text-default-500 text-default-600">
+    <ModalPrimitive
+      data-testid="confirmation-modal"
+      isDismissable={!loading}
+      onClose={onClose}
+      isOpen={isOpen}
+    >
+      <ModalPrimitiveContent hideCloseButton>
+        <ModalPrimitiveHeader>{title}</ModalPrimitiveHeader>
+        <ModalPrimitiveBody>
+          <div className="dark:text-muted text-foreground">
             <Trans parent="p">{description}</Trans>
-          </ModalPrimitiveBody>
-          <ModalPrimitiveFooter>
-            <ActionButton
-              tertiary
-              aria-label={t('actions.close.title') || ''}
-              isDisabled={loading}
-              onPress={onClose}
-            >
-              {t('actions.close.title')}
-            </ActionButton>
-            <ActionButton
-              primary
-              aria-label={
-                confirmationButtonText || t('actions.confirm.title') || ''
-              }
-              data-testid="confirm-button"
-              isLoading={loading}
-              color={confirmationButtonColor}
-              onPress={onConfirm}
-            >
-              {confirmationButtonText || t('actions.confirm.title')}
-            </ActionButton>
-          </ModalPrimitiveFooter>
-        </ModalPrimitiveContent>
-      </ModalPrimitive>
-    </div>
+          </div>
+        </ModalPrimitiveBody>
+        <ModalPrimitiveFooter>
+          <ActionButton
+            tertiary
+            aria-label={t('actions.close.title') || ''}
+            isDisabled={loading}
+            onPress={onClose}
+          >
+            {t('actions.close.title')}
+          </ActionButton>
+          <ActionButton
+            primary
+            aria-label={
+              confirmationButtonText || t('actions.confirm.title') || ''
+            }
+            data-testid="confirm-button"
+            isLoading={loading}
+            color={confirmationButtonColor}
+            onPress={onConfirm}
+          >
+            {confirmationButtonText || t('actions.confirm.title')}
+          </ActionButton>
+        </ModalPrimitiveFooter>
+      </ModalPrimitiveContent>
+    </ModalPrimitive>
   );
 };

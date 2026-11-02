@@ -3,13 +3,14 @@
 // SPDX-License-Identifier: MIT
 
 import {
+  ActionButton,
   Button,
   Card,
   CardBody,
   CardHeader,
   ChipDisplay,
   DateDisplay,
-  Input,
+  CopySnippet,
   NoDataDisplay,
   Skeleton,
   StatusDisplay,
@@ -20,13 +21,11 @@ import {
   IconMessage,
   IconFileText,
   IconTrash,
-  IconCopy,
   IconInfoCircle,
   IconServer,
   IconCalendar,
   IconDatabase,
   IconWorld,
-  IconCircleCheck,
   IconLink,
 } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -34,9 +33,9 @@ import { useRouter } from 'next/router';
 import { useState, useMemo } from 'react';
 
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import { useSystemToast } from '@amdenterpriseai/hooks';
+import { getPageTranslations } from '@/lib/server/i18n';
 
 import {
   getWorkload,
@@ -55,17 +54,13 @@ import { getChart } from '@/lib/app/charts';
 import { getCurrentTimeRange } from '@amdenterpriseai/utils/app';
 import { getWorkloadStatusVariants } from '@/utils/workloads';
 import { getWorkloadTypeVariants } from '@amdenterpriseai/utils/app';
+import type { components } from '@/types/api';
 import {
   DOCS_WORKBENCH_BASE,
   WithDocumentationLink,
 } from '@amdenterpriseai/utils/app';
 
-import {
-  TimeRangePeriod,
-  TimeSeriesResponse,
-  WorkloadType,
-} from '@amdenterpriseai/types';
-import { WorkloadStatus } from '@/types/enums/workloads';
+import { TimeRange, TimeRangePeriod } from '@amdenterpriseai/types';
 
 import AIMConnectModal from '@/components/features/models/AIMConnectModal';
 import DeleteWorkloadModal from '@/components/features/workloads/DeleteWorkloadModal';
@@ -76,7 +71,6 @@ import InferenceMetrics from '@/components/features/workloads/InferenceMetrics';
 import { aiWorkbenchMenuItems } from '@amdenterpriseai/utils/app';
 import { get } from 'lodash';
 import { useProject } from '@/contexts/ProjectContext';
-import { TimeRange } from '@/types/metrics';
 import LoadingState from '@/components/shared/PageErrorHandler/LoadingState';
 import ErrorMessage from '@/components/shared/PageErrorHandler/ErrorMessage';
 
@@ -89,7 +83,6 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
   const { activeProject, projectPath, aiGatewayEnabled, aiGatewayUrl } =
     useProject();
 
@@ -109,7 +102,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
     enabled: !!id && !!activeProject,
   });
 
-  const { data: gpuDeviceUtilization } = useQuery<TimeSeriesResponse>({
+  const { data: gpuDeviceUtilization } = useQuery({
     queryKey: [
       'workload',
       activeProject,
@@ -130,12 +123,17 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
     enabled: !!id && !!activeProject,
   });
 
-  const gpuDeviceValues = gpuDeviceUtilization?.data?.[0]?.values;
+  // GPU utilization is always a timeseries metric; narrow away the scalar
+  // variants of the shared metric response union.
+  const gpuDeviceValues =
+    gpuDeviceUtilization && Array.isArray(gpuDeviceUtilization.data)
+      ? gpuDeviceUtilization.data[0]?.values
+      : undefined;
   const latestGpuDeviceUtilizationValue = gpuDeviceValues?.length
     ? gpuDeviceValues[gpuDeviceValues.length - 1]?.value
     : undefined;
 
-  const { data: gpuMemoryUtilization } = useQuery<TimeSeriesResponse>({
+  const { data: gpuMemoryUtilization } = useQuery({
     queryKey: [
       'workload',
       activeProject,
@@ -156,13 +154,15 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
     enabled: !!id && !!activeProject,
   });
 
-  const gpuMemoryValues = gpuMemoryUtilization?.data?.[0]?.values;
+  const gpuMemoryValues =
+    gpuMemoryUtilization && Array.isArray(gpuMemoryUtilization.data)
+      ? gpuMemoryUtilization.data[0]?.values
+      : undefined;
   const latestGpuMemoryUtilizationValue = gpuMemoryValues?.length
     ? gpuMemoryValues[gpuMemoryValues.length - 1]?.value
     : undefined;
 
-  const modelId =
-    workload?.type === WorkloadType.FINE_TUNING ? workload.id : undefined;
+  const modelId = workload?.type === 'FINE_TUNING' ? workload.id : undefined;
 
   const { data: model, isLoading: isLoadingModel } = useQuery({
     queryKey: ['model', activeProject, modelId],
@@ -172,8 +172,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
       !!activeProject &&
       // For finetuning, the AIMModel CR only exists once training completes.
       // For other workload types the model exists independently of workload status.
-      (workload?.type !== WorkloadType.FINE_TUNING ||
-        workload?.status === WorkloadStatus.COMPLETE),
+      (workload?.type !== 'FINE_TUNING' || workload?.status === 'Complete'),
   });
 
   const { data: dataset, isLoading: isLoadingDataset } = useQuery({
@@ -190,13 +189,12 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
   });
 
   const canOpenWorkspace =
-    workload?.type === WorkloadType.WORKSPACE &&
-    workload?.status === WorkloadStatus.RUNNING &&
+    workload?.type === 'WORKSPACE' &&
+    workload?.status === 'Running' &&
     workload.endpoints?.external;
 
   const canOpenChat =
-    workload?.type === WorkloadType.INFERENCE &&
-    workload.status === WorkloadStatus.RUNNING;
+    workload?.type === 'INFERENCE' && workload.status === 'Running';
 
   // The workloads detail page only surfaces rows from the workloads table.
   // AIM-service-backed inference deployments link to /aims/[id], so an
@@ -205,17 +203,17 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
   // id and would 404 on a workload-table id. MODEL_DOWNLOAD and CUSTOM are
   // in the same boat. Only FINE_TUNING and WORKSPACE have 1:1 capability
   // deletes for workload-table rows.
-  const deletableTypes: WorkloadType[] = [
-    WorkloadType.FINE_TUNING,
-    WorkloadType.WORKSPACE,
+  const deletableTypes: components['schemas']['WorkloadType'][] = [
+    'FINE_TUNING',
+    'WORKSPACE',
   ];
   const canDelete =
-    workload?.status !== WorkloadStatus.DELETED &&
+    workload?.status !== 'Deleted' &&
     !!workload?.type &&
     deletableTypes.includes(workload.type);
 
   // For inference workloads, append the API endpoint path
-  const isInferenceWorkload = workload?.type === WorkloadType.INFERENCE;
+  const isInferenceWorkload = workload?.type === 'INFERENCE';
 
   // When the unified Envoy AI Gateway is enabled and configured, inference goes
   // through a single endpoint (the model is selected via the OpenAI `model`
@@ -233,13 +231,13 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
 
   const { mutate: deleteWorkloadMutation } = useMutation({
     mutationFn: (id: string) => {
-      if (workload?.type === WorkloadType.FINE_TUNING) {
+      if (workload?.type === 'FINE_TUNING') {
         return cancelFineTuningJob(id, activeProject!);
       }
-      if (workload?.type === WorkloadType.WORKSPACE) {
+      if (workload?.type === 'WORKSPACE') {
         return deleteWorkspace(activeProject!, id);
       }
-      // Generic /workloads DELETE was removed in EAI-6313 — deletion is now
+      // Generic /workloads DELETE was removed — deletion is now
       // capability-specific. INFERENCE rows on this page are raw workloads
       // (AIM services route to /aims/[id] instead), so the inference
       // capability endpoint can't delete them. MODEL_DOWNLOAD and CUSTOM
@@ -267,18 +265,8 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
   const statusVariants = useMemo(() => getWorkloadStatusVariants(t), [t]);
   const typeVariants = useMemo(() => getWorkloadTypeVariants(t), [t]);
 
-  const handleCopyToClipboard = (text: string, fieldName: string) => {
-    if (!navigator.clipboard) return;
-
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedField(fieldName);
-      setTimeout(() => {
-        setCopiedField(null);
-      }, 2000);
-    });
-  };
-  const launchWorkload = (status: WorkloadStatus) => {
-    const isRunning = status === WorkloadStatus.RUNNING;
+  const launchWorkload = (status: components['schemas']['WorkloadStatus']) => {
+    const isRunning = status === 'Running';
 
     if (!isRunning) {
       toast.error(t('list.errors.noRunningWorkload'));
@@ -312,13 +300,12 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
-          <Button
-            variant="flat"
+          <ActionButton
+            secondary
             onPress={handleBack}
             size="sm"
-            isIconOnly
-            startContent={<IconArrowLeft size={16} />}
-          ></Button>
+            icon={<IconArrowLeft size={16} />}
+          />
           <div className="flex items-center space-x-3 pr-2">
             <h2>{workload.displayName || workload.name}</h2>
             <StatusDisplay
@@ -383,18 +370,18 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
 
       <div className="columns-1 md:columns-2 xl:columns-3 gap-6 space-y-6">
         {/* Basic Information */}
-        <Card className="break-inside-avoid mb-6 border-1 border-default-200 shadow-sm">
-          <CardHeader className="py-4 px-6 flex items-center">
-            <h3 className="text-base font-semibold flex items-center space-x-2">
-              <IconInfoCircle size={16} className="text-default-500" />
-              <span>{t('details.sections.basicInformation')}</span>
-            </h3>
+        <Card className="break-inside-avoid mb-6">
+          <CardHeader>
+            <h4 className="flex items-center gap-2 font-semibold">
+              <IconInfoCircle size={16} className="text-muted" />
+              {t('details.sections.basicInformation')}
+            </h4>
           </CardHeader>
-          <CardBody className="space-y-4 px-6 pb-6 pt-0">
+          <CardBody className="space-y-4">
             <div className="flex flex-col space-y-4">
               <div className="flex items-center space-x-3">
                 <div>
-                  <h5 className="text-sm text-default-700">
+                  <h5 className="text-sm text-foreground">
                     {t('list.headers.displayName.title')}
                   </h5>
                   <p className="text-sm">
@@ -403,9 +390,22 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
                 </div>
               </div>
 
+              {workload.description && (
+                <div className="flex items-center space-x-3">
+                  <div>
+                    <h5 className="text-sm text-foreground">
+                      {t('list.headers.description.title')}
+                    </h5>
+                    <p className="text-sm whitespace-pre-wrap break-words">
+                      {workload.description}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center">
                 <div>
-                  <h5 className="text-sm text-default-700">
+                  <h5 className="text-sm text-foreground">
                     {t('list.headers.id.title')}
                   </h5>
                   <p className="font-mono text-sm">{workload.id}</p>
@@ -414,7 +414,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
 
               <div className="flex items-center">
                 <div>
-                  <h5 className="text-sm text-default-700">
+                  <h5 className="text-sm text-foreground">
                     {t('list.headers.type.title')}
                   </h5>
                   <ChipDisplay type={workload.type} variants={typeVariants} />
@@ -423,7 +423,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
 
               <div className="flex items-center">
                 <div>
-                  <h5 className="text-sm text-default-700">
+                  <h5 className="text-sm text-foreground">
                     {t('list.headers.status.title')}
                   </h5>
                   <StatusDisplay
@@ -437,18 +437,18 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
         </Card>
 
         {/* Resource Information */}
-        <Card className="break-inside-avoid mb-6 border-1 border-default-200 shadow-sm">
-          <CardHeader className="py-4 px-6 flex items-center">
-            <h3 className="text-base font-semibold flex items-center space-x-2">
-              <IconServer size={16} className="text-default-500" />
-              <span>{t('details.sections.resources')}</span>
-            </h3>
+        <Card className="break-inside-avoid mb-6">
+          <CardHeader>
+            <h4 className="flex items-center gap-2 font-semibold">
+              <IconServer size={16} className="text-muted" />
+              {t('details.sections.resources')}
+            </h4>
           </CardHeader>
-          <CardBody className="space-y-4 px-6 pb-6 pt-0">
+          <CardBody className="space-y-4">
             <div className="flex flex-col space-y-4">
               <div className="flex items-center space-x-3">
                 <div>
-                  <h5 className="text-sm text-default-700">
+                  <h5 className="text-sm text-foreground">
                     {t('list.headers.gpu.title')}
                   </h5>
                   {latestGpuDeviceUtilizationValue &&
@@ -466,7 +466,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
 
               <div className="flex items-center space-x-3">
                 <div>
-                  <h5 className="text-sm text-default-700">
+                  <h5 className="text-sm text-foreground">
                     {t('list.headers.vram.title')}
                   </h5>
                   {latestGpuMemoryUtilizationValue &&
@@ -488,18 +488,18 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
         </Card>
 
         {/* Timeline */}
-        <Card className="break-inside-avoid mb-6 border-1 border-default-200 shadow-sm">
-          <CardHeader className="py-4 px-6 flex items-center">
-            <h3 className="text-base font-semibold flex items-center space-x-2">
-              <IconCalendar size={16} className="text-default-500" />
-              <span>{t('details.sections.timeline')}</span>
-            </h3>
+        <Card className="break-inside-avoid mb-6">
+          <CardHeader>
+            <h4 className="flex items-center gap-2 font-semibold">
+              <IconCalendar size={16} className="text-muted" />
+              {t('details.sections.timeline')}
+            </h4>
           </CardHeader>
-          <CardBody className="space-y-4 px-6 pb-6 pt-0">
+          <CardBody className="space-y-4">
             <div className="flex flex-col space-y-4">
               <div className="flex items-center space-x-3">
                 <div>
-                  <h5 className="text-sm text-default-700">
+                  <h5 className="text-sm text-foreground">
                     {t('list.headers.createdBy.title')}
                   </h5>
                   <p className="text-sm">{workload.createdBy}</p>
@@ -508,7 +508,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
 
               <div className="flex items-center space-x-3">
                 <div>
-                  <h5 className="text-sm text-default-700">
+                  <h5 className="text-sm text-foreground">
                     {t('list.headers.createdAt.title')}
                   </h5>
                   <DateDisplay date={workload.createdAt} />
@@ -517,7 +517,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
 
               <div className="flex items-center space-x-3">
                 <div>
-                  <h5 className="text-sm text-default-700">
+                  <h5 className="text-sm text-foreground">
                     {t('details.fields.updatedAt')}
                   </h5>
                   <DateDisplay date={workload.updatedAt} />
@@ -528,16 +528,15 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
         </Card>
 
         {/* Model Information */}
-        {(model ||
-          (isLoadingModel && workload?.type === WorkloadType.FINE_TUNING)) && (
-          <Card className="break-inside-avoid mb-6 border-1 border-default-200 shadow-sm">
-            <CardHeader className="py-4 px-6 flex items-center">
-              <h3 className="text-base font-semibold flex items-center space-x-2">
-                <IconDatabase size={16} className="text-default-500" />
-                <span>{t('list.headers.model.title')}</span>
-              </h3>
+        {(model || (isLoadingModel && workload?.type === 'FINE_TUNING')) && (
+          <Card className="break-inside-avoid mb-6">
+            <CardHeader>
+              <h4 className="flex items-center gap-2 font-semibold">
+                <IconDatabase size={16} className="text-muted" />
+                {t('list.headers.model.title')}
+              </h4>
             </CardHeader>
-            <CardBody className="space-y-4 px-6 pb-6 pt-0">
+            <CardBody className="space-y-4">
               {isLoadingModel ? (
                 <div className="flex flex-col space-y-4">
                   <Skeleton className="w-full h-6 rounded-lg" />
@@ -548,7 +547,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
                 <div className="flex flex-col space-y-4">
                   <div className="flex items-center space-x-3">
                     <div>
-                      <h5 className="text-sm text-default-700">
+                      <h5 className="text-sm text-foreground">
                         {t('list.headers.model.name')}
                       </h5>
                       <p className="text-sm">{model!.metadata.name}</p>
@@ -558,7 +557,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
                   {resolveBaseModelSource(model!)?.modelId && (
                     <div className="flex items-center space-x-3">
                       <div>
-                        <h5 className="text-sm text-default-700">
+                        <h5 className="text-sm text-foreground">
                           {t('list.headers.model.canonicalName')}
                         </h5>
                         <p className="font-mono text-sm">
@@ -570,7 +569,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
 
                   <div className="flex items-center space-x-3">
                     <div>
-                      <h5 className="text-sm text-default-700">
+                      <h5 className="text-sm text-foreground">
                         {t('list.headers.model.id')}
                       </h5>
                       <p className="font-mono text-sm">
@@ -586,14 +585,14 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
 
         {/* Dataset Information */}
         {(dataset || (isLoadingDataset && workload?.datasetId)) && (
-          <Card className="break-inside-avoid mb-6 border-1 border-default-200 shadow-sm">
-            <CardHeader className="py-4 px-6 flex items-center">
-              <h3 className="text-base font-semibold flex items-center space-x-2">
-                <IconDatabase size={16} className="text-default-500" />
-                <span>{t('list.headers.dataset.title')}</span>
-              </h3>
+          <Card className="break-inside-avoid mb-6">
+            <CardHeader>
+              <h4 className="flex items-center gap-2 font-semibold">
+                <IconDatabase size={16} className="text-muted" />
+                {t('list.headers.dataset.title')}
+              </h4>
             </CardHeader>
-            <CardBody className="space-y-4 px-6 pb-6 pt-0">
+            <CardBody className="space-y-4">
               {isLoadingDataset ? (
                 <div className="flex flex-col space-y-4">
                   <Skeleton className="w-full h-6 rounded-lg" />
@@ -604,7 +603,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
                 <div className="flex flex-col space-y-4">
                   <div className="flex items-center space-x-3">
                     <div>
-                      <h5 className="text-sm text-default-700">
+                      <h5 className="text-sm text-foreground">
                         {t('list.headers.dataset.name')}
                       </h5>
                       <p className="text-sm">{dataset!.name}</p>
@@ -614,7 +613,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
                   {dataset!.description && (
                     <div className="flex items-center space-x-3">
                       <div>
-                        <h5 className="text-sm text-default-700">
+                        <h5 className="text-sm text-foreground">
                           {t('list.headers.dataset.description')}
                         </h5>
                         <p className="text-sm">{dataset!.description}</p>
@@ -624,7 +623,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
 
                   <div className="flex items-center space-x-3">
                     <div>
-                      <h5 className="text-sm text-default-700">
+                      <h5 className="text-sm text-foreground">
                         {t('list.headers.dataset.id')}
                       </h5>
                       <p className="font-mono text-sm">{dataset!.id}</p>
@@ -638,14 +637,14 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
 
         {/* Chart Information */}
         {(chart || (isLoadingChart && workload?.chartId)) && (
-          <Card className="break-inside-avoid mb-6 border-1 border-default-200 shadow-sm">
-            <CardHeader className="py-4 px-6 flex items-center">
-              <h3 className="text-base font-semibold flex items-center space-x-2">
-                <IconDatabase size={16} className="text-default-500" />
-                <span>{t('list.headers.chart.title')}</span>
-              </h3>
+          <Card className="break-inside-avoid mb-6">
+            <CardHeader>
+              <h4 className="flex items-center gap-2 font-semibold">
+                <IconDatabase size={16} className="text-muted" />
+                {t('list.headers.chart.title')}
+              </h4>
             </CardHeader>
-            <CardBody className="space-y-4 px-6 pb-6 pt-0">
+            <CardBody className="space-y-4">
               {isLoadingChart ? (
                 <div className="flex flex-col space-y-4">
                   <Skeleton className="w-full h-6 rounded-lg" />
@@ -656,7 +655,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
                 <div className="flex flex-col space-y-4">
                   <div className="flex items-center space-x-3">
                     <div>
-                      <h5 className="text-sm text-default-700">
+                      <h5 className="text-sm text-foreground">
                         {t('list.headers.chart.name')}
                       </h5>
                       <p className="text-sm">{chart!.name}</p>
@@ -666,7 +665,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
                   {chart!.description && (
                     <div className="flex items-center space-x-3">
                       <div>
-                        <h5 className="text-sm text-default-700">
+                        <h5 className="text-sm text-foreground">
                           {t('list.headers.chart.description')}
                         </h5>
                         <p className="text-sm">{chart!.description}</p>
@@ -676,7 +675,7 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
 
                   <div className="flex items-center space-x-3">
                     <div>
-                      <h5 className="text-sm text-default-700">
+                      <h5 className="text-sm text-foreground">
                         {t('list.headers.chart.id')}
                       </h5>
                       <p className="font-mono text-sm">{chart!.id}</p>
@@ -690,133 +689,51 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
 
         {/* Output Information */}
         {hasOutputData && (
-          <Card className="break-inside-avoid mb-6 border-1 border-default-200 shadow-sm">
-            <CardHeader className="py-4 px-6 flex items-center justify-between">
-              <h3 className="text-base font-semibold flex items-center space-x-2">
-                <IconWorld size={16} className="text-default-500" />
-                <span>{t('details.sections.output')}</span>
-              </h3>
-              {isInferenceWorkload && (
-                <Button
-                  data-testid="connect-to-model-button"
-                  size="sm"
-                  variant="light"
-                  startContent={<IconLink size={14} />}
-                  onPress={() => setIsConnectModalOpen(true)}
-                >
-                  {t('models:aimCatalog.actions.connect.label')}
-                </Button>
-              )}
+          <Card className="break-inside-avoid mb-6">
+            <CardHeader>
+              <div className="flex w-full items-center justify-between gap-2">
+                <h4 className="flex items-center gap-2 font-semibold">
+                  <IconWorld size={16} className="text-muted" />
+                  {t('details.sections.output')}
+                </h4>
+                {isInferenceWorkload && (
+                  <Button
+                    data-testid="connect-to-model-button"
+                    size="sm"
+                    variant="light"
+                    startContent={<IconLink size={14} />}
+                    onPress={() => setIsConnectModalOpen(true)}
+                  >
+                    {t('models:aimCatalog.actions.connect.label')}
+                  </Button>
+                )}
+              </div>
             </CardHeader>
-            <CardBody className="space-y-3 px-6 pb-6 pt-0">
+            <CardBody className="space-y-4">
               {useGateway ? (
-                <div className="space-y-2">
-                  <h5 className="text-sm text-default-700">
-                    {t('models:aimCatalog.actions.connect.modal.inferenceUrl')}
-                  </h5>
-                  <Input
-                    value={gatewayEndpointUrl}
-                    readOnly
-                    variant="bordered"
-                    classNames={{
-                      input: 'font-mono text-sm',
-                    }}
-                    endContent={
-                      <Button
-                        isIconOnly
-                        size="sm"
-                        variant="light"
-                        onPress={() =>
-                          handleCopyToClipboard(
-                            gatewayEndpointUrl,
-                            'inferenceUrl',
-                          )
-                        }
-                      >
-                        {copiedField === 'inferenceUrl' ? (
-                          <IconCircleCheck size={16} className="text-success" />
-                        ) : (
-                          <IconCopy size={16} />
-                        )}
-                      </Button>
-                    }
-                  />
-                </div>
+                <CopySnippet
+                  label={t(
+                    'models:aimCatalog.actions.connect.modal.inferenceUrl',
+                  )}
+                  value={gatewayEndpointUrl}
+                  className="w-full"
+                />
               ) : (
                 workload.endpoints?.external && (
-                  <div className="space-y-2">
-                    <h5 className="text-sm text-default-700">
-                      {t('details.fields.externalHost')}
-                    </h5>
-                    <Input
-                      value={getEndpointUrl(workload.endpoints.external)}
-                      readOnly
-                      variant="bordered"
-                      classNames={{
-                        input: 'font-mono text-sm',
-                      }}
-                      endContent={
-                        <Button
-                          isIconOnly
-                          size="sm"
-                          variant="light"
-                          onPress={() =>
-                            handleCopyToClipboard(
-                              getEndpointUrl(
-                                workload.endpoints?.external || '',
-                              ),
-                              'externalHost',
-                            )
-                          }
-                        >
-                          {copiedField === 'externalHost' ? (
-                            <IconCircleCheck
-                              size={16}
-                              className="text-success"
-                            />
-                          ) : (
-                            <IconCopy size={16} />
-                          )}
-                        </Button>
-                      }
-                    />
-                  </div>
+                  <CopySnippet
+                    label={t('details.fields.externalHost')}
+                    value={getEndpointUrl(workload.endpoints.external)}
+                    className="w-full"
+                  />
                 )
               )}
 
               {workload.endpoints?.internal && (
-                <div className="space-y-2">
-                  <h5 className="text-sm text-default-700">
-                    {t('details.fields.internalHost')}
-                  </h5>
-                  <Input
-                    value={getEndpointUrl(workload.endpoints.internal)}
-                    readOnly
-                    variant="bordered"
-                    classNames={{
-                      input: 'font-mono text-sm',
-                    }}
-                    endContent={
-                      <Button
-                        isIconOnly
-                        size="sm"
-                        variant="light"
-                        onPress={() =>
-                          handleCopyToClipboard(
-                            getEndpointUrl(workload.endpoints?.internal || ''),
-                            'internalHost',
-                          )
-                        }
-                      >
-                        {copiedField === 'internalHost' ? (
-                          <IconCircleCheck size={16} className="text-success" />
-                        ) : (
-                          <IconCopy size={16} />
-                        )}
-                      </Button>
-                    }
-                  />
-                </div>
+                <CopySnippet
+                  label={t('details.fields.internalHost')}
+                  value={getEndpointUrl(workload.endpoints.internal)}
+                  className="w-full"
+                />
               )}
             </CardBody>
           </Card>
@@ -846,6 +763,10 @@ const WorkloadDetailsPage: React.FC & WithDocumentationLink = () => {
           onOpenChange={setIsConnectModalOpen}
           endpoints={workload?.endpoints}
           serviceId={workload?.id ?? undefined}
+          // AIM catalog deployments (the only capability-tagged inference
+          // surface) route to /aims/[id]; INFERENCE rows here are raw workloads
+          // with no catalog tags, so chat is the only applicable capability.
+          capability="chat"
           onChatRequested={(serviceId) => {
             router.push({
               pathname: projectPath('/chat'),
@@ -866,8 +787,7 @@ export async function getServerSideProps(context: {
   const { locale, params, query } = context;
   const project = params?.project as string;
 
-  const translations = await serverSideTranslations(locale, [
-    'common',
+  const translations = await getPageTranslations(locale, [
     'workloads',
     'models',
   ]);

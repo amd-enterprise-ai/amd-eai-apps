@@ -39,6 +39,18 @@ User creates a secret "${name}" with use case "${use_case}" and value "${value}"
     Click submit secret button
     Wait for drawer to close
 
+User creates an S3 secret "${name}" with access key "${access_key_id}" and secret key "${secret_access_key}"
+    [Documentation]    Fills in and submits the Add Secret form for use case S3.
+
+    Click add secret button
+    Wait for add secret drawer
+    Fill secret name    ${name}
+    Select secret use case    S3
+    Fill S3 Access Key ID    ${access_key_id}
+    Fill S3 Secret Access Key    ${secret_access_key}
+    Click submit secret button
+    Wait for drawer to close
+
 User deletes secret "${name}"
     [Documentation]    Deletes a secret via the actions menu and confirms deletion.
 
@@ -46,6 +58,12 @@ User deletes secret "${name}"
     Wait for confirmation modal
     Click confirm delete button
     Wait for confirmation modal to close
+
+User opens the delete confirmation for secret "${name}"
+    [Documentation]    Opens the delete confirmation modal for a secret without confirming.
+
+    Click delete on secret row    ${name}
+    Wait for confirmation modal
 
 User switches to project "${project_name}"
     [Documentation]    Switches the active project using the project selector.
@@ -66,6 +84,20 @@ Secret "${name}" should not be visible in the list
     [Documentation]    Verifies that a secret with the given name is not shown in the table.
 
     Secret row should not be visible    ${name}
+
+The delete confirmation should reference "${name}"
+    [Documentation]    Verifies the delete confirmation modal references the given user-facing name.
+
+    ${modal_text}=    Get confirmation modal text
+    Should Contain    ${modal_text}    ${name}
+    ...    msg=Expected delete confirmation to reference "${name}" but it did not. Modal text: ${modal_text}
+
+The delete confirmation should not reference "${name}"
+    [Documentation]    Verifies the delete confirmation modal does not reference the given name.
+
+    ${modal_text}=    Get confirmation modal text
+    Should Not Contain    ${modal_text}    ${name}
+    ...    msg=Expected delete confirmation to NOT reference "${name}" but it did. Modal text: ${modal_text}
 
 Secrets list should contain at least "${count}" secrets
     [Documentation]    Verifies the secrets table has at least the expected number of rows.
@@ -99,13 +131,13 @@ Verify exact secret count
 # =============================================================================
 
 The user opens the workspace deploy form
-    [Documentation]    Navigates to the workspaces page and opens the deploy drawer
+    [Documentation]    Navigates to the workspaces page and opens the deploy wizard
     ...                on the first available workspace.
     ...                Expects ${UI_BASE_URL} and ${TEST_PROJECT} to be set.
 
     Navigate to workspaces page    ${UI_BASE_URL}    ${TEST_PROJECT}[name]
     Click first workspace deploy button
-    Wait for deploy drawer
+    Wait for deploy wizard
 
 The imagePullSecrets dropdown should only show image pull secrets
     [Documentation]    Opens the imagePullSecrets dropdown and verifies its contents are visible.

@@ -2,6 +2,10 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { Divider as DividerBase } from '@heroui/react';
-export const Separator = DividerBase;
-export const Divider = DividerBase;
+// HeroUI v3 renamed `Divider` to `Separator`. Keep the `Divider` alias so
+// existing consumers do not need to change their import name.
+import { Separator as SeparatorBase } from '@heroui/react';
+
+export const Separator = SeparatorBase;
+export const Divider = SeparatorBase;
+export type { SeparatorProps } from '@heroui/react';

@@ -7,6 +7,7 @@ import {
   getFirstTimestampsOfDayIndices,
   isOver1Day,
   rollupTimeSeriesData,
+  transformTimeSeriesDataToChartData,
 } from '@amdenterpriseai/utils/app';
 import { describe, it, expect } from 'vitest';
 
@@ -150,6 +151,52 @@ describe('getFirstTimestampsOfDayIndices', () => {
     const dates = [new Date('2023-03-01T10:00:00')];
     const result = getFirstTimestampsOfDayIndices(dates);
     expect(result).toEqual([0]);
+  });
+});
+
+describe('transformTimeSeriesDataToChartData', () => {
+  const ts1 = '2024-01-01T00:00:00Z';
+  const ts2 = '2024-01-01T00:05:00Z';
+
+  it('maps a null value to null and a missing datapoint to 0', () => {
+    const ts3 = '2024-01-01T00:10:00Z';
+    const tsd = [
+      {
+        metadata: { category: { id: '1', name: 'Category 1' } },
+        values: [
+          { timestamp: ts1, value: 10 },
+          { timestamp: ts2, value: null },
+        ],
+      },
+    ];
+    const result = transformTimeSeriesDataToChartData(
+      tsd,
+      [ts1, ts2, ts3],
+      'category',
+    );
+    expect(result.data).toEqual([
+      { date: ts1, 'Category 1': 10 },
+      { date: ts2, 'Category 1': null },
+      { date: ts3, 'Category 1': 0 },
+    ]);
+  });
+
+  it('maps an undefined or omitted value to null (not 0)', () => {
+    const tsd = [
+      {
+        metadata: { category: { id: '1', name: 'Category 1' } },
+        values: [{ timestamp: ts1, value: undefined }, { timestamp: ts2 }],
+      },
+    ];
+    const result = transformTimeSeriesDataToChartData(
+      tsd,
+      [ts1, ts2],
+      'category',
+    );
+    expect(result.data).toEqual([
+      { date: ts1, 'Category 1': null },
+      { date: ts2, 'Category 1': null },
+    ]);
   });
 });
 

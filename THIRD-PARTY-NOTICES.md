@@ -27,7 +27,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** PSF-2.0
 **Copyright:** J. Nick Koston
 
-### aiohttp 3.13.4
+### aiohttp 3.14.3
 
 **License:** Apache-2.0 AND MIT
 **Copyright:** See project repository
@@ -52,7 +52,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Adrian Garcia Badaracco, Samuel Colvin, Zac Hatfield-Dodds
 
-### anyio 4.12.1
+### anyio 4.15.1
 
 **License:** MIT
 **Copyright:** Alex Grönholm
@@ -77,7 +77,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Ryan Anguiano
 
-### asyncpg 0.30.0
+### asyncpg 0.31.0
 
 **License:** Apache-2.0
 **Copyright:** MagicStack Inc
@@ -112,7 +112,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Ahmed R. TAHRI
 
-### click 8.4.0
+### click 8.5.0
 
 **License:** BSD-3-Clause
 **Copyright:** Pallets
@@ -122,12 +122,12 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** BSD-3-Clause
 **Copyright:** Ian Thomas
 
-### coverage 7.14.0
+### coverage 7.16.1
 
 **License:** Apache-2.0
-**Copyright:** Ned Batchelder and 255 others
+**Copyright:** Ned Batchelder and 263 others
 
-### cryptography 46.0.7
+### cryptography 50.0.0
 
 **License:** Apache-2.0 OR BSD-3-Clause
 **Copyright:** The Python Cryptographic Authority and individual contributors
@@ -157,7 +157,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** PSF-2.0
 **Copyright:** Vinay Sajip
 
-### docker 7.1.0
+### docker 7.2.0
 
 **License:** Apache-2.0
 **Copyright:** Docker, Inc.
@@ -177,7 +177,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** holger krekel and others
 
-### fastapi 0.135.1
+### fastapi 0.141.1
 
 **License:** MIT
 **Copyright:** Sebastián Ramírez
@@ -187,7 +187,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Tadata Inc.
 
-### filelock 3.25.2
+### filelock 3.32.6
 
 **License:** MIT
 **Copyright:** Bernát Gábor and contributors
@@ -202,12 +202,17 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** Apache-2.0
 **Copyright:** Nikolay Kim and Andrew Svetlov
 
+### fsspec 2026.4.0
+
+**License:** BSD-3-Clause
+**Copyright:** Martin Durant
+
 ### gitdb 4.0.12
 
 **License:** BSD-3-Clause
 **Copyright:** Sebastian Thiel
 
-### GitPython 3.1.50
+### GitPython 3.1.62
 
 **License:** BSD-3-Clause
 **Copyright:** Sebastian Thiel, Michael Trier
@@ -222,12 +227,22 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Nathaniel J. Smith
 
+### hf-xet 1.6.0
+
+**License:** Apache-2.0
+**Copyright:** See project repository
+
 ### httmock 1.4.0
 
 **License:** Apache-2.0
 **Copyright:** Patryk Zawadzki
 
 ### httpcore 1.0.9
+
+**License:** BSD-3-Clause
+**Copyright:** Tom Christie
+
+### httpcore2 2.12.0
 
 **License:** BSD-3-Clause
 **Copyright:** Tom Christie
@@ -247,12 +262,22 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Florimond Manca
 
+### httpx2 2.12.0
+
+**License:** BSD-3-Clause
+**Copyright:** Tom Christie
+
+### huggingface_hub 1.31.0
+
+**License:** Apache-2.0
+**Copyright:** Hugging Face, Inc.
+
 ### identify 2.6.16
 
 **License:** MIT
 **Copyright:** Chris Kuehl
 
-### idna 3.15
+### idna 3.19
 
 **License:** BSD-3-Clause
 **Copyright:** Kim Davies
@@ -317,7 +342,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** PSF-2.0
 **Copyright:** John D. Hunter, Michael Droettboom
 
-### mcp 1.27.1
+### mcp 1.28.1
 
 **License:** MIT
 **Copyright:** Anthropic, PBC.
@@ -372,7 +397,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** BSD-3-Clause
 **Copyright:** Tony Garnock-Jones, Gavin M. Roy, Pivotal Software, Inc and others.
 
-### pillow 12.2.0
+### pillow 12.3.0
 
 **License:** MIT
 **Copyright:** Jeffrey 'Alex' Clark
@@ -392,17 +417,17 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** BSD
 **Copyright:** David Beazley
 
-### pre_commit 4.5.1
+### pre_commit 4.6.2
 
 **License:** MIT
 **Copyright:** Anthony Sottile
 
-### prometheus-api-client 0.7.0
+### prometheus-api-client 0.7.2
 
 **License:** MIT
 **Copyright:** Anand Sanmukhani
 
-### prometheus-fastapi-instrumentator 7.1.0
+### prometheus-fastapi-instrumentator 8.1.0
 
 **License:** ISC
 **Copyright:** Tim Schwenke
@@ -427,17 +452,17 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** BSD-3-Clause AND Unlicense
 **Copyright:** Helder Eijs
 
-### pydantic 2.13.4
+### pydantic 2.13.5
 
 **License:** MIT
 **Copyright:** Samuel Colvin, Eric Jolibois, Hasan Ramezani, Adrian Garcia Badaracco, Terrence Dorsey, David Montague, Serge Matveenko, Marcelo Trylesinski, Sydney Runkle, David Hewitt, Alex Hall, Victorien Plot
 
-### pydantic-settings 2.14.1
+### pydantic-settings 2.14.2
 
 **License:** MIT
 **Copyright:** Samuel Colvin, Eric Jolibois, Hasan Ramezani
 
-### pydantic_core 2.46.4
+### pydantic_core 2.46.5
 
 **License:** MIT
 **Copyright:** Samuel Colvin, Adrian Garcia Badaracco, David Montague, David Hewitt, Sydney Runkle, Victorien Plot
@@ -447,7 +472,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** BSD-2-Clause
 **Copyright:** Georg Brandl
 
-### PyJWT 2.12.1
+### PyJWT 2.14.0
 
 **License:** MIT
 **Copyright:** Jose Padilla
@@ -457,17 +482,17 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Paul McGuire
 
-### pytest 9.0.3
+### pytest 9.1.1
 
 **License:** MIT
-**Copyright:** Holger Krekel, Bruno Oliveira, Ronny Pfannschmidt, Floris Bruynooghe, Brianna Laugher, Freya Bruhin, Others (See AUTHORS)
+**Copyright:** Brianna Laugher, Bruno Oliveira, Floris Bruynooghe, Freya Bruhin, Holger Krekel, Others (See AUTHORS), Ronny Pfannschmidt
 
-### pytest-asyncio 1.3.0
+### pytest-asyncio 1.4.0
 
 **License:** Apache-2.0
 **Copyright:** Tin Tvrtković
 
-### pytest-cov 7.0.0
+### pytest-cov 7.1.0
 
 **License:** MIT
 **Copyright:** Marc Schlaich
@@ -477,7 +502,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Max K., Andre Caron
 
-### pytest-env 1.2.0
+### pytest-env 1.7.1
 
 **License:** MIT
 **Copyright:** The pytest-env developers
@@ -507,17 +532,17 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** See project repository
 
-### python-dotenv 1.2.2
+### python-dotenv 1.2.3
 
 **License:** BSD-3-Clause
 **Copyright:** Saurabh Kumar
 
-### python-keycloak 7.0.2
+### python-keycloak 5.8.1
 
 **License:** MIT
 **Copyright:** Marcos Pereira
 
-### python-multipart 0.0.27
+### python-multipart 0.0.32
 
 **License:** Apache-2.0
 **Copyright:** Andrew Dunham
@@ -547,7 +572,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** Apache-2.0 AND CNRI-Python
 **Copyright:** Matthew Barnett
 
-### requests 2.33.0
+### requests 2.34.2
 
 **License:** Apache-2.0
 **Copyright:** Kenneth Reitz
@@ -562,7 +587,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** Apache-2.0
 **Copyright:** Ian Cordasco, Cory Benfield
 
-### responses 0.25.8
+### responses 0.26.3
 
 **License:** Apache-2.0
 **Copyright:** David Cramer
@@ -572,12 +597,12 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Will McGugan
 
-### rich-click 1.9.7
+### rich-click 1.9.9
 
 **License:** MIT
 **Copyright:** Phil Ewels
 
-### robotframework 7.4.1
+### robotframework 7.4.2
 
 **License:** Apache-2.0
 **Copyright:** Pekka Klärck
@@ -617,12 +642,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** BSD-3-Clause
 **Copyright:** Sebastian Thiel
 
-### sniffio 1.3.1
-
-**License:** Apache-2.0 AND MIT
-**Copyright:** Nathaniel J. Smith
-
-### SQLAlchemy 2.0.45
+### SQLAlchemy 2.0.52
 
 **License:** MIT
 **Copyright:** Mike Bayer
@@ -632,12 +652,12 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** BSD-3-Clause
 **Copyright:** sysid
 
-### starlette 0.50.0
+### starlette 1.6.0
 
 **License:** BSD-3-Clause
 **Copyright:** Tom Christie
 
-### tenacity 9.1.2
+### tenacity 9.1.4
 
 **License:** Apache-2.0
 **Copyright:** Julien Danjou
@@ -651,6 +671,16 @@ This software incorporates code or materials from third parties. AMD makes certa
 
 **License:** MIT
 **Copyright:** Taneli Hukkinen
+
+### tqdm 4.68.2
+
+**License:** MPL-2.0 AND MIT
+**Copyright:** noamraph
+
+### truststore 0.10.4
+
+**License:** MIT
+**Copyright:** Seth Michael Larson, David Glick
 
 ### typer 0.25.1
 
@@ -677,7 +707,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Victorien Plot
 
-### typing_extensions 4.15.0
+### typing_extensions 4.16.0
 
 **License:** PSF-2.0
 **Copyright:** Guido van Rossum, Jukka Lehtosalo, Łukasz Langa, Michael Lee
@@ -697,7 +727,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Andrey Petrov
 
-### uvicorn 0.40.0
+### uvicorn 0.52.4
 
 **License:** BSD-3-Clause
 **Copyright:** Tom Christie
@@ -752,6 +782,21 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** TJ Holowaychuk
 
+### @adobe/react-spectrum 3.47.1
+
+**License:** Apache-2.0
+**Copyright:** Adobe
+
+### @adobe/react-spectrum-ui 1.2.1
+
+**License:** Apache-2.0
+**Copyright:** See project repository
+
+### @adobe/react-spectrum-workflow 2.3.5
+
+**License:** Apache-2.0
+**Copyright:** See project repository
+
 ### @alloc/quick-lru 5.2.0
 
 **License:** MIT
@@ -762,7 +807,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** asamuzaK
 
-### @babel/code-frame 7.29.0
+### @babel/code-frame 7.28.6
 
 **License:** MIT
 **Copyright:** The Babel Team
@@ -1252,7 +1297,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** The Babel Team
 
-### @babel/runtime 7.29.2
+### @babel/runtime 7.28.6
 
 **License:** MIT
 **Copyright:** The Babel Team
@@ -1277,12 +1322,17 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Charles Samborski
 
-### @biomejs/biome 2.2.5
+### @biomejs/biome 2.5.10
 
 **License:** MIT OR Apache-2.0
 **Copyright:** Emanuele Stoppa
 
-### @biomejs/cli-linux-x64 2.2.5
+### @biomejs/cli-linux-x64 2.5.10
+
+**License:** MIT OR Apache-2.0
+**Copyright:** See project repository
+
+### @biomejs/cli-linux-x64-musl 2.5.10
 
 **License:** MIT OR Apache-2.0
 **Copyright:** See project repository
@@ -1352,397 +1402,12 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Long Ho
 
-### @heroui/accordion 2.2.26
+### @heroui/react 3.2.0
 
 **License:** MIT
 **Copyright:** HeroUI
 
-### @heroui/alert 2.2.29
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/aria-utils 2.2.26
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/autocomplete 2.3.31
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/avatar 2.2.24
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/badge 2.2.18
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/breadcrumbs 2.2.24
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/button 2.2.29
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/calendar 2.2.29
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/card 2.2.27
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/checkbox 2.3.29
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/chip 2.2.24
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/code 2.2.22
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/date-input 2.3.29
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/date-picker 2.3.30
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/divider 2.2.21
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/dom-animation 2.1.10
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/drawer 2.2.26
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/dropdown 2.3.29
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/form 2.1.29
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/framer-utils 2.1.25
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/image 2.2.18
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/input 2.4.30
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/input-otp 2.1.29
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/kbd 2.2.23
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/link 2.2.25
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/listbox 2.3.28
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/menu 2.2.28
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/modal 2.2.26
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/navbar 2.2.27
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/number-input 2.0.20
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/pagination 2.2.26
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/popover 2.3.29
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/progress 2.2.24
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/radio 2.3.29
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/react 2.8.7
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/react-rsc-utils 2.1.9
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/react-utils 2.1.14
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/ripple 2.2.21
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/scroll-shadow 2.3.19
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/select 2.4.30
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/shared-icons 2.1.10
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/shared-utils 2.1.12
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/skeleton 2.2.18
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/slider 2.4.26
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/snippet 2.2.30
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/spacer 2.2.22
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/spinner 2.2.26
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/switch 2.2.26
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/system 2.4.25
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/system-rsc 2.3.21
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/table 2.2.29
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/tabs 2.2.26
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/theme 2.4.25
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/toast 2.0.19
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/tooltip 2.2.26
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-aria-accordion 2.2.19
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-aria-button 2.2.21
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-aria-link 2.2.22
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-aria-modal-overlay 2.2.20
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-aria-multiselect 2.4.20
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-aria-overlay 2.0.5
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-callback-ref 2.1.8
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-clipboard 2.1.9
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-data-scroll-overflow 2.2.13
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-disclosure 2.2.18
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-draggable 2.1.19
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-form-reset 2.0.1
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-image 2.1.13
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-intersection-observer 2.2.14
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-is-mobile 2.2.12
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-is-mounted 2.1.8
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-measure 2.1.8
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-pagination 2.2.19
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-resize 2.1.8
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-safe-layout-effect 2.1.8
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-scroll-position 2.1.8
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/use-viewport-size 2.0.1
-
-**License:** MIT
-**Copyright:** HeroUI
-
-### @heroui/user 2.2.24
+### @heroui/styles 3.2.0
 
 **License:** MIT
 **Copyright:** HeroUI
@@ -1757,12 +1422,22 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Heather Arthur
 
-### @img/sharp-libvips-linux-x64 1.2.4
+### @img/sharp-libvips-linux-x64 1.3.3
 
 **License:** LGPL-3.0-or-later
 **Copyright:** Lovell Fuller
 
-### @img/sharp-linux-x64 0.34.5
+### @img/sharp-libvips-linuxmusl-x64 1.3.3
+
+**License:** LGPL-3.0-or-later
+**Copyright:** Lovell Fuller
+
+### @img/sharp-linux-x64 0.35.4
+
+**License:** Apache-2.0
+**Copyright:** Lovell Fuller
+
+### @img/sharp-linuxmusl-x64 0.35.4
 
 **License:** Apache-2.0
 **Copyright:** Lovell Fuller
@@ -1792,22 +1467,22 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Simon Boudrias
 
-### @internationalized/date 3.10.1
+### @internationalized/date 3.12.2
 
 **License:** Apache-2.0
 **Copyright:** Adobe
 
-### @internationalized/message 3.1.8
+### @internationalized/message 3.1.10
 
 **License:** Apache-2.0
 **Copyright:** Adobe
 
-### @internationalized/number 3.6.5
+### @internationalized/number 3.6.7
 
 **License:** Apache-2.0
 **Copyright:** Adobe
 
-### @internationalized/string 3.2.7
+### @internationalized/string 3.2.9
 
 **License:** Apache-2.0
 **Copyright:** Adobe
@@ -1862,12 +1537,17 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Artem Zakharchenko
 
-### @next/env 16.2.3
+### @next/env 16.3.5
 
 **License:** MIT
 **Copyright:** Next.js Team
 
-### @next/swc-linux-x64-gnu 16.2.3
+### @next/swc-linux-x64-gnu 16.3.5
+
+**License:** MIT
+**Copyright:** Vercel, Inc.
+
+### @next/swc-linux-x64-musl 16.3.5
 
 **License:** MIT
 **Copyright:** Vercel, Inc.
@@ -1912,420 +1592,110 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Luke Edwards
 
-### @react-aria/breadcrumbs 3.5.30
+### @radix-ui/react-avatar 1.1.11
 
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/button 3.14.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/calendar 3.9.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/checkbox 3.16.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/combobox 3.14.1
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/datepicker 3.15.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/dialog 3.5.32
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/focus 3.21.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/form 3.1.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/grid 3.14.6
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/i18n 3.12.14
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/interactions 3.26.0
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/label 3.7.23
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/landmark 3.0.8
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/link 3.8.7
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/listbox 3.15.1
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/live-announcer 3.4.4
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/menu 3.19.4
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/numberfield 3.12.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/overlays 3.31.0
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/progress 3.4.28
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/radio 3.12.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/selection 3.27.0
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/slider 3.8.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/spinbutton 3.7.0
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/ssr 3.9.10
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/switch 3.7.9
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/table 3.17.9
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/tabs 3.10.9
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/textfield 3.18.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/toast 3.0.9
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/toggle 3.12.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/toolbar 3.0.0-beta.22
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/tooltip 3.9.0
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/utils 3.32.0
+**License:** MIT
+**Copyright:** WorkOS
 
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-aria/visually-hidden 3.8.29
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/calendar 3.9.1
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/checkbox 3.7.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/collections 3.12.8
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/combobox 3.12.1
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/datepicker 3.15.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/flags 3.1.2
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/form 3.2.2
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/grid 3.11.7
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/list 3.13.2
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/menu 3.9.9
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/numberfield 3.10.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/overlays 3.6.21
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/radio 3.11.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/selection 3.20.7
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/slider 3.7.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/table 3.15.2
+### @radix-ui/react-compose-refs 1.1.2
 
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/tabs 3.8.7
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/toast 3.1.2
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/toggle 3.9.3
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/tooltip 3.5.9
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/tree 3.9.4
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/utils 3.11.0
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-stately/virtualizer 4.4.4
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-types/accordion 3.0.0-alpha.26
-
-**License:** Apache-2.0
-**Copyright:** Adobe
+**License:** MIT
+**Copyright:** See project repository
 
-### @react-types/breadcrumbs 3.7.17
+### @radix-ui/react-context 1.1.3
 
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-types/button 3.14.1
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-types/calendar 3.8.1
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-types/checkbox 3.10.2
-
-**License:** Apache-2.0
-**Copyright:** Adobe
-
-### @react-types/combobox 3.13.10
-
-**License:** Apache-2.0
-**Copyright:** Adobe
+**License:** MIT
+**Copyright:** WorkOS
 
-### @react-types/datepicker 3.13.3
+### @radix-ui/react-primitive 2.1.4
 
-**License:** Apache-2.0
-**Copyright:** Adobe
+**License:** MIT
+**Copyright:** WorkOS
 
-### @react-types/dialog 3.5.22
+### @radix-ui/react-slot 1.2.4
 
-**License:** Apache-2.0
-**Copyright:** Adobe
+**License:** MIT
+**Copyright:** WorkOS
 
-### @react-types/form 3.7.16
+### @radix-ui/react-use-callback-ref 1.1.1
 
-**License:** Apache-2.0
-**Copyright:** Adobe
+**License:** MIT
+**Copyright:** See project repository
 
-### @react-types/grid 3.3.6
+### @radix-ui/react-use-is-hydrated 0.1.0
 
-**License:** Apache-2.0
-**Copyright:** Adobe
+**License:** MIT
+**Copyright:** WorkOS
 
-### @react-types/link 3.6.5
+### @radix-ui/react-use-layout-effect 1.1.1
 
-**License:** Apache-2.0
-**Copyright:** Adobe
+**License:** MIT
+**Copyright:** See project repository
 
-### @react-types/listbox 3.7.4
+### @react-aria/color 3.2.1
 
 **License:** Apache-2.0
 **Copyright:** Adobe
 
-### @react-types/menu 3.10.5
+### @react-aria/i18n 3.13.1
 
 **License:** Apache-2.0
 **Copyright:** Adobe
 
-### @react-types/numberfield 3.8.16
+### @react-aria/ssr 3.10.1
 
 **License:** Apache-2.0
 **Copyright:** Adobe
 
-### @react-types/overlays 3.9.2
+### @react-aria/utils 3.34.1
 
 **License:** Apache-2.0
 **Copyright:** Adobe
 
-### @react-types/progress 3.5.16
+### @react-spectrum/color 3.2.1
 
 **License:** Apache-2.0
 **Copyright:** Adobe
 
-### @react-types/radio 3.9.2
+### @react-spectrum/provider 3.11.1
 
 **License:** Apache-2.0
 **Copyright:** Adobe
 
-### @react-types/shared 3.32.1
+### @react-stately/color 3.10.1
 
 **License:** Apache-2.0
 **Copyright:** Adobe
 
-### @react-types/slider 3.8.2
+### @react-stately/utils 3.12.1
 
 **License:** Apache-2.0
 **Copyright:** Adobe
 
-### @react-types/switch 3.5.15
+### @react-types/color 3.2.0
 
 **License:** Apache-2.0
 **Copyright:** Adobe
 
-### @react-types/table 3.13.4
+### @react-types/shared 3.35.0
 
 **License:** Apache-2.0
 **Copyright:** Adobe
 
-### @react-types/tabs 3.3.20
+### @redocly/ajv 8.11.2
 
-**License:** Apache-2.0
-**Copyright:** Adobe
+**License:** MIT
+**Copyright:** Evgeny Poberezkin
 
-### @react-types/textfield 3.12.6
+### @redocly/config 0.22.0
 
-**License:** Apache-2.0
-**Copyright:** Adobe
+**License:** MIT
+**Copyright:** Redocly Inc.
 
-### @react-types/tooltip 3.5.0
+### @redocly/openapi-core 1.34.17
 
-**License:** Apache-2.0
-**Copyright:** Adobe
+**License:** MIT
+**Copyright:** Roman Hotsiy
 
 ### @rolldown/pluginutils 1.0.0-beta.27
 
@@ -2333,6 +1703,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 **Copyright:** present VoidZero Inc. & Contributors
 
 ### @rollup/rollup-linux-x64-gnu 4.60.1
+
+**License:** MIT
+**Copyright:** Lukas Taegert-Atkinson
+
+### @rollup/rollup-linux-x64-musl 4.60.1
 
 **License:** MIT
 **Copyright:** Lukas Taegert-Atkinson
@@ -2346,6 +1721,16 @@ This software incorporates code or materials from third parties. AMD makes certa
 
 **License:** MIT
 **Copyright:** Arnout Kazemier
+
+### @spectrum-icons/ui 3.7.1
+
+**License:** Apache-2.0
+**Copyright:** Adobe
+
+### @spectrum-icons/workflow 4.3.1
+
+**License:** Apache-2.0
+**Copyright:** Adobe
 
 ### @standard-schema/spec 1.1.0
 
@@ -2437,12 +1822,17 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** Apache-2.0 AND MIT
 **Copyright:** 강동윤
 
+### @swc/core-linux-x64-musl 1.15.8
+
+**License:** Apache-2.0 AND MIT
+**Copyright:** 강동윤
+
 ### @swc/counter 0.1.3
 
 **License:** Apache-2.0
 **Copyright:** 강동윤
 
-### @swc/helpers 0.5.21
+### @swc/helpers 0.5.23
 
 **License:** Apache-2.0
 **Copyright:** 강동윤
@@ -2477,6 +1867,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Tailwind Labs, Inc.
 
+### @tailwindcss/oxide-linux-x64-musl 4.1.18
+
+**License:** MIT
+**Copyright:** Tailwind Labs, Inc.
+
 ### @tailwindcss/postcss 4.1.18
 
 **License:** MIT
@@ -2497,16 +1892,6 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** tannerlinsley
 
-### @tanstack/react-virtual 3.11.3
-
-**License:** MIT
-**Copyright:** Tanner Linsley
-
-### @tanstack/virtual-core 3.11.3
-
-**License:** MIT
-**Copyright:** Tanner Linsley
-
 ### @testing-library/dom 10.4.1
 
 **License:** MIT
@@ -2526,6 +1911,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 
 **License:** MIT
 **Copyright:** Giorgio Polvara
+
+### @turbo/linux-64 2.9.14
+
+**License:** MIT
+**Copyright:** Vercel, Inc
 
 ### @types/aria-query 5.0.4
 
@@ -2682,7 +2072,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Microsoft Corporation.
 
-### @types/react 19.2.8
+### @types/react 19.2.14
 
 **License:** MIT
 **Copyright:** Microsoft Corporation.
@@ -2782,6 +2172,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Present VoidZero Inc. and Vitest contributors
 
+### @xmldom/xmldom 0.9.10
+
+**License:** MIT
+**Copyright:** present Christopher J. Brody and other contributors, as listed in: https://github.com/xmldom/xmldom/graphs/contributors
+
 ### accepts 1.3.8
 
 **License:** MIT
@@ -2812,6 +2207,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** ISC
 **Copyright:** nexdrew
 
+### ansi-colors 4.1.3
+
+**License:** MIT
+**Copyright:** Brian Woodward
+
 ### ansi-regex 5.0.1
 
 **License:** MIT
@@ -2837,7 +2237,12 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** Python-2.0
 **Copyright:** Stichting Mathematisch Centrum Amsterdam
 
-### aria-query 5.3.0
+### aria-hidden 1.2.6
+
+**License:** MIT
+**Copyright:** Anton Korzunov
+
+### aria-query 5.3.2
 
 **License:** Apache-2.0
 **Copyright:** Jesse Beach
@@ -2897,7 +2302,12 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Titus Wormer
 
-### baseline-browser-mapping 2.10.18
+### balanced-match 1.0.2
+
+**License:** MIT
+**Copyright:** Julian Gruber
+
+### baseline-browser-mapping 2.11.23
 
 **License:** Apache-2.0
 **Copyright:** See project repository
@@ -2921,6 +2331,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 
 **License:** MIT
 **Copyright:** Sindre Sorhus
+
+### brace-expansion 2.1.2
+
+**License:** MIT
+**Copyright:** Julian Gruber
 
 ### braces 3.0.3
 
@@ -2967,7 +2382,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Sindre Sorhus
 
-### caniuse-lite 1.0.30001788
+### caniuse-lite 1.0.30001764
 
 **License:** CC-BY-4.0
 **Copyright:** Ben Briggs
@@ -2986,6 +2401,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 
 **License:** MIT
 **Copyright:** Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
+
+### change-case 5.4.4
+
+**License:** MIT
+**Copyright:** Blake Embrey
 
 ### character-entities 2.0.2
 
@@ -3007,7 +2427,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Titus Wormer
 
-### chokidar 3.6.0
+### chokidar 4.0.3
 
 **License:** MIT
 **Copyright:** Paul Miller
@@ -3052,30 +2472,30 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Titus Wormer
 
-### color 4.2.3
+### color 5.0.3
 
 **License:** MIT
 **Copyright:** Heather Arthur
 
-### color-convert 2.0.1
+### color-convert 3.1.3
 
 **License:** MIT
-**Copyright:** Heather Arthur
+**Copyright:** Josh Junon
 
-### color-name 1.1.4
-
-**License:** MIT
-**Copyright:** DY
-
-### color-string 1.9.1
+### color-name 2.1.0
 
 **License:** MIT
-**Copyright:** Heather Arthur
+**Copyright:** Dmitry Iv
 
-### color2k 2.0.3
+### color-string 2.1.4
 
 **License:** MIT
-**Copyright:** Rico Kahler
+**Copyright:** Josh Junon
+
+### colorette 1.4.0
+
+**License:** MIT
+**Copyright:** Jorge Bucaran
 
 ### combined-stream 1.0.8
 
@@ -3092,11 +2512,6 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** TJ Holowaychuk
 
-### compute-scroll-into-view 3.1.1
-
-**License:** MIT
-**Copyright:** Cody Olsen
-
 ### content-disposition 0.5.4
 
 **License:** MIT
@@ -3112,7 +2527,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Thorsten Lorenz
 
-### cookie 1.1.1
+### cookie 0.7.2
 
 **License:** MIT
 **Copyright:** Roman Shtylman
@@ -3352,7 +2767,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Titus Wormer
 
-### dom-accessibility-api 0.5.16
+### dom-accessibility-api 0.6.3
 
 **License:** MIT
 **Copyright:** Sebastian Silbermann
@@ -3557,6 +2972,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Stefan Thomas
 
+### fast-deep-equal 3.1.3
+
+**License:** MIT
+**Copyright:** Evgeny Poberezkin
+
 ### fast-equals 5.4.0
 
 **License:** MIT
@@ -3602,11 +3022,6 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Sindre Sorhus
 
-### flat 5.0.2
-
-**License:** BSD-3-Clause
-**Copyright:** Hugh Kennedy
-
 ### flatted 3.4.2
 
 **License:** ISC
@@ -3631,11 +3046,6 @@ This software incorporates code or materials from third parties. AMD makes certa
 
 **License:** MIT
 **Copyright:** Robert Eisele
-
-### framer-motion 12.26.2
-
-**License:** MIT
-**Copyright:** Matt Perry
 
 ### fresh 0.5.2
 
@@ -3842,7 +3252,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Andrea Giammarchi
 
-### html-parse-stringify 3.0.1
+### html-parse-stringify 3.1.0
 
 **License:** MIT
 **Copyright:** Henrik Joreteg
@@ -3877,7 +3287,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Nathan Rajlich
 
-### i18next 25.7.4
+### i18next 26.4.2
 
 **License:** MIT
 **Copyright:** Jan Mühlemann
@@ -3907,6 +3317,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Sindre Sorhus
 
+### index-to-position 1.2.0
+
+**License:** MIT
+**Copyright:** Sindre Sorhus
+
 ### inherits 2.0.4
 
 **License:** ISC
@@ -3917,7 +3332,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** TJ Holowaychuk <tj@vision-media.ca>
 
-### input-otp 1.4.1
+### input-otp 1.4.2
 
 **License:** MIT
 **Copyright:** Guilherme Rodz
@@ -4062,12 +3477,17 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Filip Skokan
 
+### js-levenshtein 1.1.6
+
+**License:** MIT
+**Copyright:** Gustaf Andersson
+
 ### js-tokens 4.0.0
 
 **License:** MIT
 **Copyright:** Simon Lydell
 
-### js-yaml 4.1.1
+### js-yaml 4.2.0
 
 **License:** MIT
 **Copyright:** Vladimir Zapparov
@@ -4086,6 +3506,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 
 **License:** MIT
 **Copyright:** Kat Marchán
+
+### json-schema-traverse 1.0.0
+
+**License:** MIT
+**Copyright:** Evgeny Poberezkin
 
 ### json5 2.2.3
 
@@ -4148,6 +3573,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 **Copyright:** See project repository
 
 ### lightningcss-linux-x64-gnu 1.30.2
+
+**License:** MPL-2.0
+**Copyright:** See project repository
+
+### lightningcss-linux-x64-musl 1.30.2
 
 **License:** MPL-2.0
 **Copyright:** See project repository
@@ -4237,7 +3667,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Titus Wormer
 
-### lru-cache 5.1.1
+### lru-cache 6.0.0
 
 **License:** ISC
 **Copyright:** Isaac Z. Schlueter
@@ -4587,20 +4017,15 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** James Kyle
 
+### minimatch 5.1.9
+
+**License:** ISC
+**Copyright:** Isaac Z. Schlueter
+
 ### mj-context-menu 0.6.1
 
 **License:** Apache-2.0
 **Copyright:** Volker Sorge
-
-### motion-dom 12.38.0
-
-**License:** MIT
-**Copyright:** Matt Perry
-
-### motion-utils 12.36.0
-
-**License:** MIT
-**Copyright:** Matt Perry
 
 ### mrmime 2.0.1
 
@@ -4622,7 +4047,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** ISC
 **Copyright:** GitHub Inc.
 
-### nanoid 3.3.11
+### nanoid 3.3.12
 
 **License:** MIT
 **Copyright:** Andrey Sitnik
@@ -4632,12 +4057,12 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Federico Romero
 
-### next 16.2.3
+### next 16.3.5
 
 **License:** MIT
 **Copyright:** Vercel, Inc.
 
-### next-auth 4.24.13
+### next-auth 4.24.15
 
 **License:** ISC
 **Copyright:** Iain Collins
@@ -4722,6 +4147,21 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Sindre Sorhus
 
+### openapi-fetch 0.17.0
+
+**License:** MIT
+**Copyright:** Drew Powers
+
+### openapi-typescript 7.13.0
+
+**License:** MIT
+**Copyright:** Drew Powers
+
+### openapi-typescript-helpers 0.1.0
+
+**License:** MIT
+**Copyright:** Drew Powers
+
 ### openid-client 5.7.1
 
 **License:** MIT
@@ -4742,7 +4182,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Titus Wormer
 
-### parse-json 5.2.0
+### parse-json 8.3.0
 
 **License:** MIT
 **Copyright:** Sindre Sorhus
@@ -4772,7 +4212,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Blake Embrey (hello@blakeembrey.com)
 
-### path-type 4.0.0
+### path-type 6.0.0
 
 **License:** MIT
 **Copyright:** Sindre Sorhus
@@ -4802,12 +4242,17 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** ISC
 **Copyright:** Volodymyr Agafonkin
 
+### pluralize 8.0.0
+
+**License:** MIT
+**Copyright:** Blake Embrey
+
 ### pngjs 7.0.0
 
 **License:** MIT
 **Copyright:** Alexandre Paré
 
-### postcss 8.5.12
+### postcss 8.5.13
 
 **License:** MIT
 **Copyright:** Andrey Sitnik
@@ -4897,12 +4342,22 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Meta Platforms, Inc. and affiliates.
 
+### react-aria 3.49.0
+
+**License:** Apache-2.0
+**Copyright:** Adobe
+
+### react-aria-components 1.18.0
+
+**License:** Apache-2.0
+**Copyright:** Adobe
+
 ### react-dom 19.2.1
 
 **License:** MIT
 **Copyright:** Meta Platforms, Inc. and affiliates.
 
-### react-hook-form 7.71.1
+### react-hook-form 7.87.0
 
 **License:** MIT
 **Copyright:** Beier
@@ -4942,20 +4397,15 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** JasonHzq
 
+### react-stately 3.47.0
+
+**License:** Apache-2.0
+**Copyright:** Adobe
+
 ### react-syntax-highlighter 16.1.0
 
 **License:** MIT
 **Copyright:** Conor Hastings
-
-### react-textarea-autosize 8.5.9
-
-**License:** MIT
-**Copyright:** Andrey Popp
-
-### react-toastify 11.0.5
-
-**License:** MIT
-**Copyright:** Fadi Khadra
 
 ### react-transition-group 4.4.5
 
@@ -5097,6 +4547,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Troy Goode
 
+### require-from-string 2.0.2
+
+**License:** MIT
+**Copyright:** Vsevolod Strukchinsky
+
 ### resolve 1.22.11
 
 **License:** MIT
@@ -5157,6 +4612,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Nikita Skovoroda
 
+### sax 1.6.0
+
+**License:** BlueOak-1.0.0
+**Copyright:** Isaac Z. Schlueter
+
 ### saxes 6.0.0
 
 **License:** ISC
@@ -5167,12 +4627,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Meta Platforms, Inc. and affiliates.
 
-### scroll-into-view-if-needed 3.0.10
-
-**License:** MIT
-**Copyright:** Cody Olsen
-
-### semver 7.7.4
+### semver 7.7.3
 
 **License:** ISC
 **Copyright:** GitHub Inc.
@@ -5182,7 +4637,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** ISC
 **Copyright:** Wes Todd
 
-### sharp 0.34.5
+### sharp 0.35.4
 
 **License:** Apache-2.0
 **Copyright:** Lovell Fuller
@@ -5206,11 +4661,6 @@ This software incorporates code or materials from third parties. AMD makes certa
 
 **License:** ISC
 **Copyright:** Ben Coe
-
-### simple-swizzle 0.2.4
-
-**License:** MIT
-**Copyright:** Qix
 
 ### sirv 3.0.2
 
@@ -5262,7 +4712,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Roman Shtylman
 
-### statuses 2.0.2
+### statuses 1.5.0
 
 **License:** MIT
 **Copyright:** Jonathan Ong <me@jongleberry.com>
@@ -5317,7 +4767,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** present Vercel, Inc.
 
-### supports-color 7.2.0
+### supports-color 10.2.2
 
 **License:** MIT
 **Copyright:** Sindre Sorhus
@@ -5331,6 +4781,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 
 **License:** MIT
 **Copyright:** Rich Harris
+
+### svgo 3.3.3
+
+**License:** MIT
+**Copyright:** Kir Belevich
 
 ### symbol-tree 3.2.4
 
@@ -5462,17 +4917,17 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** suryagh
 
-### turbo 2.7.4
+### turbo 2.9.14
 
 **License:** MIT
 **Copyright:** Vercel, Inc
 
-### turbo-linux-64 2.7.4
+### tw-animate-css 1.4.0
 
 **License:** MIT
-**Copyright:** Vercel, Inc
+**Copyright:** Luca Bosin
 
-### type-fest 5.4.0
+### type-fest 4.41.0
 
 **License:** MIT OR CC0-1.0
 **Copyright:** Sindre Sorhus
@@ -5577,20 +5032,10 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** MIT
 **Copyright:** Andrey Sitnik
 
-### use-composed-ref 1.4.0
+### uri-js-replace 1.0.1
 
 **License:** MIT
-**Copyright:** See project repository
-
-### use-isomorphic-layout-effect 1.2.1
-
-**License:** MIT
-**Copyright:** Mateusz Burzyński
-
-### use-latest 1.3.0
-
-**License:** MIT
-**Copyright:** Andarist
+**Copyright:** https://github.com/andreinwald
 
 ### use-sync-external-store 1.6.0
 
@@ -5742,7 +5187,7 @@ This software incorporates code or materials from third parties. AMD makes certa
 **License:** ISC
 **Copyright:** Ben Coe
 
-### yallist 3.1.1
+### yallist 4.0.0
 
 **License:** ISC
 **Copyright:** Isaac Z. Schlueter
@@ -5751,6 +5196,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 
 **License:** ISC
 **Copyright:** Eemeli Aro
+
+### yaml-ast-parser 0.0.43
+
+**License:** Apache-2.0
+**Copyright:** (c) MuleSoft, Inc.
 
 ### yargs 17.7.2
 
@@ -5911,6 +5361,11 @@ This software incorporates code or materials from third parties. AMD makes certa
 
 **License:** BSD-3-Clause
 **Copyright:** Open Knowledge Foundation Ltd.
+
+### github.com/pkg/errors
+
+**License:** BSD-2-Clause
+**Copyright:** Dave Cheney <dave@cheney.net>
 
 ### github.com/pmezard/go-difflib/difflib
 

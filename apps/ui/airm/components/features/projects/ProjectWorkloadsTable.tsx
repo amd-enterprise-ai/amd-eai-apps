@@ -241,7 +241,7 @@ export const ProjectWorkloadsTable: React.FC<Props> = ({
     ),
     [ProjectWorkloadsTableField.TYPE]: (item) => (
       <ChipDisplay
-        type={item.type ?? t(`common.error.misc.unknownEntity`)}
+        type={item.type ?? t(`common:error.misc.unknownEntity`)}
         variants={getWorkloadTypeVariants(workloadsT)}
       />
     ),
@@ -333,7 +333,7 @@ export const ProjectWorkloadsTable: React.FC<Props> = ({
       <ServerSideDataTable
         filters={filters}
         handleDataRequest={handleWorkloadsTableParamsChange}
-        total={projectWorkloadsMetrics?.total ?? 0}
+        total={projectWorkloadsMetrics?.pagination?.total ?? 0}
         data={projectWorkloadsMetrics?.data ?? []}
         columns={columns}
         customRenderers={customRenderers}

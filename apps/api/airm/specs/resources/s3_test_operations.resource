@@ -10,6 +10,7 @@ Library             Process
 Library             Collections
 Library             String
 Library             OperatingSystem
+Library             StorageCredentials
 
 
 *** Variables ***
@@ -91,8 +92,12 @@ Submit S3 Reader Job
     RETURN    ${job_name}
 
 Submit S3 Cleanup Job
-    [Documentation]    Submit a Kubernetes Job to cleanup e2e test data from S3
-    [Arguments]    ${namespace}    ${storage_config_map_name}    ${secret_name}    ${access_key_name}    ${secret_key_name}    ${random_suffix}
+    [Documentation]    Submit a Kubernetes Job to cleanup e2e test data from S3.
+    ...
+    ...    The prefix bounds what is deleted to the objects the calling test wrote — passing the
+    ...    test's own key prefix keeps cleanup from reaching anything else that happens to share
+    ...    the bucket.
+    [Arguments]    ${namespace}    ${storage_config_map_name}    ${secret_name}    ${access_key_name}    ${secret_key_name}    ${test_data_prefix}    ${random_suffix}
 
     ${job_name}=    Set Variable    s3-cleanup-test-${random_suffix}
     ${manifest_path}=    Set Variable    ${CURDIR}/../test_data/manifests/s3-cleanup-job.yaml
@@ -104,6 +109,7 @@ Submit S3 Cleanup Job
     ${manifest}=    Replace String    ${manifest}    ACCESS_KEY_NAME_PLACEHOLDER    ${access_key_name}
     ${manifest}=    Replace String    ${manifest}    SECRET_KEY_NAME_PLACEHOLDER    ${secret_key_name}
     ${manifest}=    Replace String    ${manifest}    name: s3-cleanup-test-job    name: ${job_name}
+    ${manifest}=    Replace String    ${manifest}    value: "PLACEHOLDER"    value: "${test_data_prefix}"    count=1
 
     ${temp_file}=    Set Variable    /tmp/${job_name}.yaml
     Create File    ${temp_file}    ${manifest}
@@ -197,12 +203,59 @@ Delete Job
     ${result}=    Run Process    ${kubectl_cmd}    shell=True
     Log    Deleted job ${job_name}: ${result.stdout}    DEBUG
 
+Remove S3 Test Objects
+    [Documentation]    Delete the objects a test wrote under its own key prefix.
+    ...
+    ...    Call it while the storage ConfigMap and Secret still exist, since the cleanup Job reads
+    ...    the bucket and credentials from them. After deleting the objects, the Job deletes only
+    ...    buckets named e2e-test-bucket-* (the dedicated test-bucket convention); every other
+    ...    bucket is preserved as platform- or user-owned.
+    ...
+    ...    Best effort: a cleanup that cannot run must not fail a test whose assertions already
+    ...    passed, so a failure becomes a warning naming the prefix that was left behind.
+    [Arguments]    ${namespace}    ${storage_config_map_name}    ${secret_name}    ${access_key_name}    ${secret_key_name}    ${test_data_prefix}
+
+    # Empty until the Job exists, so the FINALLY below can tell "never submitted" from
+    # "submitted and then something went wrong".
+    VAR    ${job_name}    ${EMPTY}
+
+    TRY
+        ${random_suffix}=    Generate Random Suffix
+        ${job_name}=    Submit S3 Cleanup Job
+        ...    ${namespace}
+        ...    ${storage_config_map_name}
+        ...    ${secret_name}
+        ...    ${access_key_name}
+        ...    ${secret_key_name}
+        ...    ${test_data_prefix}
+        ...    ${random_suffix}
+
+        Wait For Job Completion    ${job_name}    ${namespace}    timeout=2 min
+        ${logs}=    Get Job Logs    ${job_name}    ${namespace}
+        Verify Job Succeeded    ${job_name}    ${namespace}
+
+        Log    Removed S3 test objects under prefix: ${test_data_prefix}    INFO
+    EXCEPT    AS    ${error}
+        Log    Could not remove S3 test objects under prefix ${test_data_prefix}: ${error}    WARN
+    FINALLY
+        # A Job that never reaches a finished state is never reaped by ttlSecondsAfterFinished,
+        # so a wait timeout would otherwise strand it. Delete on every path.
+        IF    '${job_name}' != '${EMPTY}'
+            Delete Job    ${job_name}    ${namespace}
+        END
+    END
+
 Generate Random Suffix
-    [Documentation]    Generate a random suffix for unique resource names
+    [Documentation]    Generate a unique suffix for resource names and S3 key prefixes.
+    ...
+    ...    The timestamp keeps the value sortable when inspecting leftovers; the random token is
+    ...    what makes it unique. A 4-digit random was not enough for concurrently-created
+    ...    Kubernetes Jobs in the same namespace — a collision is a hard create failure.
+    ...
+    ...    Lowercase hex keeps the result valid inside a Kubernetes resource name.
     ${timestamp}=    Evaluate    int(__import__('time').time())
-    ${random}=    Evaluate    __import__('random').randint(1000, 9999)
-    ${suffix}=    Set Variable    ${timestamp}-${random}
-    RETURN    ${suffix}
+    ${token}=    Evaluate    __import__('uuid').uuid4().hex[:12]
+    RETURN    ${timestamp}-${token}
 
 Create Storage ConfigMap For Local Testing
     [Documentation]    Create ConfigMap for storage in local development (Agent doesn't run)
@@ -231,32 +284,20 @@ Create Storage ConfigMap For Local Testing
     Log    Created ConfigMap ${config_map_name} in namespace ${namespace}    INFO
 
 Create ExternalSecret For Local Testing
-    [Documentation]    Create ExternalSecret for storage credentials in local development
-    ...    This ExternalSecret would normally be created by the Agent
-    ...    For local testing, we create a regular Secret with the same credentials
-    ...    Reads Minio credentials from the cluster secret to avoid hardcoding
-    [Arguments]    ${namespace}    ${secret_name}    ${access_key_name}    ${secret_key_name}
+    [Documentation]    Create the Secret the S3 Jobs mount, in local development.
+    ...    This Secret would normally be created by the Agent.
+    ...    Uses the per-project credentials the platform syncs into the project namespace — the
+    ...    access path a project's own workloads use — rather than a cluster storage-admin identity
+    ...    from a MinIO tenant no current release deploys.
+    ...    The read, decode and apply all happen inside one Python keyword: Robot logs every
+    ...    variable assignment at INFO, so holding the credentials in Robot variables here would put
+    ...    the access key and secret key into routine test output.
+    ...    bucket_url is the storage spec's own, the same value the Jobs' ConfigMap carries, so the
+    ...    absent-credentials skip is decided about the store those Jobs actually use.
+    [Arguments]    ${namespace}    ${secret_name}    ${access_key_name}    ${secret_key_name}    ${bucket_url}
 
-    # Read Minio credentials from the cluster secret rather than hardcoding
-    ${minio_creds}=    Get Minio Credentials From Cluster
-
-    ${manifest}=    Catenate    SEPARATOR=\n
-    ...    apiVersion: v1
-    ...    kind: Secret
-    ...    metadata:
-    ...    ${SPACE}${SPACE}name: ${secret_name}
-    ...    ${SPACE}${SPACE}namespace: ${namespace}
-    ...    type: Opaque
-    ...    stringData:
-    ...    ${SPACE}${SPACE}${access_key_name}: "${minio_creds}[user]"
-    ...    ${SPACE}${SPACE}${secret_key_name}: "${minio_creds}[password]"
-
-    ${temp_file}=    Set Variable    /tmp/storage-secret-${secret_name}.yaml
-    Create File    ${temp_file}    ${manifest}
-
-    ${kubectl_cmd}=    Set Variable    kubectl apply -f ${temp_file} -n ${namespace}
-    ${result}=    Run Process    ${kubectl_cmd}    shell=True
-    Should Be Equal As Integers    ${result.rc}    0    msg=Failed to create Secret: ${result.stderr}
+    Provision Storage Credentials Secret
+    ...    ${namespace}    ${secret_name}    ${access_key_name}    ${secret_key_name}    ${bucket_url}
 
     Log    Created Secret ${secret_name} in namespace ${namespace}    INFO
 
@@ -271,34 +312,3 @@ Delete Storage Resources For Local Testing
     ${kubectl_cmd}=    Set Variable    kubectl delete secret ${secret_name} -n ${namespace} --ignore-not-found=true
     ${result}=    Run Process    ${kubectl_cmd}    shell=True
     Log    Deleted Secret ${secret_name}: ${result.stdout}    DEBUG
-
-Get Minio Credentials From Cluster
-    [Documentation]    Reads Minio root credentials from the cluster secret.
-    ...    Parses the config.env from minio-tenant-default/default-minio-tenant-env-configuration.
-    ...    Returns a dictionary with 'user' and 'password' keys.
-
-    # Extract MINIO_ROOT_USER from the secret
-    ${user_result}=    Run Process
-    ...    kubectl get secret default-minio-tenant-env-configuration -n minio-tenant-default -o jsonpath\='{.data.config\\.env}' | base64 -d | grep 'MINIO_ROOT_USER\=' | head -1 | sed 's/.*MINIO_ROOT_USER\=//' | tr -d '"'
-    ...    shell=True
-    Should Be Equal As Integers    ${user_result.rc}    0
-    ...    msg=Failed to read Minio user from cluster: ${user_result.stderr}
-    Should Not Be Empty    ${user_result.stdout}
-    ...    msg=MINIO_ROOT_USER not found in cluster secret
-
-    # Extract MINIO_ROOT_PASSWORD from the secret
-    ${password_result}=    Run Process
-    ...    kubectl get secret default-minio-tenant-env-configuration -n minio-tenant-default -o jsonpath\='{.data.config\\.env}' | base64 -d | grep 'MINIO_ROOT_PASSWORD\=' | head -1 | sed 's/.*MINIO_ROOT_PASSWORD\=//' | tr -d '"'
-    ...    shell=True
-    Should Be Equal As Integers    ${password_result.rc}    0
-    ...    msg=Failed to read Minio password from cluster: ${password_result.stderr}
-    Should Not Be Empty    ${password_result.stdout}
-    ...    msg=MINIO_ROOT_PASSWORD not found in cluster secret
-
-    &{credentials}=    Create Dictionary
-    ...    user=${user_result.stdout}
-    ...    password=${password_result.stdout}
-
-    Log    Retrieved Minio credentials for user: ${user_result.stdout}    DEBUG
-
-    RETURN    ${credentials}

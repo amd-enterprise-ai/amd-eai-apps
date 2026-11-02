@@ -14,6 +14,7 @@ import rich.table
 import rich_click as click
 from loguru import logger
 from rich.console import Console
+from rich.markup import escape
 
 from . import config
 from .core import patches, registration, repository, utils
@@ -59,7 +60,10 @@ def init(force: bool = False, skip_patches: bool = False) -> None:
     init_result = repository.initialize(force)
 
     if not init_result["success"]:
-        console.print(f"[bold red]❌ {init_result['message']}")
+        # The message quotes PATCHED_VERSION's contents, so it must be escaped: an
+        # unescaped "[/]" in that file would silently delete part of the very value
+        # this diagnostic exists to quote, or raise MarkupError and lose the line.
+        console.print(f"[bold red]❌ {escape(init_result['message'])}")
         sys.exit(1)
     else:
         console.print(f"✅ Repository initialized to commit {init_result['commit'][:8]}")
@@ -74,41 +78,25 @@ def init(force: bool = False, skip_patches: bool = False) -> None:
 
     if not results:
         console.print("[bold yellow]⚠️ No patches applied[/]")
-    else:
-        success_count = sum(1 for r in results if r["success"])
-        already_applied_count = sum(
-            1 for r in results if r["success"] and r.get("message") == "Changes already applied"
-        )
-        applied_count = sum(1 for r in results if r["success"] and r.get("message") == "Changes applied successfully")
-        failed_count = sum(1 for r in results if not r["success"])
+        return
 
-        # Show summary based on what happened
-        if success_count == len(results):
-            if already_applied_count > 0 and applied_count == 0:
-                console.print(
-                    f"[bold green]✅ All patches verified[/] ([grey70]{already_applied_count} already applied[/grey70])"
-                )
-            elif already_applied_count > 0:
-                console.print(
-                    f"[bold green]✅ All patches processed successfully[/] ([green]{applied_count} applied[/green], [grey70]{already_applied_count} already applied[/grey70])"
-                )
-            else:
-                console.print("[bold green]✅ All patches applied successfully[/]")
-        else:
-            console.print(f"[bold yellow]⚠️ {failed_count} out of {len(results)} patches could not be applied[/]")
+    failed_count = sum(1 for r in results if not r["success"])
 
-        # Show details for all patches with their status
-        logger.debug("Detailed patch application results:")
-        for result in results:
-            if not result["success"]:
-                console.print(f"  - {result['name']}: {result['message']}")
-            elif result.get("message") == "Changes already applied":
-                console.print(f"  - {result['name']}: [grey70]{result.get('message', 'Already applied')}[/grey70]")
-            elif result.get("message") == "Files already exist, patch skipped":
-                # Don't show skipped patches to reduce noise
-                pass
-            else:
-                console.print(f"  - {result['name']}: {result.get('message', 'Applied successfully')}")
+    if failed_count == 0:
+        console.print("[bold green]✅ All patches applied successfully[/]")
+        return
+
+    console.print(f"[bold red]❌ {failed_count} out of {len(results)} patches could not be applied[/]")
+    logger.debug("Detailed patch application results:")
+    for result in results:
+        if not result["success"]:
+            console.print(f"  - {result['name']}: {result['message']}")
+
+    # A failed 3-way merge leaves conflict markers in the vendored chart, so the tree
+    # this command produces is not safe to package. Fail loudly rather than let a
+    # downstream build ship a broken chart.
+    console.print("[bold red]The workloads tree is left in a broken state. Fix the patches and re-run 'wm init'.[/]")
+    sys.exit(1)
 
 
 @cli.command()
@@ -150,25 +138,11 @@ def update():
         console.print("[bold yellow]⚠️ No patches applied[/]")
     else:
         success_count = sum(1 for r in results if r["success"])
-        already_applied_count = sum(
-            1 for r in results if r["success"] and r.get("message") == "Changes already applied"
-        )
-        applied_count = sum(1 for r in results if r["success"] and r.get("message") == "Changes applied successfully")
 
-        # Show summary based on what happened
         if success_count == len(results):
-            if already_applied_count > 0 and applied_count == 0:
-                console.print(
-                    f"[bold green]✅ All patches verified[/] ([grey70]{already_applied_count} already applied[/grey70])"
-                )
-            elif already_applied_count > 0:
-                console.print(
-                    f"[bold green]✅ All patches processed successfully[/] ([green]{applied_count} applied[/green], [grey70]{already_applied_count} already applied[/grey70])"
-                )
-            else:
-                console.print("[bold green]✅ All patches applied successfully[/]")
+            console.print("[bold green]✅ All patches applied successfully[/]")
         else:
-            failed_count = sum(1 for r in results if not r["success"])
+            failed_count = len(results) - success_count
             console.print(f"[bold yellow]⚠️ {failed_count} out of {len(results)} patches could not be applied[/]")
             # Show details for failed patches
             for result in results:
@@ -176,6 +150,10 @@ def update():
                     console.print(f"  - {result['name']}: {result['message']}")
 
         if success_count < len(results):
+            # Unlike 'init', this command exits 0 on a patch failure. Conflicts are the
+            # expected outcome of moving to a newer upstream version, and the operator
+            # resolves them by hand in the tree this command just left behind. Nothing
+            # packages that tree, so failing hard here would only break the workflow.
             console.print("\n[bold yellow]Some patches need to be updated for the new version of the workloads.[/]")
             console.print("Run 'wm create-patches' after fixing the conflicts.")
 
@@ -185,9 +163,9 @@ def create_patches():
     """Create patches from modified workloads."""
     for w in get_workloads():
         if w.is_changed:
-            success = patches.create_patch(w.dir_name)
-            if not success:
-                console.print(f"[bold yellow]⚠️ Failed to create patch for {w.dir_name}[/]")
+            result = patches.create_patch(w.dir_name)
+            if not result["success"]:
+                console.print(f"[bold yellow]⚠️ Failed to create patch for {w.dir_name}: {result['error']}[/]")
 
     # Get list of created patches
     created_patches = [p for p in patches.get_available_patches()]
@@ -230,8 +208,29 @@ def register(workload: str | None, url: str, yes: bool = False) -> None:
     dir_status = repository.check_directories()
     if not dir_status["workloads_repo_exists"]:
         console.print("[bold red]⚠️ Workloads repository not found. Cloning repo...[/]")
-        repository.initialize(force=True)
-        patches.apply_patches()
+        init_result = repository.initialize(force=True)
+
+        # Without this check a failed clone falls through to patching an absent or partial
+        # tree, and the operator sees a patch error instead of the clone error that caused it.
+        if not init_result["success"]:
+            console.print(f"[bold red]❌ {init_result['message']}[/]")
+            sys.exit(1)
+
+        results = patches.apply_patches()
+
+        failed_count = sum(1 for r in results if not r["success"])
+        if failed_count > 0:
+            console.print(f"[bold red]❌ {failed_count} out of {len(results)} patches could not be applied[/]")
+            for result in results:
+                if not result["success"]:
+                    console.print(f"  - {result['name']}: {result['message']}")
+
+            # A failed patch leaves conflict markers in the vendored chart, so registering it
+            # now would publish unparseable YAML, the exact failure this clone step exists to prevent.
+            console.print(
+                "[bold red]The workloads tree is left in a broken state. Fix the patches and re-run 'wm init'.[/]"
+            )
+            sys.exit(1)
 
     token = os.environ.get("TOKEN")
     if not token:
@@ -317,14 +316,13 @@ def register(workload: str | None, url: str, yes: bool = False) -> None:
             for failed in failed_workloads:
                 console.print(f"  - {failed.dir_name}")
 
-            # Only show success message if there are no failed workloads
-            if success_count == len(registerable_workloads):
-                console.print("[bold green]✅ All workloads registered successfully[/]")
-            else:
-                console.print("[bold yellow]⚠️  Some workloads had issues during registration[/]")
-        else:
-            console.print("[bold green]✅ All workloads registered successfully[/]")
-            sys.exit(0)
+            # A partial registration leaves the service holding an incomplete set of charts.
+            # Exiting 0 here would let an automated caller treat that as a finished rollout.
+            console.print("[bold red]❌ Some workloads could not be registered[/]")
+            sys.exit(1)
+
+        console.print("[bold green]✅ All workloads registered successfully[/]")
+        sys.exit(0)
 
     # If no workload is provided and no --yes flag, show interactive selection
     elif not workload:

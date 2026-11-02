@@ -19,5 +19,8 @@ SPDX-License-Identifier: MIT
     <include file="007_make_audit_user_fields_nullable.xml" relativeToChangelogFile="true"/>
     <include file="008_rename_api_keys_name_to_display_name.xml" relativeToChangelogFile="true"/>
     <include file="009_add_overlays_display_name.xml" relativeToChangelogFile="true"/>
+    <include file="010_api_keys_store_columns.xml" relativeToChangelogFile="true"/>
+    <include file="012_readd_cluster_auth_key_id_if_missing.xml" relativeToChangelogFile="true"/>
+    <include file="013_add_workload_dataset_refs.xml" relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

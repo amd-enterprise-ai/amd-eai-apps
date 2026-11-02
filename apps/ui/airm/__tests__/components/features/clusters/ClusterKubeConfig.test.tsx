@@ -41,7 +41,7 @@ describe('ClusterKubeConfig', () => {
       expect(screen.getByText('config.title')).toBeInTheDocument(),
     );
     await waitFor(() =>
-      expect(screen.getByText('mock-kube-config')).toBeInTheDocument(),
+      expect(screen.getByDisplayValue('mock-kube-config')).toBeInTheDocument(),
     );
   });
 });

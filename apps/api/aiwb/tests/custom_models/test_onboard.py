@@ -11,6 +11,7 @@ creation/patch, conflict detection, and the k8s-first ordering guarantee:
 the CR is the source of truth and is written before the S3 manifest mirror.
 """
 
+import base64
 import re
 from collections.abc import Iterator
 from typing import Any
@@ -23,17 +24,22 @@ from kubernetes_asyncio.client import ApiException
 from minio.error import S3Error
 from pydantic import ValidationError
 
-from api_common.exceptions import ConflictException, ExternalServiceError, ForbiddenException, ValidationException
-from app.aims.crds import AIMModelResource
+from api_common.exceptions import (
+    ConflictException,
+    ExternalServiceError,
+    ForbiddenException,
+    NotFoundException,
+    ValidationException,
+)
+from app.aims.crds import AIMModelResource, AIMProfileResource, AIMProfileSpec
 from app.custom_models.constants import (
     AIM_BASE_MODEL_NAME,
+    AUDIO_CAPABLE_BASE_REPOSITORIES,
     CANONICAL_REPO_ID_ANNOTATION,
     COMPONENT_ID_ANNOTATION,
     DEFAULT_AIM_DEPLOYMENT_IMAGE_REF,
-    MINIO_CREDENTIALS_ACCESS_KEY_KEY,
-    MINIO_CREDENTIALS_SECRET_KEY_KEY,
-    MINIO_CREDENTIALS_SECRET_NAME,
     MODEL_DISPLAY_NAME_ANNOTATION,
+    MODEL_PRECISION_ANNOTATION,
     RADEON_AIM_DEPLOYMENT_IMAGE_REF,
     REVISION_ANNOTATION,
     SOURCE_DESCRIPTION_ANNOTATION,
@@ -46,13 +52,17 @@ from app.custom_models.service import (
     _base_model_name_from_image_ref,
     _build_aim_base_model_manifest,
     _build_custom_aim_model_manifest,
-    _verify_minio_credentials_secret,
     ensure_namespace_aim_base_model,
     onboard_custom_model_source,
     preview_model_source,
 )
 from app.dispatch.crds import K8sMetadata
-from app.minio.config import MINIO_URL
+from app.minio.config import (
+    MINIO_BUCKET,
+    MINIO_URL,
+)
+from app.storages.constants import STORAGE_CONFIGMAP_LABEL, STORAGE_TYPE_LABEL
+from app.storages.enums import StorageType
 from app.workloads.constants import (
     CANONICAL_NAME_LABEL,
     DISPLAY_NAME_ANNOTATION,
@@ -87,9 +97,54 @@ HUB_RESPONSE = {
 TEST_IMAGE = "docker.io/amd/tinyllama:1.0.0"
 TEST_SUBMITTER = "alice@example.com"
 
+
+def _cluster_model_item(
+    name: str,
+    image: str,
+    *,
+    base_only: bool = True,
+    discovered_supported: int = 1,
+) -> dict[str, Any]:
+    managed_profiles = (
+        {"base": 1, "ready": 1, "total": 1} if base_only else {"base": 1, "inference": 1, "ready": 2, "total": 2}
+    )
+    return {
+        "metadata": {"name": name},
+        "spec": {"image": image},
+        "status": {
+            "managedProfiles": managed_profiles,
+            "discoveredProfiles": {"supported": discovered_supported},
+        },
+    }
+
+
 # Sha used by the default `_make_request` payload and by the autouse Hub
 # re-verify mock; keep these aligned so the happy path stays a no-op.
 _DEFAULT_REQUEST_SHA = "abc123"
+
+
+def _make_s3_storage_config_map(
+    *,
+    secret_name: str = "my-s3-secret",
+    bucket_url: str | None = None,
+    region: str | None = None,
+    access_key_name: str = "minio-access-key",
+    secret_key_name: str = "minio-secret-key",
+) -> MagicMock:
+    data: dict[str, str] = {
+        "TYPE": StorageType.S3.value,
+        "SECRET_NAME": secret_name,
+    }
+    if bucket_url:
+        data["BUCKET_URL"] = bucket_url
+    if region:
+        data["REGION"] = region
+    data["ACCESS_KEY_NAME"] = access_key_name
+    data["SECRET_KEY_NAME"] = secret_key_name
+    return MagicMock(
+        data=data,
+        metadata=MagicMock(labels={STORAGE_CONFIGMAP_LABEL: "true", STORAGE_TYPE_LABEL: StorageType.S3.value}),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -110,18 +165,6 @@ def stub_onboard_hub_reverify() -> Iterator[dict[str, AsyncMock]]:
         fetch_mock.return_value = {"sha": _DEFAULT_REQUEST_SHA}
         token_mock.return_value = "fake-hf-token"
         yield {"fetch": fetch_mock, "token": token_mock}
-
-
-@pytest.fixture(autouse=True)
-def stub_schedule_import() -> Iterator[MagicMock]:
-    """Stop onboard from spawning the real detached weight-import task.
-
-    These tests cover the CR/S3 orchestration, not the import itself; without
-    this stub each onboard would fire a background task hitting the network.
-    The dedicated import tests in test_weights_import.py exercise the importer.
-    """
-    with patch("app.custom_models.service.schedule_import") as schedule_mock:
-        yield schedule_mock
 
 
 def _no_such_key_s3_error() -> S3Error:
@@ -158,10 +201,13 @@ _CREATED_AIM_MODEL_STUB = {
     "spec": {},
 }
 
-_AIM_BASE_STUB = _build_aim_base_model_manifest(
-    namespace="test-namespace",
-    image_ref=DEFAULT_AIM_DEPLOYMENT_IMAGE_REF,
-)
+_BASE_MODEL_STUBS = {
+    name: _build_aim_base_model_manifest(namespace="test-namespace", image_ref=image_ref, model_name=name)
+    for name, image_ref in (
+        (AIM_BASE_MODEL_NAME, DEFAULT_AIM_DEPLOYMENT_IMAGE_REF),
+        (_base_model_name_from_image_ref(TEST_IMAGE), TEST_IMAGE),
+    )
+}
 
 
 @pytest.fixture
@@ -172,8 +218,9 @@ def mock_kube_client() -> AsyncMock:
     mock.custom_objects.list_namespaced_custom_object = AsyncMock(return_value={"items": []})
 
     async def get_namespaced_custom_object(*_args: Any, name: str, **_kwargs: Any) -> dict:
-        if name == AIM_BASE_MODEL_NAME:
-            return _AIM_BASE_STUB
+        stub = _BASE_MODEL_STUBS.get(name)
+        if stub is not None:
+            return stub
         raise ApiException(status=404, reason="Not Found")
 
     mock.custom_objects.get_namespaced_custom_object = AsyncMock(side_effect=get_namespaced_custom_object)
@@ -181,6 +228,9 @@ def mock_kube_client() -> AsyncMock:
     # default to a valid-shaped payload; individual tests override as needed.
     mock.custom_objects.create_namespaced_custom_object = AsyncMock(return_value=_CREATED_AIM_MODEL_STUB)
     mock.custom_objects.patch_namespaced_custom_object = AsyncMock(return_value=_CREATED_AIM_MODEL_STUB)
+    mock.core_v1 = AsyncMock()
+    mock.core_v1.read_namespaced_config_map = AsyncMock(return_value=_make_s3_storage_config_map())
+    mock.core_v1.read_namespaced_secret = AsyncMock(return_value=MagicMock())
     return mock
 
 
@@ -195,8 +245,8 @@ def _make_existing_aim_model(
     source_uri: str | None = None,
     component_id: str | None = _EXISTING_COMPONENT_ID,
 ) -> AIMModelResource:
-    # sourceUri is normally the s3:// prefix where the import lands; tests rarely
-    # care about its exact shape, so it defaults to a placeholder unless overridden.
+    # HF onboarding now keeps the upstream Hugging Face source URI directly.
+    # Tests that care about exact shape override this explicitly.
     # component_id defaults to a stable value so patch-path tests can assert it's
     # preserved across idempotent calls; pass None to simulate a legacy CR.
     annotations: dict[str, str] = {}
@@ -223,7 +273,7 @@ def _make_existing_aim_model(
                     "modelSources": [
                         {
                             "modelId": repo_id,
-                            "sourceUri": source_uri or f"s3://test-bucket/test-namespace/custom-models/{name}/weights/",
+                            "sourceUri": source_uri or f"hf://{repo_id}",
                         }
                     ],
                 },
@@ -256,11 +306,41 @@ def test_onboard_request_rejects_empty_required_string(field: str) -> None:
     assert any(err["loc"] == (field,) for err in exc_info.value.errors())
 
 
+def test_onboard_request_s3_source_requires_s3_storage_name() -> None:
+    """S3 onboarding payloads require s3StorageName."""
+    payload = {
+        "source_type": "s3",
+        "repo_id": "s3://my-bucket/path/to/model",
+        "revision": "s3",
+        "sha": "s3",
+        "display_name": "S3 model",
+        "image": TEST_IMAGE,
+    }
+    with pytest.raises(ValidationError, match="s3StorageName is required when sourceType is 's3'"):
+        OnboardRequest(**payload)
+
+
+def test_onboard_request_s3_source_rejects_hf_token_secret_name() -> None:
+    """S3 onboarding payloads reject hfTokenSecretName to avoid mixed source credentials."""
+    payload = {
+        "source_type": "s3",
+        "repo_id": "s3://my-bucket/path/to/model",
+        "revision": "s3",
+        "sha": "s3",
+        "display_name": "S3 model",
+        "image": TEST_IMAGE,
+        "s3_storage_name": "my-s3-storage",
+        "hf_token_secret_name": "my-hf-secret",
+    }
+    with pytest.raises(ValidationError, match="hfTokenSecretName is only supported when sourceType is 'huggingFace'"):
+        OnboardRequest(**payload)
+
+
 # --- _build_custom_aim_model_manifest ---
 
 
 _RESOURCE_NAME = "llama-3-8b-import-abc12345"
-_SOURCE_URI = f"s3://test-bucket/test-namespace/custom-models/{_RESOURCE_NAME}/weights/"
+_SOURCE_URI = "hf://meta-llama/Llama-3-8B"
 _BUILDER_COMPONENT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
@@ -271,6 +351,7 @@ def _make_request(**overrides: Any) -> OnboardRequest:
     touch this factory, not every test body.
     """
     defaults: dict = {
+        "source_type": "huggingFace",
         "repo_id": "meta-llama/Llama-3-8B",
         "revision": "main",
         "sha": "abc123",
@@ -362,6 +443,11 @@ def test_base_model_name_from_image_ref_falls_back_for_invalid_ref() -> None:
     assert _base_model_name_from_image_ref("not-a-valid-tagged-ref") == AIM_BASE_MODEL_NAME
 
 
+def test_base_model_name_from_image_ref_rejects_invalid_selected_ref() -> None:
+    with pytest.raises(ValidationException, match="does not identify a supported runtime family"):
+        _base_model_name_from_image_ref("registry.example.com/custom-base", fallback=False)
+
+
 def test_manifest_overrides_stamp_identity_required_for_base_role() -> None:
     """role=base requires overrides.aimId and overrides.modelId (base profiles
     carry no identity of their own); the builder sets both to the repo id."""
@@ -400,6 +486,22 @@ def test_manifest_carries_source_annotations() -> None:
     assert annotations[REVISION_ANNOTATION] == "dev-branch"
     assert annotations[SOURCE_SHA_ANNOTATION] == "abc123"
     assert annotations[SOURCE_DESCRIPTION_ANNOTATION] == "An open model."
+
+
+def test_manifest_stamps_precision_annotation_from_custom_profile() -> None:
+    """The chosen precision is pruned from spec.profiles.overrides by the AIMModel
+    CRD, so the builder must also record it on a durable annotation the edit
+    prefill and deploy default read back."""
+    manifest = _build_manifest(_make_request(description="", custom_profile={"precision": "fp8"}))
+
+    assert manifest["metadata"]["annotations"][MODEL_PRECISION_ANNOTATION] == "fp8"
+
+
+def test_manifest_omits_precision_annotation_when_not_chosen() -> None:
+    """No customProfile precision means no precision annotation is stamped."""
+    manifest = _build_manifest(_make_request(description=""))
+
+    assert MODEL_PRECISION_ANNOTATION not in manifest["metadata"]["annotations"]
 
 
 def test_manifest_carries_airm_provenance_annotations() -> None:
@@ -442,15 +544,13 @@ def test_manifest_stamps_description_annotation_even_when_blank() -> None:
 
 def test_manifest_pins_source_in_model_sources() -> None:
     """overrides.modelSources is the engine's source of truth for where to load
-    the BYO weights from. modelId is the logical HF id; sourceUri is the s3://
-    prefix the importer writes to."""
+    the BYO weights from. modelId is the logical HF id; sourceUri is hf://."""
     manifest = _build_manifest(_make_request(description=""))
 
     sources = manifest["spec"]["profiles"]["overrides"]["modelSources"]
     assert len(sources) == 1
     assert sources[0]["modelId"] == "meta-llama/Llama-3-8B"
-    assert sources[0]["sourceUri"].startswith("s3://")
-    assert sources[0]["sourceUri"].endswith("/weights/")
+    assert sources[0]["sourceUri"] == "hf://meta-llama/Llama-3-8B"
 
 
 def test_manifest_sets_user_provided_image() -> None:
@@ -459,57 +559,23 @@ def test_manifest_sets_user_provided_image() -> None:
     assert manifest["spec"]["profiles"]["overrides"]["image"] == "registry.example.com/byom:v2"
 
 
-def test_manifest_always_injects_s3_credentials() -> None:
-    """aim-engine's check-size job requires AWS_* env vars to authenticate to
-    MinIO regardless of whether the model is gated — inject them unconditionally."""
+def test_manifest_hf_source_omits_s3_credentials() -> None:
+    """HF onboarding no longer stages weights through internal S3, so model source
+    env must not include AWS credential wiring."""
     manifest = _build_manifest(_make_request(description=""))
 
-    env = manifest["spec"]["profiles"]["overrides"]["modelSources"][0]["env"]
-    env_names = [e["name"] for e in env]
-    assert "AWS_ACCESS_KEY_ID" in env_names
-    assert "AWS_SECRET_ACCESS_KEY" in env_names
-    assert "AWS_ENDPOINT_URL" in env_names
-
-
-def test_manifest_s3_credentials_reference_minio_secret() -> None:
-    """AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must reference the
-    platform-provisioned minio-credentials secret so aim-engine can
-    authenticate without the API ever handling the raw credential values."""
-    manifest = _build_manifest(_make_request(description=""))
-
-    env = manifest["spec"]["profiles"]["overrides"]["modelSources"][0]["env"]
-    env_by_name = {e["name"]: e for e in env}
-
-    access_key = env_by_name["AWS_ACCESS_KEY_ID"]
-    assert access_key["valueFrom"]["secretKeyRef"]["name"] == MINIO_CREDENTIALS_SECRET_NAME
-    assert access_key["valueFrom"]["secretKeyRef"]["key"] == MINIO_CREDENTIALS_ACCESS_KEY_KEY
-
-    secret_key = env_by_name["AWS_SECRET_ACCESS_KEY"]
-    assert secret_key["valueFrom"]["secretKeyRef"]["name"] == MINIO_CREDENTIALS_SECRET_NAME
-    assert secret_key["valueFrom"]["secretKeyRef"]["key"] == MINIO_CREDENTIALS_SECRET_KEY_KEY
-
-
-def test_manifest_s3_endpoint_uses_minio_url_config() -> None:
-    """AWS_ENDPOINT_URL must match MINIO_URL so aim-engine talks to the
-    platform's MinIO instance and not a default public S3 endpoint."""
-    manifest = _build_manifest(_make_request(description=""))
-
-    env = manifest["spec"]["profiles"]["overrides"]["modelSources"][0]["env"]
-    env_by_name = {e["name"]: e for e in env}
-
-    assert env_by_name["AWS_ENDPOINT_URL"]["value"] == MINIO_URL
+    source = manifest["spec"]["profiles"]["overrides"]["modelSources"][0]
+    assert "env" not in source
 
 
 def test_manifest_wires_hf_token_when_secret_name_given() -> None:
-    """Gated/private models need HF_TOKEN appended after the S3 credentials
-    so aim-engine sees all required env vars on the weights source."""
+    """Gated/private models need HF_TOKEN wiring on the HF source."""
     manifest = _build_manifest(_make_request(description="", hf_token_secret_name="my-hf-secret"))
 
     env = manifest["spec"]["profiles"]["overrides"]["modelSources"][0]["env"]
     env_names = [e["name"] for e in env]
 
-    assert env_names[:3] == ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_ENDPOINT_URL"]
-    assert env_names[-1] == "HF_TOKEN"
+    assert env_names == ["HF_TOKEN"]
 
     hf_entry = next(e for e in env if e["name"] == "HF_TOKEN")
     assert hf_entry == {
@@ -519,55 +585,11 @@ def test_manifest_wires_hf_token_when_secret_name_given() -> None:
 
 
 def test_manifest_omits_hf_token_when_no_secret_name_given() -> None:
-    """Public models do not need HF_TOKEN — the env stanza should contain
-    only the three S3 credential vars."""
+    """Public models do not need HF_TOKEN; omit model-source env entirely."""
     manifest = _build_manifest(_make_request(description=""))
 
-    env = manifest["spec"]["profiles"]["overrides"]["modelSources"][0]["env"]
-    env_names = [e["name"] for e in env]
-
-    assert env_names == ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_ENDPOINT_URL"]
-
-
-# --- _verify_minio_credentials_secret ---
-
-
-@pytest.mark.asyncio
-async def test_verify_minio_credentials_secret_passes_when_present(mock_kube_client: AsyncMock) -> None:
-    """No exception is raised when the platform-provisioned secret exists."""
-    mock_kube_client.core_v1.read_namespaced_secret.return_value = MagicMock()
-
-    await _verify_minio_credentials_secret(mock_kube_client, "test-namespace")
-
-    mock_kube_client.core_v1.read_namespaced_secret.assert_called_once_with(
-        name=MINIO_CREDENTIALS_SECRET_NAME, namespace="test-namespace"
-    )
-
-
-@pytest.mark.asyncio
-async def test_verify_minio_credentials_secret_raises_400_when_missing(mock_kube_client: AsyncMock) -> None:
-    """A missing MinIO credentials secret raises ValidationException (400) with
-    an actionable message so the caller knows exactly what to provision."""
-    mock_kube_client.core_v1.read_namespaced_secret.side_effect = ApiException(status=404)
-
-    with pytest.raises(ValidationException, match=MINIO_CREDENTIALS_SECRET_NAME):
-        await _verify_minio_credentials_secret(mock_kube_client, "test-namespace")
-
-
-@pytest.mark.asyncio
-async def test_verify_minio_credentials_secret_wraps_non_404_errors_as_external_service_error(
-    mock_kube_client: AsyncMock,
-) -> None:
-    """Non-404 Kubernetes errors must surface as ExternalServiceError (502) so they
-    are handled consistently at the service layer instead of leaking the async
-    ApiException type that AIWB's exception handler does not recognise."""
-    api_error = ApiException(status=403, reason="Forbidden")
-    mock_kube_client.core_v1.read_namespaced_secret.side_effect = api_error
-
-    with pytest.raises(ExternalServiceError) as exc_info:
-        await _verify_minio_credentials_secret(mock_kube_client, "test-namespace")
-
-    assert exc_info.value.__cause__ is api_error
+    source = manifest["spec"]["profiles"]["overrides"]["modelSources"][0]
+    assert "env" not in source
 
 
 # --- derivedFrom bootstrap (aim-base) ---
@@ -615,6 +637,141 @@ async def test_ensure_namespace_aim_base_model_honors_custom_image_ref(mock_kube
 
 
 @pytest.mark.asyncio
+async def test_ensure_namespace_aim_base_model_rejects_selected_tag_collision(
+    mock_kube_client: AsyncMock,
+) -> None:
+    existing = _make_existing_aim_model(name="aim-radeon-base", source_uri=None)
+    existing.spec.image = "docker.io/amdenterpriseai/aim-radeon-base:0.11"
+    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = None
+    mock_kube_client.custom_objects.get_namespaced_custom_object.return_value = existing.model_dump(
+        by_alias=True, exclude_none=True
+    )
+
+    with pytest.raises(ConflictException, match="conflicts with requested image"):
+        await ensure_namespace_aim_base_model(
+            mock_kube_client,
+            "test-namespace",
+            image_ref=RADEON_AIM_DEPLOYMENT_IMAGE_REF,
+        )
+
+    mock_kube_client.custom_objects.patch_namespaced_custom_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("existing_image", "selected_image"),
+    [
+        ("docker.io/amdenterpriseai/aim-radeon-base:0.12", "amdenterpriseai/aim-radeon-base:0.12"),
+        ("amdenterpriseai/aim-radeon-base:0.12", "docker.io/amdenterpriseai/aim-radeon-base:0.12"),
+    ],
+)
+async def test_ensure_namespace_aim_base_model_accepts_registry_alias_of_existing_image(
+    mock_kube_client: AsyncMock, existing_image: str, selected_image: str
+) -> None:
+    existing = _make_existing_aim_model(name="aim-radeon-base", source_uri=None)
+    existing.spec.image = existing_image
+    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = None
+    mock_kube_client.custom_objects.get_namespaced_custom_object.return_value = existing.model_dump(
+        by_alias=True, exclude_none=True
+    )
+
+    model_name = await ensure_namespace_aim_base_model(
+        mock_kube_client,
+        "test-namespace",
+        image_ref=selected_image,
+    )
+
+    assert model_name == "aim-radeon-base"
+    mock_kube_client.custom_objects.patch_namespaced_custom_object.assert_not_called()
+    mock_kube_client.custom_objects.create_namespaced_custom_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ensure_namespace_aim_base_model_accepts_create_race_registry_alias(
+    mock_kube_client: AsyncMock,
+) -> None:
+    existing = _make_existing_aim_model(name="aim-radeon-base", source_uri=None)
+    existing.spec.image = f"docker.io/{RADEON_AIM_DEPLOYMENT_IMAGE_REF}"
+    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = [
+        ApiException(status=404),
+        existing.model_dump(by_alias=True, exclude_none=True),
+    ]
+    mock_kube_client.custom_objects.create_namespaced_custom_object.side_effect = ApiException(status=409)
+
+    model_name = await ensure_namespace_aim_base_model(
+        mock_kube_client,
+        "test-namespace",
+        image_ref=RADEON_AIM_DEPLOYMENT_IMAGE_REF,
+    )
+
+    assert model_name == "aim-radeon-base"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "image_ref",
+    [
+        "docker.io/vendor/aim_base:1",
+        "docker.io/vendor/aim..base:1",
+        "docker.io/vendor/aim-.base:1",
+        f"docker.io/vendor/{'a' * 64}.base:1",
+    ],
+)
+async def test_ensure_namespace_aim_base_model_rejects_invalid_k8s_family_name(
+    mock_kube_client: AsyncMock,
+    image_ref: str,
+) -> None:
+    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = ApiException(status=404)
+
+    with pytest.raises(ValidationException, match="does not identify a supported runtime family"):
+        await ensure_namespace_aim_base_model(
+            mock_kube_client,
+            "test-namespace",
+            image_ref=image_ref,
+        )
+
+    mock_kube_client.custom_objects.create_namespaced_custom_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "image_ref",
+    [
+        "registry.example.com/custom-base",
+        "registry.example.com:5000/custom-base",
+    ],
+)
+async def test_ensure_namespace_aim_base_model_rejects_unparseable_selected_image(
+    mock_kube_client: AsyncMock,
+    image_ref: str,
+) -> None:
+    with pytest.raises(ValidationException, match="does not identify a supported runtime family"):
+        await ensure_namespace_aim_base_model(
+            mock_kube_client,
+            "test-namespace",
+            image_ref=image_ref,
+        )
+
+    mock_kube_client.custom_objects.create_namespaced_custom_object.assert_not_called()
+    mock_kube_client.custom_objects.get_namespaced_custom_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ensure_namespace_aim_base_model_accepts_dotted_family_name(mock_kube_client: AsyncMock) -> None:
+    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = ApiException(status=404)
+
+    await ensure_namespace_aim_base_model(
+        mock_kube_client,
+        "test-namespace",
+        image_ref="docker.io/vendor/aim-base.v2:1",
+    )
+
+    body = mock_kube_client.custom_objects.create_namespaced_custom_object.call_args.kwargs["body"]
+    assert body["metadata"]["name"] == "aim-base.v2"
+    assert body["spec"]["image"] == "docker.io/vendor/aim-base.v2:1"
+
+
+@pytest.mark.asyncio
 async def test_ensure_namespace_aim_base_model_honors_custom_model_name(mock_kube_client: AsyncMock) -> None:
     mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = ApiException(status=404)
 
@@ -635,7 +792,7 @@ async def test_ensure_namespace_aim_base_model_derives_name_from_discovered_imag
     mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = ApiException(status=404)
     discovered_image = "docker.io/silogenai/aim-radeon-base:0.12-preview"
 
-    with patch("app.custom_models.service.get_cluster_base_image_ref", AsyncMock(return_value=discovered_image)):
+    with patch("app.custom_models.service.get_cluster_base_image_refs", AsyncMock(return_value=[discovered_image])):
         model_name = await ensure_namespace_aim_base_model(mock_kube_client, "test-namespace")
 
     body = mock_kube_client.custom_objects.create_namespaced_custom_object.call_args.kwargs["body"]
@@ -657,7 +814,7 @@ async def test_ensure_namespace_aim_base_model_repoints_existing_image_mismatch(
     mock_kube_client.custom_objects.get_namespaced_custom_object = AsyncMock(side_effect=get_namespaced_custom_object)
     discovered_image = "docker.io/silogenai/aim-radeon-base:0.12-preview"
 
-    with patch("app.custom_models.service.get_cluster_base_image_ref", AsyncMock(return_value=discovered_image)):
+    with patch("app.custom_models.service.get_cluster_base_image_refs", AsyncMock(return_value=[discovered_image])):
         model_name = await ensure_namespace_aim_base_model(mock_kube_client, "test-namespace")
 
     assert model_name == "aim-radeon-base"
@@ -669,23 +826,189 @@ async def test_ensure_namespace_aim_base_model_repoints_existing_image_mismatch(
 
 @pytest.mark.asyncio
 async def test_ensure_namespace_aim_base_model_tolerates_create_race_conflict(mock_kube_client: AsyncMock) -> None:
-    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = ApiException(status=404)
+    existing = _build_aim_base_model_manifest(
+        namespace="test-namespace",
+        image_ref=DEFAULT_AIM_DEPLOYMENT_IMAGE_REF,
+    )
+    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = [
+        ApiException(status=404),
+        existing,
+    ]
     mock_kube_client.custom_objects.create_namespaced_custom_object.side_effect = ApiException(status=409)
 
-    await ensure_namespace_aim_base_model(mock_kube_client, "test-namespace")
+    with patch(
+        "app.custom_models.service.get_cluster_base_image_refs",
+        AsyncMock(return_value=[DEFAULT_AIM_DEPLOYMENT_IMAGE_REF]),
+    ):
+        await ensure_namespace_aim_base_model(mock_kube_client, "test-namespace")
+
+
+@pytest.mark.asyncio
+async def test_ensure_namespace_aim_base_model_rejects_create_race_tag_mismatch(
+    mock_kube_client: AsyncMock,
+) -> None:
+    existing = _make_existing_aim_model(name="aim-radeon-base", source_uri=None)
+    existing.spec.image = "docker.io/amdenterpriseai/aim-radeon-base:0.11"
+    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = [
+        ApiException(status=404),
+        existing.model_dump(by_alias=True, exclude_none=True),
+    ]
+    mock_kube_client.custom_objects.create_namespaced_custom_object.side_effect = ApiException(status=409)
+
+    with pytest.raises(ConflictException, match="conflicts with requested image"):
+        await ensure_namespace_aim_base_model(
+            mock_kube_client,
+            "test-namespace",
+            image_ref=RADEON_AIM_DEPLOYMENT_IMAGE_REF,
+        )
 
 
 @pytest.mark.asyncio
 async def test_ensure_namespace_aim_base_model_noop_when_scope_not_namespace(mock_kube_client: AsyncMock) -> None:
     with patch("app.custom_models.service.AIM_BASE_MODEL_SCOPE", "Cluster"):
-        await ensure_namespace_aim_base_model(mock_kube_client, "test-namespace")
+        model_name = await ensure_namespace_aim_base_model(mock_kube_client, "test-namespace")
 
+    assert model_name == AIM_BASE_MODEL_NAME
     mock_kube_client.custom_objects.get_namespaced_custom_object.assert_not_called()
     mock_kube_client.custom_objects.create_namespaced_custom_object.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_onboard_provisions_aim_base_before_custom_model_create(
+async def test_ensure_cluster_scope_returns_selected_family_without_provisioning(
+    mock_kube_client: AsyncMock,
+) -> None:
+    cluster_models = [_cluster_model_item("aim-radeon-base-012", RADEON_AIM_DEPLOYMENT_IMAGE_REF)]
+    with (
+        patch("app.custom_models.service.AIM_BASE_MODEL_SCOPE", "Cluster"),
+        patch("app.custom_models.service.aims_gateway.list_aim_cluster_models", return_value=cluster_models),
+    ):
+        model_name = await ensure_namespace_aim_base_model(
+            mock_kube_client,
+            "test-namespace",
+            image_ref=RADEON_AIM_DEPLOYMENT_IMAGE_REF,
+        )
+
+    assert model_name == "aim-radeon-base-012"
+    mock_kube_client.custom_objects.get_namespaced_custom_object.assert_not_called()
+    mock_kube_client.custom_objects.create_namespaced_custom_object.assert_not_called()
+    mock_kube_client.custom_objects.patch_namespaced_custom_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ensure_cluster_scope_matches_image_independent_of_resource_name(
+    mock_kube_client: AsyncMock,
+) -> None:
+    cluster_models = [_cluster_model_item("aim-base-013", "amdenterpriseai/aim-base:0.13")]
+    with (
+        patch("app.custom_models.service.AIM_BASE_MODEL_SCOPE", "Cluster"),
+        patch("app.custom_models.service.aims_gateway.list_aim_cluster_models", return_value=cluster_models),
+    ):
+        model_name = await ensure_namespace_aim_base_model(
+            mock_kube_client,
+            "test-namespace",
+            image_ref="docker.io/amdenterpriseai/aim-base:0.13",
+        )
+
+    assert model_name == "aim-base-013"
+
+
+@pytest.mark.asyncio
+async def test_ensure_cluster_scope_ignores_non_base_cluster_models_with_same_image(
+    mock_kube_client: AsyncMock,
+) -> None:
+    cluster_models = [
+        _cluster_model_item("aaa-inference", "amdenterpriseai/aim-base:0.13", base_only=False),
+        _cluster_model_item("aim-base-013", "amdenterpriseai/aim-base:0.13"),
+    ]
+    with (
+        patch("app.custom_models.service.AIM_BASE_MODEL_SCOPE", "Cluster"),
+        patch("app.custom_models.service.aims_gateway.list_aim_cluster_models", return_value=cluster_models),
+    ):
+        model_name = await ensure_namespace_aim_base_model(
+            mock_kube_client,
+            "test-namespace",
+            image_ref="amdenterpriseai/aim-base:0.13",
+        )
+
+    assert model_name == "aim-base-013"
+
+
+@pytest.mark.asyncio
+async def test_ensure_cluster_scope_rejects_when_only_non_base_cluster_model_matches(
+    mock_kube_client: AsyncMock,
+) -> None:
+    cluster_models = [
+        _cluster_model_item("aaa-inference", RADEON_AIM_DEPLOYMENT_IMAGE_REF, base_only=False),
+        _cluster_model_item("unsupported-base", RADEON_AIM_DEPLOYMENT_IMAGE_REF, discovered_supported=0),
+    ]
+    with (
+        patch("app.custom_models.service.AIM_BASE_MODEL_SCOPE", "Cluster"),
+        patch("app.custom_models.service.aims_gateway.list_aim_cluster_models", return_value=cluster_models),
+    ):
+        with pytest.raises(NotFoundException, match="No AIMClusterModel found"):
+            await ensure_namespace_aim_base_model(
+                mock_kube_client,
+                "test-namespace",
+                image_ref=RADEON_AIM_DEPLOYMENT_IMAGE_REF,
+            )
+
+
+@pytest.mark.asyncio
+async def test_ensure_cluster_scope_rejects_when_no_cluster_model_matches(
+    mock_kube_client: AsyncMock,
+) -> None:
+    with (
+        patch("app.custom_models.service.AIM_BASE_MODEL_SCOPE", "Cluster"),
+        patch("app.custom_models.service.aims_gateway.list_aim_cluster_models", return_value=[]),
+    ):
+        with pytest.raises(NotFoundException, match="No AIMClusterModel found"):
+            await ensure_namespace_aim_base_model(
+                mock_kube_client,
+                "test-namespace",
+                image_ref=RADEON_AIM_DEPLOYMENT_IMAGE_REF,
+            )
+
+
+@pytest.mark.asyncio
+async def test_ensure_cluster_scope_rejects_unparseable_selected_image(mock_kube_client: AsyncMock) -> None:
+    with patch("app.custom_models.service.AIM_BASE_MODEL_SCOPE", "Cluster"):
+        with pytest.raises(ValidationException, match="does not identify a supported runtime family"):
+            await ensure_namespace_aim_base_model(
+                mock_kube_client,
+                "test-namespace",
+                image_ref="registry.example.com/custom-base",
+            )
+
+
+@pytest.mark.asyncio
+async def test_onboard_cluster_scope_derives_from_selected_family(
+    mock_kube_client: AsyncMock, mock_minio_client: MagicMock
+) -> None:
+    mock_kube_client.custom_objects.list_namespaced_custom_object.return_value = {"items": []}
+    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = ApiException(status=404)
+    cluster_models = [_cluster_model_item("tinyllama-cluster", TEST_IMAGE)]
+
+    with (
+        patch("app.custom_models.service.AIM_BASE_MODEL_SCOPE", "Cluster"),
+        patch("app.custom_models.service.aims_gateway.list_aim_cluster_models", return_value=cluster_models),
+    ):
+        await onboard_custom_model_source(
+            mock_kube_client,
+            mock_minio_client,
+            "test-namespace",
+            TEST_SUBMITTER,
+            _make_request(repo_id="meta-llama/Llama-3-8B"),
+        )
+
+    mock_kube_client.custom_objects.create_namespaced_custom_object.assert_called_once()
+    body = mock_kube_client.custom_objects.create_namespaced_custom_object.call_args.kwargs["body"]
+    selector = body["spec"]["profiles"]["derivedFrom"]["selector"]
+    assert selector["modelRef"]["name"] == "tinyllama-cluster"
+    assert selector["modelRef"]["scope"] == "Cluster"
+
+
+@pytest.mark.asyncio
+async def test_onboard_provisions_base_model_for_selected_image(
     mock_kube_client: AsyncMock, mock_minio_client: MagicMock
 ) -> None:
     create_calls: list[dict] = []
@@ -707,8 +1030,10 @@ async def test_onboard_provisions_aim_base_before_custom_model_create(
     )
 
     assert len(create_calls) == 2
-    assert create_calls[0]["metadata"]["name"] == AIM_BASE_MODEL_NAME
-    assert "profiles" in create_calls[1]["spec"]
+    assert create_calls[0]["metadata"]["name"] == _base_model_name_from_image_ref(TEST_IMAGE)
+    assert create_calls[0]["spec"]["image"] == TEST_IMAGE
+    selector = create_calls[1]["spec"]["profiles"]["derivedFrom"]["selector"]
+    assert selector["modelRef"]["name"] == _base_model_name_from_image_ref(TEST_IMAGE)
 
 
 @pytest.mark.asyncio
@@ -725,20 +1050,17 @@ async def test_onboard_provisions_radeon_base_before_custom_model_create(
 
     mock_kube_client.custom_objects.create_namespaced_custom_object.side_effect = record_create
 
-    with patch(
-        "app.custom_models.service.get_cluster_base_image_ref",
-        AsyncMock(return_value=RADEON_AIM_DEPLOYMENT_IMAGE_REF),
-    ):
-        await onboard_custom_model_source(
-            mock_kube_client,
-            mock_minio_client,
-            "test-namespace",
-            TEST_SUBMITTER,
-            _make_request(repo_id="meta-llama/Llama-3-8B", image=RADEON_AIM_DEPLOYMENT_IMAGE_REF),
-        )
+    await onboard_custom_model_source(
+        mock_kube_client,
+        mock_minio_client,
+        "test-namespace",
+        TEST_SUBMITTER,
+        _make_request(repo_id="meta-llama/Llama-3-8B", image=RADEON_AIM_DEPLOYMENT_IMAGE_REF),
+    )
 
     assert len(create_calls) == 2
     assert create_calls[0]["metadata"]["name"] == "aim-radeon-base"
+    assert create_calls[0]["spec"]["image"] == RADEON_AIM_DEPLOYMENT_IMAGE_REF
     selector = create_calls[1]["spec"]["profiles"]["derivedFrom"]["selector"]
     assert selector["modelRef"]["name"] == "aim-radeon-base"
 
@@ -758,17 +1080,13 @@ async def test_onboard_provisions_any_base_family_before_custom_model_create(
     mock_kube_client.custom_objects.create_namespaced_custom_object.side_effect = record_create
 
     custom_base_image = "docker.io/amd/aim-mi300x-base:1.0"
-    with patch(
-        "app.custom_models.service.get_cluster_base_image_ref",
-        AsyncMock(return_value=custom_base_image),
-    ):
-        await onboard_custom_model_source(
-            mock_kube_client,
-            mock_minio_client,
-            "test-namespace",
-            TEST_SUBMITTER,
-            _make_request(repo_id="meta-llama/Llama-3-8B", image=custom_base_image),
-        )
+    await onboard_custom_model_source(
+        mock_kube_client,
+        mock_minio_client,
+        "test-namespace",
+        TEST_SUBMITTER,
+        _make_request(repo_id="meta-llama/Llama-3-8B", image=custom_base_image),
+    )
 
     assert len(create_calls) == 2
     assert create_calls[0]["metadata"]["name"] == "aim-mi300x-base"
@@ -777,17 +1095,11 @@ async def test_onboard_provisions_any_base_family_before_custom_model_create(
 
 
 @pytest.mark.asyncio
-async def test_onboard_skips_aim_base_create_when_already_present(
+async def test_onboard_skips_selected_base_model_create_when_already_present(
     mock_kube_client: AsyncMock, mock_minio_client: MagicMock
 ) -> None:
+    base_model_name = _base_model_name_from_image_ref(TEST_IMAGE)
     mock_kube_client.custom_objects.list_namespaced_custom_object.return_value = {"items": []}
-
-    async def get_namespaced_custom_object(*_args: Any, name: str, **_kwargs: Any) -> dict:
-        if name == AIM_BASE_MODEL_NAME:
-            return _AIM_BASE_STUB
-        raise ApiException(status=404)
-
-    mock_kube_client.custom_objects.get_namespaced_custom_object = AsyncMock(side_effect=get_namespaced_custom_object)
 
     await onboard_custom_model_source(
         mock_kube_client,
@@ -800,14 +1112,14 @@ async def test_onboard_skips_aim_base_create_when_already_present(
     create_call = mock_kube_client.custom_objects.create_namespaced_custom_object.await_args
     assert create_call is not None
     created_body = create_call.kwargs.get("body") or create_call.args[-1]
-    assert created_body["metadata"]["name"] != AIM_BASE_MODEL_NAME
+    assert created_body["metadata"]["name"] != base_model_name
 
 
 @pytest.mark.asyncio
-async def test_onboard_repatches_existing_model_after_ensuring_aim_base(
+async def test_onboard_repatches_existing_model_after_ensuring_selected_base(
     mock_kube_client: AsyncMock, mock_minio_client: MagicMock
 ) -> None:
-    """Re-onboard must still provision aim-base when missing, then patch the custom AIMModel."""
+    """Re-onboard provisions the selected base when missing before patching."""
     existing = _make_existing_aim_model()
     mock_kube_client.custom_objects.list_namespaced_custom_object.return_value = {
         "items": [existing.model_dump(by_alias=True)]
@@ -832,7 +1144,7 @@ async def test_onboard_repatches_existing_model_after_ensuring_aim_base(
     )
 
     assert len(create_calls) == 1
-    assert create_calls[0]["metadata"]["name"] == AIM_BASE_MODEL_NAME
+    assert create_calls[0]["metadata"]["name"] == _base_model_name_from_image_ref(TEST_IMAGE)
     mock_kube_client.custom_objects.patch_namespaced_custom_object.assert_called_once()
     mock_kube_client.custom_objects.create_namespaced_custom_object.assert_called_once()
 
@@ -1144,6 +1456,9 @@ async def test_onboard_creates_cr_then_uploads_manifest_when_absent(
     documents = list(yaml.safe_load_all(payload))
     assert len(documents) == 1
     assert documents[0]["kind"] == "AIMModel"
+    source = documents[0]["spec"]["profiles"]["overrides"]["modelSources"][0]
+    assert source["sourceUri"] == "hf://meta-llama/Llama-3-8B"
+    assert "env" not in source
 
     assert mock_kube_client.custom_objects.create_namespaced_custom_object.await_count == 2
 
@@ -1323,7 +1638,43 @@ async def test_onboard_conflict_on_same_display_name_different_repo(
             mock_minio_client,
             "test-namespace",
             TEST_SUBMITTER,
-            _make_request(repo_id="other/Model", description=""),
+            _make_request(
+                repo_id="other/Model",
+                description="",
+                image="docker.io/amd/new-runtime-family:1.0.0",
+            ),
+        )
+
+    mock_minio_client.upload_object.assert_not_called()
+    mock_kube_client.custom_objects.create_namespaced_custom_object.assert_not_called()
+    mock_kube_client.custom_objects.patch_namespaced_custom_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_onboard_re_submission_with_bumped_family_tag_conflicts(
+    mock_kube_client: AsyncMock, mock_minio_client: MagicMock
+) -> None:
+    """Same model, new tag of an already-provisioned family, must 409.
+
+    Idempotency covers the same form including image. Changing the runtime tag
+    would otherwise repoint the shared base-model CR; update the model instead.
+    """
+    existing = _make_existing_aim_model()
+    mock_kube_client.custom_objects.list_namespaced_custom_object.return_value = {
+        "items": [existing.model_dump(by_alias=True)]
+    }
+
+    with pytest.raises(ConflictException, match="already uses image"):
+        await onboard_custom_model_source(
+            mock_kube_client,
+            mock_minio_client,
+            "test-namespace",
+            TEST_SUBMITTER,
+            _make_request(
+                repo_id="meta-llama/Meta-Llama-3-8B-Instruct",
+                description="",
+                image="docker.io/amd/tinyllama:2.0.0",
+            ),
         )
 
     mock_minio_client.upload_object.assert_not_called()
@@ -1494,6 +1845,253 @@ async def test_onboard_skips_token_fetch_when_no_secret_supplied(
 
     stub_onboard_hub_reverify["token"].assert_not_called()
     assert stub_onboard_hub_reverify["fetch"].call_args.args[2] is None
+    mock_kube_client.core_v1.read_namespaced_secret.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_onboard_s3_source_reuses_preview_validation_and_skips_hf_import_path(
+    mock_kube_client: AsyncMock,
+    mock_minio_client: MagicMock,
+    stub_onboard_hub_reverify: dict[str, AsyncMock],
+) -> None:
+    """S3 onboard reuses preview-grade validation and does not run HF reverify/import logic."""
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(
+        return_value=MagicMock(
+            metadata=MagicMock(labels={}),
+            data={
+                "minio-access-key": base64.b64encode(b"access-key").decode(),
+                "minio-secret-key": base64.b64encode(b"secret-key").decode(),
+            },
+        )
+    )
+
+    with patch(
+        "app.custom_models.service._build_s3_preview_response",
+        return_value=MagicMock(warnings=["missing tokenizer.json"]),
+    ) as preview_validation:
+        await onboard_custom_model_source(
+            mock_kube_client,
+            mock_minio_client,
+            "test-namespace",
+            TEST_SUBMITTER,
+            _make_request(
+                source_type="s3",
+                repo_id="s3://my-bucket/path/to/model",
+                revision="s3",
+                sha="s3",
+                s3_storage_name="my-s3-storage",
+                hf_token_secret_name=None,
+            ),
+        )
+
+    preview_validation.assert_called_once_with(
+        kube_client=mock_kube_client,
+        namespace="test-namespace",
+        source="s3://my-bucket/path/to/model",
+        storage_name="my-s3-storage",
+    )
+    stub_onboard_hub_reverify["fetch"].assert_not_called()
+    stub_onboard_hub_reverify["token"].assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_onboard_s3_source_uses_s3_source_uri_and_secret_refs(
+    mock_kube_client: AsyncMock,
+    mock_minio_client: MagicMock,
+) -> None:
+    """S3 onboard keeps source URI and pulls endpoint/region from storage config."""
+    mock_kube_client.core_v1.read_namespaced_config_map = AsyncMock(
+        return_value=_make_s3_storage_config_map(
+            bucket_url="http://minio.example:9000/my-bucket",
+            region="us-east-1",
+            access_key_name="minio-access-key",
+            secret_key_name="minio-secret-key",
+        )
+    )
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(
+        return_value=MagicMock(
+            metadata=MagicMock(labels={}),
+            data={
+                "minio-access-key": base64.b64encode(b"access-key").decode(),
+                "minio-secret-key": base64.b64encode(b"secret-key").decode(),
+            },
+        )
+    )
+
+    with patch("app.custom_models.service._build_s3_preview_response", return_value=MagicMock(warnings=[])):
+        await onboard_custom_model_source(
+            mock_kube_client,
+            mock_minio_client,
+            "test-namespace",
+            TEST_SUBMITTER,
+            _make_request(
+                source_type="s3",
+                repo_id="s3://my-bucket/path/to/model",
+                revision="s3",
+                sha="s3",
+                s3_storage_name="my-s3-storage",
+                hf_token_secret_name=None,
+            ),
+        )
+
+    create_kwargs = mock_kube_client.custom_objects.create_namespaced_custom_object.call_args.kwargs
+    body = create_kwargs["body"]
+    overrides = body["spec"]["profiles"]["overrides"]
+    expected_source_model_id = f"s3/{body['metadata']['name']}"
+    assert overrides["aimId"] == expected_source_model_id
+    assert overrides["modelId"] == expected_source_model_id
+    model_source = overrides["modelSources"][0]
+    assert model_source["modelId"] == expected_source_model_id
+    assert model_source["sourceUri"] == "s3://my-bucket/path/to/model"
+    env_by_name = {entry["name"]: entry for entry in model_source["env"]}
+    assert env_by_name["AWS_ACCESS_KEY_ID"]["valueFrom"]["secretKeyRef"] == {
+        "name": "my-s3-secret",
+        "key": "minio-access-key",
+    }
+    assert env_by_name["AWS_SECRET_ACCESS_KEY"]["valueFrom"]["secretKeyRef"] == {
+        "name": "my-s3-secret",
+        "key": "minio-secret-key",
+    }
+    assert env_by_name["AWS_ENDPOINT_URL"]["value"] == "http://minio.example:9000"
+    assert env_by_name["AWS_DEFAULT_REGION"]["value"] == "us-east-1"
+
+
+@pytest.mark.asyncio
+async def test_onboard_s3_source_defaults_endpoint_to_minio_url_when_storage_omits_bucket_url(
+    mock_kube_client: AsyncMock,
+    mock_minio_client: MagicMock,
+) -> None:
+    """S3 onboard falls back to MINIO_URL when storage omits bucketUrl."""
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(
+        return_value=MagicMock(
+            metadata=MagicMock(labels={}),
+            data={
+                "minio-access-key": base64.b64encode(b"access-key").decode(),
+                "minio-secret-key": base64.b64encode(b"secret-key").decode(),
+            },
+        )
+    )
+
+    with patch("app.custom_models.service._build_s3_preview_response", return_value=MagicMock(warnings=[])):
+        await onboard_custom_model_source(
+            mock_kube_client,
+            mock_minio_client,
+            "test-namespace",
+            TEST_SUBMITTER,
+            _make_request(
+                source_type="s3",
+                repo_id=f"s3://{MINIO_BUCKET}/path/to/model",
+                revision="s3",
+                sha="s3",
+                s3_storage_name="my-s3-storage",
+                hf_token_secret_name=None,
+            ),
+        )
+
+    create_kwargs = mock_kube_client.custom_objects.create_namespaced_custom_object.call_args.kwargs
+    body = create_kwargs["body"]
+    model_source = body["spec"]["profiles"]["overrides"]["modelSources"][0]
+    env_by_name = {entry["name"]: entry for entry in model_source["env"]}
+    assert env_by_name["AWS_ACCESS_KEY_ID"]["valueFrom"]["secretKeyRef"] == {
+        "name": "my-s3-secret",
+        "key": "minio-access-key",
+    }
+    assert env_by_name["AWS_SECRET_ACCESS_KEY"]["valueFrom"]["secretKeyRef"] == {
+        "name": "my-s3-secret",
+        "key": "minio-secret-key",
+    }
+    assert env_by_name["AWS_ENDPOINT_URL"]["value"] == MINIO_URL
+    assert "AWS_DEFAULT_REGION" not in env_by_name
+
+
+@pytest.mark.asyncio
+async def test_onboard_s3_source_accepts_api_camelcase_secret_keys(
+    mock_kube_client: AsyncMock,
+    mock_minio_client: MagicMock,
+) -> None:
+    """S3 onboard accepts API camelCase credential keys from storage config."""
+    mock_kube_client.core_v1.read_namespaced_config_map = AsyncMock(
+        return_value=_make_s3_storage_config_map(
+            bucket_url="http://minio.example:9000/my-bucket",
+            region="us-east-1",
+            access_key_name="awsAccessKeyId",
+            secret_key_name="awsSecretAccessKey",
+        )
+    )
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(
+        return_value=MagicMock(
+            metadata=MagicMock(labels={}),
+            data={
+                "awsAccessKeyId": base64.b64encode(b"access-key").decode(),
+                "awsSecretAccessKey": base64.b64encode(b"secret-key").decode(),
+            },
+        )
+    )
+
+    with patch("app.custom_models.service._build_s3_preview_response", return_value=MagicMock(warnings=[])):
+        await onboard_custom_model_source(
+            mock_kube_client,
+            mock_minio_client,
+            "test-namespace",
+            TEST_SUBMITTER,
+            _make_request(
+                source_type="s3",
+                repo_id="s3://my-bucket/path/to/model",
+                revision="s3",
+                sha="s3",
+                s3_storage_name="my-s3-storage",
+                hf_token_secret_name=None,
+            ),
+        )
+
+    create_kwargs = mock_kube_client.custom_objects.create_namespaced_custom_object.call_args.kwargs
+    body = create_kwargs["body"]
+    model_source = body["spec"]["profiles"]["overrides"]["modelSources"][0]
+    env_by_name = {entry["name"]: entry for entry in model_source["env"]}
+    assert env_by_name["AWS_ACCESS_KEY_ID"]["valueFrom"]["secretKeyRef"] == {
+        "name": "my-s3-secret",
+        "key": "awsAccessKeyId",
+    }
+    assert env_by_name["AWS_SECRET_ACCESS_KEY"]["valueFrom"]["secretKeyRef"] == {
+        "name": "my-s3-secret",
+        "key": "awsSecretAccessKey",
+    }
+    assert env_by_name["AWS_ENDPOINT_URL"]["value"] == "http://minio.example:9000"
+    assert env_by_name["AWS_DEFAULT_REGION"]["value"] == "us-east-1"
+
+
+@pytest.mark.asyncio
+async def test_onboard_s3_source_aborts_when_preview_revalidation_fails(
+    mock_kube_client: AsyncMock,
+    mock_minio_client: MagicMock,
+    stub_onboard_hub_reverify: dict[str, AsyncMock],
+) -> None:
+    """A hard S3 revalidation error should stop onboard before any CR or manifest writes."""
+    with patch(
+        "app.custom_models.service._build_s3_preview_response",
+        side_effect=ValidationException("S3 source 's3://my-bucket/path/to/model' does not exist."),
+    ):
+        with pytest.raises(ValidationException, match="does not exist"):
+            await onboard_custom_model_source(
+                mock_kube_client,
+                mock_minio_client,
+                "test-namespace",
+                TEST_SUBMITTER,
+                _make_request(
+                    source_type="s3",
+                    repo_id="s3://my-bucket/path/to/model",
+                    revision="s3",
+                    sha="s3",
+                    s3_storage_name="my-s3-storage",
+                    hf_token_secret_name=None,
+                ),
+            )
+
+    stub_onboard_hub_reverify["fetch"].assert_not_called()
+    stub_onboard_hub_reverify["token"].assert_not_called()
+    mock_kube_client.custom_objects.create_namespaced_custom_object.assert_not_called()
+    mock_kube_client.custom_objects.patch_namespaced_custom_object.assert_not_called()
+    mock_minio_client.upload_object.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1588,3 +2186,285 @@ async def test_preview_does_not_onboard(mock_kube_client: AsyncMock, mock_minio_
     assert result.display_name == "Llama 3 8B"
     mock_minio_client.upload_object.assert_not_called()
     mock_kube_client.custom_objects.create_namespaced_custom_object.assert_not_called()
+
+
+# --- speech-to-text onboarding ---
+
+
+_AUDIO_BASE_MODEL = min(AUDIO_CAPABLE_BASE_REPOSITORIES)
+_AUDIO_IMAGE = f"amdenterpriseai/{_AUDIO_BASE_MODEL}:1.0"
+_ASR_TAGS = ["transformers", "whisper", "automatic-speech-recognition", "audio"]
+
+
+def _make_base_profile(
+    precision: str = "bf16", metric: str = "latency", profile_type: str = "unoptimized"
+) -> AIMProfileResource:
+    """Base-role AIMProfile carrying the identity axes the ASR preset reads."""
+    return AIMProfileResource(
+        metadata=K8sMetadata(name=f"aim-audio-base-{precision}-{metric}", namespace="test-namespace"),
+        spec=AIMProfileSpec(
+            aim_id="",
+            accelerator_model="MI300X",
+            accelerator_count=1,
+            precision=precision,
+            metric=metric,
+            type=profile_type,
+        ),
+    )
+
+
+async def _onboard_asr_body(
+    mock_kube_client: AsyncMock,
+    mock_minio_client: MagicMock,
+    *,
+    base_profiles: list[AIMProfileResource] | None = None,
+    **request_overrides: Any,
+) -> dict:
+    """Onboard a speech model and return the created custom AIMModel manifest."""
+    mock_kube_client.custom_objects.list_namespaced_custom_object.return_value = {"items": []}
+    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = ApiException(status=404)
+
+    created_bodies: list[dict] = []
+
+    def record_create(*_args: Any, body: dict, **_kwargs: Any) -> dict:
+        created_bodies.append(body)
+        return body
+
+    mock_kube_client.custom_objects.create_namespaced_custom_object.side_effect = record_create
+
+    profiles = base_profiles if base_profiles is not None else [_make_base_profile()]
+    with patch("app.custom_models.service.list_base_role_profiles", return_value=profiles):
+        await onboard_custom_model_source(
+            mock_kube_client,
+            mock_minio_client,
+            "test-namespace",
+            TEST_SUBMITTER,
+            _make_request(repo_id="openai/whisper-large-v3", tags=_ASR_TAGS, image=_AUDIO_IMAGE, **request_overrides),
+        )
+
+    # The base-image AIMModel is created first, the custom model second.
+    return created_bodies[-1]
+
+
+async def _onboard_asr(
+    mock_kube_client: AsyncMock,
+    mock_minio_client: MagicMock,
+    **kwargs: Any,
+) -> dict:
+    """Onboard a speech model and return the created AIMModel's profile overrides."""
+    body = await _onboard_asr_body(mock_kube_client, mock_minio_client, **kwargs)
+    return body["spec"]["profiles"]["overrides"]
+
+
+@pytest.mark.asyncio
+async def test_onboard_speech_model_stamps_asr_engine_args(
+    mock_kube_client: AsyncMock, mock_minio_client: MagicMock
+) -> None:
+    """A speech model needs the audio prompt limit and Whisper's decoder context to serve transcriptions."""
+    overrides = await _onboard_asr(mock_kube_client, mock_minio_client)
+
+    assert overrides["engineArgs"]["limit-mm-per-prompt"] == {"audio": 1}
+    assert overrides["engineArgs"]["max-model-len"] == 448
+
+
+@pytest.mark.asyncio
+async def test_onboard_speech_model_populates_identity_axes_from_base_profiles(
+    mock_kube_client: AsyncMock, mock_minio_client: MagicMock
+) -> None:
+    """Stamped axes must come from the base profiles being derived from, never invented:
+    a value outside that matrix narrows the derivation instead of describing it."""
+    overrides = await _onboard_asr(mock_kube_client, mock_minio_client)
+
+    assert overrides["precision"] == "bf16"
+    assert overrides["metric"] == "latency"
+    assert overrides["type"] == "unoptimized"
+    # dtype tracks the resolved precision rather than a fixed value.
+    assert overrides["engineArgs"]["dtype"] == "bfloat16"
+
+
+@pytest.mark.asyncio
+async def test_onboard_speech_model_records_backfilled_precision_on_the_annotation(
+    mock_kube_client: AsyncMock, mock_minio_client: MagicMock
+) -> None:
+    """The CRD prunes precision from overrides, so the annotation is where it survives for the UI."""
+    body = await _onboard_asr_body(mock_kube_client, mock_minio_client)
+
+    assert body["metadata"]["annotations"][MODEL_PRECISION_ANNOTATION] == "bf16"
+
+
+@pytest.mark.asyncio
+async def test_onboard_speech_model_leaves_ambiguous_axis_to_the_derived_profile(
+    mock_kube_client: AsyncMock, mock_minio_client: MagicMock
+) -> None:
+    """Two base metrics give no single right answer; stamping either would narrow the derivation wrongly."""
+    overrides = await _onboard_asr(
+        mock_kube_client,
+        mock_minio_client,
+        base_profiles=[_make_base_profile(metric="latency"), _make_base_profile(metric="throughput")],
+    )
+
+    assert "metric" not in overrides
+    assert overrides["precision"] == "bf16"
+
+
+@pytest.mark.asyncio
+async def test_onboard_speech_model_keeps_user_tuned_engine_args(
+    mock_kube_client: AsyncMock, mock_minio_client: MagicMock
+) -> None:
+    """A value the user set in the wizard must survive the preset merge."""
+    overrides = await _onboard_asr(
+        mock_kube_client,
+        mock_minio_client,
+        custom_profile={"engineArgs": {"max-model-len": 1024}},
+    )
+
+    assert overrides["engineArgs"]["max-model-len"] == 1024
+    assert overrides["engineArgs"]["limit-mm-per-prompt"] == {"audio": 1}
+
+
+@pytest.mark.asyncio
+async def test_onboard_speech_model_rejects_base_image_without_audio_runtime(
+    mock_kube_client: AsyncMock, mock_minio_client: MagicMock, stub_onboard_hub_reverify: dict[str, AsyncMock]
+) -> None:
+    """Rejecting here beats deploying a model that reports healthy and fails every transcription call.
+
+    The rejection runs at the service boundary, so it leaves nothing behind: no
+    base AIMModel, no Hub call. A request the API refuses must not half-onboard.
+    """
+    mock_kube_client.custom_objects.list_namespaced_custom_object.return_value = {"items": []}
+    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = ApiException(status=404)
+
+    with pytest.raises(ValidationException, match="audio runtime"):
+        await onboard_custom_model_source(
+            mock_kube_client,
+            mock_minio_client,
+            "test-namespace",
+            TEST_SUBMITTER,
+            _make_request(repo_id="openai/whisper-large-v3", tags=_ASR_TAGS, image=TEST_IMAGE),
+        )
+
+    stub_onboard_hub_reverify["fetch"].assert_not_called()
+    mock_kube_client.custom_objects.create_namespaced_custom_object.assert_not_called()
+    mock_kube_client.custom_objects.patch_namespaced_custom_object.assert_not_called()
+    mock_minio_client.upload_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("image_ref", ["registry.example.com/custom-base", "repo-only"])
+async def test_onboard_speech_model_blames_the_malformed_image_not_the_audio_runtime(
+    mock_kube_client: AsyncMock, mock_minio_client: MagicMock, image_ref: str
+) -> None:
+    """An unparseable ref is not an audio problem. Telling a user to pick an
+    audio-capable image would send them hunting for a different image when the
+    one they picked is malformed, so the runtime-family error still wins."""
+    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = ApiException(status=404)
+
+    with pytest.raises(ValidationException, match="does not identify a supported runtime family"):
+        await onboard_custom_model_source(
+            mock_kube_client,
+            mock_minio_client,
+            "test-namespace",
+            TEST_SUBMITTER,
+            _make_request(repo_id="openai/whisper-large-v3", tags=_ASR_TAGS, image=image_ref),
+        )
+
+    mock_kube_client.custom_objects.create_namespaced_custom_object.assert_not_called()
+    mock_minio_client.upload_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_onboard_speech_model_surfaces_a_kubernetes_failure_resolving_axes(
+    mock_kube_client: AsyncMock, mock_minio_client: MagicMock
+) -> None:
+    """A transient K8s failure must not masquerade as "this namespace has no base
+    profiles". Both yield an empty list under strict=False, but only one of them
+    means the resolved axes are trustworthy."""
+    mock_kube_client.custom_objects.list_namespaced_custom_object.return_value = {"items": []}
+    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = ApiException(status=404)
+
+    with patch(
+        "app.custom_models.service.list_base_role_profiles",
+        new=AsyncMock(side_effect=ExternalServiceError("kube unavailable")),
+    ) as mock_list:
+        with pytest.raises(ExternalServiceError):
+            await onboard_custom_model_source(
+                mock_kube_client,
+                mock_minio_client,
+                "test-namespace",
+                TEST_SUBMITTER,
+                _make_request(repo_id="openai/whisper-large-v3", tags=_ASR_TAGS, image=_AUDIO_IMAGE),
+            )
+
+    mock_list.assert_awaited_once()
+    mock_minio_client.upload_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_onboard_speech_model_resolves_axes_from_the_audio_base_only(
+    mock_kube_client: AsyncMock, mock_minio_client: MagicMock
+) -> None:
+    """A namespace that already onboarded a chat model also holds aim-base, and its
+    base profiles carry the same role label. Reading those would pin Whisper to the
+    chat image's precision — and through it a foreign dtype — so the lookup has to
+    name the audio base rather than trust the role label alone."""
+    mock_kube_client.custom_objects.list_namespaced_custom_object.return_value = {"items": []}
+    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = ApiException(status=404)
+
+    with patch(
+        "app.custom_models.service.list_base_role_profiles",
+        new=AsyncMock(return_value=[_make_base_profile()]),
+    ) as mock_list:
+        await onboard_custom_model_source(
+            mock_kube_client,
+            mock_minio_client,
+            "test-namespace",
+            TEST_SUBMITTER,
+            _make_request(repo_id="openai/whisper-large-v3", tags=_ASR_TAGS, image=_AUDIO_IMAGE),
+        )
+
+    mock_list.assert_awaited_once_with(mock_kube_client, "test-namespace", model_name=_AUDIO_BASE_MODEL, strict=True)
+
+
+@pytest.mark.asyncio
+async def test_onboard_speech_model_leaves_axes_unset_when_no_base_profiles_exist_yet(
+    mock_kube_client: AsyncMock, mock_minio_client: MagicMock
+) -> None:
+    """The audio base is a different image from the chat base, so the first speech
+    onboard into a namespace creates it and reads back nothing — aim-engine has not
+    reconciled yet. Onboard still succeeds; the axes and the dtype stay unset."""
+    overrides = await _onboard_asr(mock_kube_client, mock_minio_client, base_profiles=[])
+
+    for axis in ("precision", "metric", "type"):
+        assert axis not in overrides
+    assert "dtype" not in overrides["engineArgs"]
+    assert overrides["engineArgs"]["max-model-len"] == 448
+
+
+@pytest.mark.asyncio
+async def test_onboard_non_speech_model_is_untouched_by_the_asr_path(
+    mock_kube_client: AsyncMock, mock_minio_client: MagicMock
+) -> None:
+    """A chat model must onboard exactly as before, even onto an audio-capable base."""
+    mock_kube_client.custom_objects.list_namespaced_custom_object.return_value = {"items": []}
+    mock_kube_client.custom_objects.get_namespaced_custom_object.side_effect = ApiException(status=404)
+
+    created_bodies: list[dict] = []
+
+    def record_create(*_args: Any, body: dict, **_kwargs: Any) -> dict:
+        created_bodies.append(body)
+        return body
+
+    mock_kube_client.custom_objects.create_namespaced_custom_object.side_effect = record_create
+
+    await onboard_custom_model_source(
+        mock_kube_client,
+        mock_minio_client,
+        "test-namespace",
+        TEST_SUBMITTER,
+        _make_request(repo_id="meta-llama/Llama-3-8B", tags=["text-generation", "llama"], image=_AUDIO_IMAGE),
+    )
+
+    overrides = created_bodies[-1]["spec"]["profiles"]["overrides"]
+    assert "engineArgs" not in overrides
+    assert "precision" not in overrides
+    assert "metric" not in overrides

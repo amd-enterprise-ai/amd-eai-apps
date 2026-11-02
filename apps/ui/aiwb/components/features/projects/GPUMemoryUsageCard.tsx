@@ -14,6 +14,9 @@ type DashboardProps = {
   data: TimeSeriesAllocationData;
   isLoading?: boolean;
   width?: number;
+  fillHeight?: boolean;
+  alertTooltip?: string;
+  hasDedicatedQuota?: boolean;
   workloadId?: never;
   namespace?: never;
   timePeriod?: never;
@@ -26,6 +29,8 @@ type WorkloadProps = {
   timePeriod: TimeRangePeriod;
   isLoading?: boolean;
   width?: number;
+  alertTooltip?: string;
+  hasDedicatedQuota?: boolean;
 };
 
 type Props = DashboardProps | WorkloadProps;
@@ -38,6 +43,8 @@ const GPU_MEMORY_CONFIG = {
   upperLimitUnallocatedKey:
     'dashboard.overview.vramDeviceUsage.upperLimitUnallocated',
   upperLimitKey: 'dashboard.overview.vramDeviceUsage.upperLimit',
+  upperLimitAvailableKey:
+    'dashboard.overview.vramDeviceUsage.upperLimitAvailable',
   dataFormatter: (value: number | null) =>
     displayHumanReadableMegaBytes(Number(value)),
 } as const satisfies GPUUsageCardConfig;

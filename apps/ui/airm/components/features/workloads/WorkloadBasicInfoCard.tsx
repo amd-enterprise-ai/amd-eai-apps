@@ -20,10 +20,10 @@ export const WorkloadBasicInfoCard: React.FC<WorkloadBasicInfoCardProps> = ({
   const { t } = useTranslation('workloads');
 
   return (
-    <Card className="border border-default-200 shadow-sm rounded-sm dark:bg-default-100">
+    <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center gap-2">
-          <IconInfoCircle size={18} className="text-default-400" />
+          <IconInfoCircle size={18} className="text-muted" />
           <span className="text-sm font-medium">
             {t('details.sections.basicInformation')}
           </span>
@@ -31,19 +31,15 @@ export const WorkloadBasicInfoCard: React.FC<WorkloadBasicInfoCardProps> = ({
       </CardHeader>
       <CardBody className="pt-0 space-y-3 text-sm">
         <div className="space-y-0.5">
-          <div className="text-default-500">{t('details.fields.name')}</div>
+          <div className="text-muted">{t('details.fields.name')}</div>
           <div>{name}</div>
         </div>
         <div className="space-y-0.5">
-          <div className="text-default-500">
-            {t('details.fields.workloadId')}
-          </div>
+          <div className="text-muted">{t('details.fields.workloadId')}</div>
           <div>{workloadId}</div>
         </div>
         <div className="space-y-0.5">
-          <div className="text-default-500">
-            {t('details.fields.createdBy')}
-          </div>
+          <div className="text-muted">{t('details.fields.createdBy')}</div>
           <div>{createdBy}</div>
         </div>
       </CardBody>

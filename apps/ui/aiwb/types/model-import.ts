@@ -2,48 +2,20 @@
 //
 // SPDX-License-Identifier: MIT
 
+import type { components } from '@/types/api';
 import type { ModelOnboardingStatus } from '@/types/models';
 
-/**
- * Coarse role classification produced by the backend preview endpoint.
- * `primary` / `shard` files are selectable weight blobs; `config` files
- * (tokenizer/README/config.json) are returned for context only.
- */
-export type ModelSourceWeightFileRole = 'primary' | 'shard' | 'config';
+/** Preview success body returned by the BFF, sourced from the backend schema. */
+export type ModelSourcePreviewResponse =
+  components['schemas']['PreviewResponse'];
 
-export interface ModelSourceWeightFile {
-  path: string;
-  sizeBytes?: number | null;
-  /**
-   * Known classification, or an unrecognized string when the backend adds
-   * a new role we haven't modeled yet. `(string & {})` keeps the literal
-   * union autocomplete-friendly while still allowing forward-compatible
-   * values at runtime.
-   */
-  role?: ModelSourceWeightFileRole | (string & {}) | null;
-}
+/** Source family a custom model is imported from. */
+export type ModelSourceType = components['schemas']['CustomModelImportType'];
 
-/** Preview request body sent by the wizard's "Model source" step. */
-export interface ModelSourcePreviewRequest {
-  source: string;
-  /** Kubernetes secret name in the project (HF token); not echoed back. */
-  hfTokenSecretName?: string;
-}
-
-/** Preview success body returned by the BFF (envelope unwrapped). */
-export interface ModelSourcePreviewResponse {
-  repoId: string;
-  revision: string;
-  sha: string;
-  displayName: string;
-  description: string;
-  tags: string[];
-  pipelineTag?: string | null;
-  gated: boolean;
-  hfTokenRecommended: boolean;
-  weightFiles: ModelSourceWeightFile[];
-  layoutHint?: string | null;
-}
+export const MODEL_SOURCE_TYPE = {
+  HUGGING_FACE: 'huggingFace',
+  S3: 's3',
+} as const satisfies Record<string, ModelSourceType>;
 
 /**
  * Runtime profile overrides forwarded on onboard using v1alpha2 AIMProfile.spec
@@ -72,23 +44,6 @@ export interface ModelCustomProfile {
 export interface EngineEnvEntry {
   name: string;
   value: string;
-}
-
-/**
- * Onboard request body for POST `/projects/{project}/models/onboard`.
- * Hub-validated fields come from preview; `image` and optional
- * `customProfile` come from the runtime step.
- */
-export interface ModelOnboardRequest {
-  repoId: string;
-  revision: string;
-  sha: string;
-  displayName: string;
-  description?: string;
-  tags?: string[];
-  image: string;
-  hfTokenSecretName?: string;
-  customProfile?: ModelCustomProfile;
 }
 
 /** Onboarding status response (envelope unwrapped). */

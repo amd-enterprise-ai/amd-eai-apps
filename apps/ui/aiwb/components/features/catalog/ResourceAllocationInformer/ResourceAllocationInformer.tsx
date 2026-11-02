@@ -4,13 +4,18 @@
 
 import { FC, useMemo } from 'react';
 
-import { Alert } from '@amdenterpriseai/components';
+import { Alert, Card, CardBody, CardHeader } from '@amdenterpriseai/components';
 
 import { useTranslation } from 'next-i18next';
 
-import { ResourceType } from './constants';
+import { ResourceType, type AllocationAlertColor } from './constants';
 
 import TableLine from './TableLine';
+
+type AllocationAlertContent = {
+  color: AllocationAlertColor;
+  description: string;
+};
 
 export type ResourceAllocationInformerProps = {
   isLoading: boolean;
@@ -70,22 +75,22 @@ const ResourceAllocationInformer: FC<ResourceAllocationInformerProps> = ({
     [gpus, totalMemory, totalCpu, quota, requiredResources],
   );
 
-  const alertContent = useMemo(() => {
+  const alertContent = useMemo((): AllocationAlertContent | null => {
     if (belowRequired && exceedsQuota) {
       return {
-        color: 'text-danger',
+        color: 'danger',
         description: t('belowRequiredExceedsQuotaWarning'),
       };
     }
     if (belowRequired) {
       return {
-        color: 'text-danger',
+        color: 'danger',
         description: t('belowRequiredWarning'),
       };
     }
     if (exceedsQuota) {
       return {
-        color: 'text-warning',
+        color: 'warning',
         description: t('exceedsQuotaWarning'),
       };
     }
@@ -93,46 +98,46 @@ const ResourceAllocationInformer: FC<ResourceAllocationInformerProps> = ({
   }, [belowRequired, exceedsQuota, t]);
 
   return (
-    <div className="flex flex-col gap-4 text-small">
-      <div className="text-foreground text-medium uppercase font-bold">
-        {t('totalResourceAllocation')}
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <TableLine
-          type={ResourceType.GPU}
-          value={gpus}
-          req={requiredResources.gpus}
-          quota={quota?.gpus}
-          isLoading={isLoading}
-        />
-        <TableLine
-          type={ResourceType.RAM}
-          value={memoryPerGpu}
-          req={
-            Math.max(requiredResources.gpus, 1) * requiredResources.memoryPerGpu
-          }
-          multiplier={Math.max(gpus, 1)}
-          quota={quota?.memory}
-          isLoading={isLoading}
-        />
-        <TableLine
-          type={ResourceType.CPU}
-          value={cpuPerGpu}
-          req={
-            Math.max(requiredResources.gpus, 1) * requiredResources.cpuPerGpu
-          }
-          multiplier={Math.max(gpus, 1)}
-          quota={quota?.cpu}
-          isLoading={isLoading}
-        />
-      </div>
+    <div className="flex flex-col gap-4 text-sm">
+      <Card data-testid="resource-allocation-card" variant="secondary">
+        <CardHeader>
+          <h4>{t('totalResourceAllocation')}</h4>
+        </CardHeader>
+        <CardBody className="flex flex-col gap-2">
+          <TableLine
+            type={ResourceType.GPU}
+            value={gpus}
+            req={requiredResources.gpus}
+            quota={quota?.gpus}
+            isLoading={isLoading}
+          />
+          <TableLine
+            type={ResourceType.RAM}
+            value={memoryPerGpu}
+            req={
+              Math.max(requiredResources.gpus, 1) *
+              requiredResources.memoryPerGpu
+            }
+            multiplier={Math.max(gpus, 1)}
+            quota={quota?.memory}
+            isLoading={isLoading}
+          />
+          <TableLine
+            type={ResourceType.CPU}
+            value={cpuPerGpu}
+            req={
+              Math.max(requiredResources.gpus, 1) * requiredResources.cpuPerGpu
+            }
+            multiplier={Math.max(gpus, 1)}
+            quota={quota?.cpu}
+            isLoading={isLoading}
+          />
+        </CardBody>
+      </Card>
 
       {!isLoading && alertContent && (
         <Alert
-          variant="bordered"
-          color="danger"
-          classNames={{ base: 'pl-2' }}
+          status={alertContent.color}
           description={alertContent.description}
         />
       )}

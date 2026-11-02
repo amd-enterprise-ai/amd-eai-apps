@@ -11,19 +11,21 @@ Documentation       Page object for the AIWB Models / AIM Catalog page.
 *** Variables ***
 ${MODELS_PATH}                     /models/aim-catalog
 ${CUSTOM_MODELS_PATH}              /models/custom-models
-${FINE_TUNE_MODELS_PATH}           /models/fine-tune-models
+${FINE_TUNE_MODELS_PATH}           /fine-tuning/models
 ${DEPLOYED_MODELS_PATH}            /models/deployed-models
 ${AIM_CATALOG_SELECTOR}            [data-testid="aim-catalog"]
 ${AIM_CATALOG_LOADING_SELECTOR}    [data-testid="aim-catalog-loading"]
 ${AIM_CARD_SELECTOR}               [data-testid="aim-catalog"] .grid > div
 ${DEPLOYED_MODELS_SELECTOR}        [data-testid="deployed-models"]
-${DEPLOYED_TAB_SELECTOR}           role=tab[name="Deployed Models"]
-${DEPLOY_DRAWER_SELECTOR}          text="Deploy AIM"
+# The wizard's accessible name tracks the "deployAIM.title" translation ("Model Deployment"),
+# not the AIM's name or the legacy "Deploy AIM" copy.
+${DEPLOY_WIZARD_SELECTOR}          role=dialog[name="Model Deployment"]
 ${ACTIONS_MENU_SELECTOR}           [role="menu"]
 ${VERSION_SELECTOR}                [aria-label="Version"]
-${METRIC_SELECTOR}                 [aria-label="Performance metric"]
+${METRIC_SELECTOR}                 [data-testid="deployAimPerformanceModeGroup"]
 ${UNSUPPORTED_BANNER_SELECTOR}     [data-testid="unsupported-banner"]
-${DEPLOY_SETTINGS_SELECTOR}        text="Deployment settings"
+${DEPLOY_WIZARD_MODEL_HEADER_SELECTOR}    css=[data-testid="deploy-aim-wizard-model-header"]
+${DEPLOY_WIZARD_MODEL_STEP_SELECTOR}      css=[data-testid="wizard-step-model"]
 ${SEARCH_FILTER_SELECTOR}          input[placeholder*="Search"]
 ${CATALOG_DESCRIPTION_SELECTOR}    [data-testid="aim-catalog"] > p
 ${REQUEST_MODEL_CARD_SELECTOR}     [data-testid="request-model"]
@@ -38,7 +40,17 @@ ${FINETUNE_BTN_SELECTOR}              css=[data-testid="fine-tune-models-finetun
 ${BASE_MODEL_SELECT_SELECTOR}         css=[data-testid="baseModelSelect"]
 ${BASE_MODEL_OPTION_SELECTOR}         css=[role="option"][data-testid^="model-select-"]
 ${BASE_MODEL_EMPTY_MSG}               No fine-tuning recipes available for your cluster hardware
-${ADVANCED_SETTINGS_TRIGGER}          css=button:has-text("Advanced settings")
+${DATASET_SELECTOR_TABLE}             css=[data-testid="dataset-selector"]
+${DATASET_ROW_CHECKBOX_SELECTOR}      css=[data-testid="dataset-selector"] [aria-label^="Select row "]
+${DATASET_SELECT_ALL_SELECTOR}        css=[data-testid="dataset-selector"] [aria-label="Select all"]
+${DATASET_SIZE_HEADER_SELECTOR}       css=[data-testid="dataset-selector"] th:has-text("Size")
+${DATASET_SIZE_CELL_SELECTOR}         css=[data-testid="dataset-selector"] tr:has([aria-label^="Select row "]) td:nth-child(3)
+${FINETUNE_WIZARD_NEXT_BTN}           css=[data-testid="wizard-next"]
+${FINETUNE_WIZARD_BACK_BTN}           css=[data-testid="wizard-back"]
+${HYPERPARAMETERS_SUMMARY_SELECTOR}   css=[data-testid="wizard-step-hyperparameters"]
+${CUSTOMIZE_HYPERPARAMETERS_TOGGLE}   css=[data-testid="customize-hyperparameters-toggle"]
+${LORA_TYPE_RADIO_SELECTOR}           role=radio[name="LoRA"]
+${FINETUNE_TYPE_SELECTOR}             css=[data-testid="fine-tuning-type-selector"]
 # HeroUI's NumberInput renders TWO inputs in the same wrapper: a hidden input
 # carrying name= for form submission, and a type="text" input the user types into
 # (react-aria avoids type="number" so locale formatting works). The visible input
@@ -47,11 +59,24 @@ ${ADVANCED_SETTINGS_TRIGGER}          css=button:has-text("Advanced settings")
 ${BATCH_SIZE_WRAPPER_SELECTOR}        css=[data-slot="inner-wrapper"]:has(input[name="batchSize"])
 ${BATCH_SIZE_INPUT_SELECTOR}          ${BATCH_SIZE_WRAPPER_SELECTOR} >> css=input[data-slot="input"]
 ${BATCH_SIZE_INCREMENT_SELECTOR}      ${BATCH_SIZE_WRAPPER_SELECTOR} >> css=[data-slot="increase-button"]
+${LORA_RANK_INPUT_SELECTOR}           role=spinbutton[name="Rank"]
+${LORA_ALPHA_INPUT_SELECTOR}          role=spinbutton[name="Alpha"]
+${LORA_DROPOUT_INPUT_SELECTOR}        role=spinbutton[name="Dropout"]
+${EPOCHS_INPUT_SELECTOR}              role=spinbutton[name="Number of epochs"]
+${LEARNING_RATE_INPUT_SELECTOR}       role=spinbutton[name="Learning rate multiplier"]
+${FINETUNE_DATASET_LIMIT_TOAST_SELECTOR}    css=[data-slot="toast"]:has-text("You can select up to 10 datasets")
 ${FINE_TUNE_MODELS_ROW_ACTION_BTN}    css=button[aria-label="Actions"]
 ${FINE_TUNE_MODELS_FINETUNE_OPTION}   css=[data-testid="finetune"]
 
 # Custom-model deploy drawer — anchor on stable in-drawer markup (not translated title copy).
 ${CUSTOM_DEPLOY_DRAWER_SELECTOR}         css=[data-testid="runtime-profile-slot"]
+# Profile selection, rendered only for custom-onboarded models
+${CUSTOM_DEPLOY_PROFILE_SELECT}          css=[data-testid="deploy-profile-select"]
+${CUSTOM_DEPLOY_PROFILE_TRIGGER}         ${CUSTOM_DEPLOY_PROFILE_SELECT} >> css=button
+${CUSTOM_DEPLOY_PROFILE_DETAILS}         css=[data-testid="deploy-profile-details"]
+${CUSTOM_DEPLOY_PROFILE_ADD_NEW}         css=[data-testid="deploy-profile-add-new"]
+# Portalled, so matched by role rather than under the drawer
+${CUSTOM_DEPLOY_PROFILE_LISTBOX}         css=[role="listbox"]
 # Row action item for the Deploy option — data-testid is the action key ("deploy")
 ${FINE_TUNE_MODELS_DEPLOY_OPTION}        css=[data-testid="deploy"]
 # Display-name input: FormInput renders an <input> whose name attr is "displayName"
@@ -67,42 +92,98 @@ ${CUSTOM_MODEL_CARD_SELECTOR}              css=[data-testid="custom-model-card"]
 ${CUSTOM_MODEL_CARD_ACTIONS_SELECTOR}      css=[data-testid="custom-model-card-actions"]
 ${CUSTOM_MODEL_COPY_MENU_ITEM_SELECTOR}    css=[role="menuitem"]:has-text("Make a copy")
 ${CUSTOM_MODEL_SETTINGS_MENU_ITEM_SELECTOR}    css=[role="menuitem"]:has-text("Model settings")
+${CUSTOM_MODEL_PROFILES_MENU_ITEM_SELECTOR}    css=[role="menuitem"]:has-text("Profiles")
 ${CUSTOM_MODEL_DELETE_MENU_ITEM_SELECTOR}      css=[role="menuitem"]:has-text("Delete")
 ${CUSTOM_MODEL_DELETE_MODAL_SELECTOR}          [data-testid="confirmation-modal"]
 ${CUSTOM_MODEL_DELETE_CONFIRM_BUTTON_SELECTOR}    [data-testid="confirm-button"]
 ${CUSTOM_MODEL_DELETE_CLOSE_BUTTON_SELECTOR}      css=[data-testid="confirmation-modal"] button:has-text("Close")
 ${IMPORT_WIZARD_PAGE_SELECTOR}             css=[data-testid="custom-model-import-page"]
-${IMPORT_WIZARD_SOURCE_INPUT_SELECTOR}     css=[data-testid="custom-model-import-source"] input
+
+# Custom profiles list page selectors
+${CUSTOM_PROFILES_PATH_SUFFIX}             /profiles
+${CUSTOM_PROFILES_TABLE_SELECTOR}          css=[data-testid="custom-profiles"]
+${CUSTOM_PROFILES_BACK_SELECTOR}           css=[data-testid="custom-profiles-back"]
+${CUSTOM_PROFILES_NEW_SELECTOR}            css=[data-testid="custom-profiles-new-profile"]
+${CUSTOM_PROFILES_ROW_SELECTOR}            css=[data-testid="custom-profiles"] tbody tr
+${CUSTOM_PROFILE_DELETE_MENU_ITEM_SELECTOR}    css=[role="menuitem"]:has-text("Delete")
+${CUSTOM_PROFILE_EDIT_MENU_ITEM_SELECTOR}    css=[role="menuitem"]:has-text("Edit")
+${CUSTOM_PROFILE_DEPLOY_MENU_ITEM_SELECTOR}    css=[role="menuitem"]:has-text("Deploy with this profile")
+# Column positions, counted from 1 after the display name column.
+${CUSTOM_PROFILES_ACCELERATOR_COLUMN}      2
+${CUSTOM_PROFILES_METRIC_COLUMN}           3
+${CUSTOM_PROFILES_PRECISION_COLUMN}        4
+${CUSTOM_PROFILES_AUTHOR_COLUMN}           5
+${CUSTOM_PROFILES_CREATED_COLUMN}          6
+# The table renders an em dash where a profile has no value for a column.
+${CUSTOM_PROFILES_NO_VALUE}                \u2014
+# Add/edit profile drawer. The design system puts a field's data-testid on the
+# <input> itself, and DrawerForm gives the confirm button an aria-label equal to
+# its confirmText.
+${CUSTOM_PROFILE_DRAWER_HEADING_SELECTOR}      css=[data-testid="custom-profile-heading"]
+${CUSTOM_PROFILE_DRAWER_NAME_SELECTOR}         css=input[data-testid="custom-profile-display-name"]
+${CUSTOM_PROFILE_DRAWER_ENGINE_ARGS_SELECTOR}    css=[data-testid="custom-profile-engine-args-yaml"]
+${CUSTOM_PROFILE_DRAWER_SAVE_SELECTOR}         css=button[aria-label="Save"]
+${CUSTOM_PROFILE_DRAWER_SAVE_DEPLOY_SELECTOR}    css=button[aria-label="Save and deploy"]
+${CUSTOM_PROFILE_DRAWER_CANCEL_SELECTOR}       css=[role="dialog"] button:has-text("Cancel")
+# The design system puts a field's data-testid on the <input> itself, so the
+# wizard's text inputs are addressed directly rather than through a wrapper.
+${IMPORT_WIZARD_SOURCE_INPUT_SELECTOR}     css=input[data-testid="custom-model-import-source"]
 ${IMPORT_WIZARD_NEXT_SOURCE_SELECTOR}          css=[data-testid="custom-model-import-next-source"]
 ${IMPORT_WIZARD_NEXT_INFORMATION_SELECTOR}    css=[data-testid="custom-model-import-next-information"]
 ${IMPORT_WIZARD_SUBMIT_SELECTOR}              css=[data-testid="custom-model-import-submit"]
 ${IMPORT_WIZARD_CANCEL_SELECTOR}              css=[data-testid="custom-model-import-cancel"]
 ${IMPORT_WIZARD_HEADER_BACK_SELECTOR}         css=[data-testid="custom-model-import-header-back"]
-${CUSTOM_MODEL_CARD_IMPORTING_SELECTOR}       css=[data-testid="custom-model-card"]:has-text("Importing")
-${CUSTOM_MODEL_CARD_READY_SELECTOR}           css=[data-testid="custom-model-card"]:has-text("Ready")
+${CUSTOM_MODEL_CARD_READY_SELECTOR}           css=[data-testid="custom-model-card"] [data-testid="custom-model-card-deploy"]:enabled
 ${CUSTOM_MODEL_CARD_DEPLOY_BUTTON_SELECTOR}   css=[data-testid="custom-model-card-deploy"]
 ${CUSTOM_MODELS_EMPTY_STATE_SELECTOR}         css=[data-testid="custom-models-empty"]
 ${PROJECT_HF_TOKEN_SELECTOR}               css=[data-testid="project-hf-token-selector"]
 ${CUSTOM_MODEL_EDIT_LOAD_ERROR_SELECTOR}   css=[data-testid="custom-model-edit-error"]
+
+# Source-family selectors. The wizard's first step picks between a Hugging Face
+# repo and an S3 bucket; each family shows its own credential field, so tests
+# assert on which selector is mounted rather than on internal form state.
+${IMPORT_WIZARD_SOURCE_TYPE_SELECTOR}          css=[data-testid="custom-model-import-source-type"]
+# Edit mode replaces the radio group with a read-only input carrying the same testid.
+${IMPORT_WIZARD_SOURCE_TYPE_FIELD_SELECTOR}    css=input[data-testid="custom-model-import-source-type"]
+${PROJECT_S3_STORAGE_SELECTOR}                 css=[data-testid="project-s3-storage-selector"]
+# The S3 configuration dropdown stays disabled until the project's storages load,
+# so interactions target its trigger button rather than the field wrapper.
+${PROJECT_S3_STORAGE_TRIGGER_SELECTOR}         css=[data-testid="project-s3-storage-selector"] button
+${S3_STORAGE_DIALOG_SECRET_SELECTOR}           css=[data-testid="s3-storage-selector-dialog-secret"] button
+${IMPORT_WIZARD_PREVIEW_WARNINGS_SELECTOR}     css=[data-testid="custom-model-import-preview-warnings"]
 
 # Custom Model Import/Edit wizard — runtime profile step selectors
 # Engine args and env vars are YAML textareas in the runtime step (not a key/value editor).
 ${RUNTIME_ENGINE_ARGS_YAML_SELECTOR}           css=[data-testid="custom-model-import-engine-args-yaml"]
 ${RUNTIME_ENV_VARS_YAML_SELECTOR}              css=[data-testid="custom-model-import-env-vars-yaml"]
 ${RUNTIME_DISABLED_NOTICE_SELECTOR}            css=[data-testid="custom-model-import-runtime-disabled-notice"]
+${RUNTIME_MODEL_PRECISION_SELECTOR}            css=[data-testid="custom-model-import-model-precision"]
+${RUNTIME_CONTAINER_IMAGE_SELECTOR}            css=[data-testid="custom-model-import-container-image"]
+${RUNTIME_CONTAINER_VERSION_SELECTOR}          css=[data-testid="custom-model-import-container-version"]
+${SELECT_LISTBOX_OPTIONS_SELECTOR}             css=[role="listbox"] [role="option"]
 
-# Catalog deploy drawer — advanced profile overrides. These fields carry no testids;
-# the expander is matched on its visible label and the selects on their aria-labels.
-${DEPLOY_ADVANCED_TOGGLE_SELECTOR}             css=button:has-text("advanced profile parameters")
+# Catalog deploy wizard — advanced profile overrides.
+${DEPLOY_ADVANCED_TOGGLE_SELECTOR}             css=[data-testid="deployAimPerformanceMode-advanced"]
 ${DEPLOY_ADVANCED_PRECISION_SELECTOR}          css=[aria-label="Precision"]
+${DEPLOY_PERSONALIZATION_TOGGLE_SELECTOR}      css=[data-testid="personalization-toggle"]
+${DEPLOY_PERSONALIZATION_MAX_RANK_SELECTOR}    css=[data-testid="deploy-personalization-max-rank"]
+${DEPLOY_PERSONALIZATION_ADAPTERS_SELECTOR}    css=[data-testid="lora-adapters-selector"]
+${DEPLOY_PERSONALIZATION_ADAPTERS_READY_SELECTOR}
+...    css=[data-testid="lora-adapters-selector"][data-loading="false"]
+${DEPLOY_WIZARD_SUBMIT_BUTTON_SELECTOR}        role=button[name="Deploy"]
+
+# Deploy AIM wizard — the Next button's accessible name tracks the "actions.next"
+# translation ("Next"); the wizard has no dedicated testid for it.
+${DEPLOY_WIZARD_NEXT_BUTTON_SELECTOR}          role=button[name="Next"]
+${DEPLOY_WIZARD_UNOPTIMIZED_WARNING_SELECTOR}  text="Unoptimized profile"
 ${CUSTOM_MODEL_EDIT_LOADING_SELECTOR}      css=[data-testid="custom-model-edit-loading"]
 ${IMPORT_WIZARD_DISPLAY_NAME_SELECTOR}     css=[data-testid="custom-model-import-page"] input[name="displayName"]
 ${IMPORT_WIZARD_DUP_WARNING_SELECTOR}      css=[data-testid="custom-model-import-duplicate-name-warning"]
 
 # Pagination — HeroUI's Pagination component renders a sibling list with
 # numbered buttons and prev/next controls. The next-page control carries
-# aria-label="next page button" (HeroUI default). EAI-6124 moved the fine-tune
-# table off the Custom Models tab into its own tab; selectors target the
+# aria-label="next page button" (HeroUI default). The fine-tune
+# table lives on its own tab, not the Custom Models tab; selectors target the
 # fine-tune-models testid root accordingly.
 ${FINE_TUNE_MODELS_TABLE_ROW}           css=${FINE_TUNE_MODELS_SELECTOR} table tbody tr
 ${FINE_TUNE_MODELS_PAGINATION}          css=${FINE_TUNE_MODELS_SELECTOR} [role="navigation"]
@@ -111,9 +192,26 @@ ${FINE_TUNE_MODELS_NEXT_PAGE_BTN}       css=${FINE_TUNE_MODELS_SELECTOR} button[
 # mounted when the selected base model is gated, so its presence/absence
 # proves the gating flag was respected.
 ${HF_TOKEN_SECTION_SELECTOR}            css=h4:has-text("Hugging Face Authentication")
-# DrawerForm renders the confirm button with aria-label equal to confirmText.
 ${FINETUNE_CONFIRM_BTN_SELECTOR}        button[aria-label="Start training"]
 ${FINETUNE_DISPLAY_NAME_INPUT}          css=input[name="displayName"]
+${FINETUNE_DESCRIPTION_INPUT}           css=input[name="description"]
+${FINE_TUNE_MODELS_DETAILS_OPTION}      css=[data-testid="details"]
+
+# HuggingFaceTokenSelector "Add new" popover — shared across every consumer of
+# ProjectHuggingFaceTokenSelector (finetune wizard, catalog deploy wizard,
+# custom-model import wizard), so these selectors are reused across specs.
+${HF_TOKEN_ADD_NEW_SELECTOR}            css=[data-testid="hf-token-selector-add-new"]
+${HF_TOKEN_DIALOG_NAME_SELECTOR}        css=[data-testid="hf-token-selector-dialog-name"]
+${HF_TOKEN_DIALOG_TOKEN_SELECTOR}       css=[data-testid="hf-token-selector-dialog-token"]
+${HF_TOKEN_DIALOG_SUBMIT_SELECTOR}      css=[data-testid="hf-token-selector-dialog-submit"]
+
+# Deployed Models status filter. FilterDropdown renders its trigger as a
+# div[role="button"] (not a <button>) carrying the filter label, and the open
+# panel as a react-aria listbox with the same label. Each option renders its
+# label twice — once as the label, once as the description — so options are
+# matched by substring rather than exact text.
+${STATUS_FILTER_TRIGGER}                [role="button"][aria-label="Statuses"]
+${STATUS_FILTER_LISTBOX}                [role="listbox"][aria-label="Statuses"]
 
 
 *** Keywords ***
@@ -122,13 +220,20 @@ Navigate to models page
     [Arguments]    ${base_url}    ${project}
 
     Go To    ${base_url}/${project}${MODELS_PATH}
+    Wait for AIM Catalog page
+
+Wait for AIM Catalog page
+    [Documentation]    Waits for the AIM Catalog content to become visible.
+
     Wait For Elements State    css=${AIM_CATALOG_SELECTOR}    visible    timeout=30s
 
 Navigate to deployed models page
-    [Documentation]    Navigates directly to the Deployed Models tab.
-    [Arguments]    ${base_url}    ${project}
+    [Documentation]    Navigates directly to the Deployed Models tab. ${query} appends a
+    ...                query string (for example "?deleted=1") for entry points that are
+    ...                only reachable by URL.
+    [Arguments]    ${base_url}    ${project}    ${query}=${EMPTY}
 
-    Go To    ${base_url}/${project}${DEPLOYED_MODELS_PATH}
+    Go To    ${base_url}/${project}${DEPLOYED_MODELS_PATH}${query}
     Wait For Elements State    css=${DEPLOYED_MODELS_SELECTOR}    visible    timeout=30s
 
 Click deploy button on card
@@ -144,21 +249,15 @@ Click actions menu button on card
     ...                asynchronously and the button is disabled until deployments are detected.
     [Arguments]    ${aim_name}
 
-    VAR    ${selector}    css=${AIM_CARD_SELECTOR}:has-text("${aim_name}") >> css=button[aria-label="Actions menu"]
+    VAR    ${selector}    css=${AIM_CARD_SELECTOR}:has-text("${aim_name}") >> css=button[aria-label="Actions"]
     Wait For Elements State    ${selector}    visible    timeout=15s
     Wait For Elements State    ${selector}    enabled    timeout=30s
     Click    ${selector}
 
-Click deployed models tab
-    [Documentation]    Switches to the "Deployed Models" tab.
+Wait for deploy wizard
+    [Documentation]    Waits for the Deploy AIM wizard to become visible.
 
-    Click    ${DEPLOYED_TAB_SELECTOR}
-    Wait For Elements State    css=${DEPLOYED_MODELS_SELECTOR}    visible    timeout=15s
-
-Wait for deploy drawer
-    [Documentation]    Waits for the Deploy AIM drawer to become visible.
-
-    Wait For Elements State    ${DEPLOY_DRAWER_SELECTOR}    visible    timeout=15s
+    Wait For Elements State    ${DEPLOY_WIZARD_SELECTOR}    visible    timeout=15s
 
 Get actions menu text
     [Documentation]    Returns the text content of the currently visible actions menu.
@@ -273,10 +372,12 @@ AIM card has deployments chip should not be present
     VAR    ${selector}    css=${AIM_CARD_SELECTOR}:has-text("${aim_name}") ${HAS_DEPLOYMENTS_CHIP_SELECTOR}
     Wait For Elements State    ${selector}    detached    timeout=10s
 
-Deploy drawer should show deployment settings
-    [Documentation]    Verifies the deploy drawer shows the "Deployment settings" section.
+Deploy wizard steps should be visible
+    [Documentation]    Verifies the deploy wizard shows its model step and stepper labels.
 
-    Wait For Elements State    ${DEPLOY_SETTINGS_SELECTOR}    visible    timeout=10s
+    Wait For Elements State    ${DEPLOY_WIZARD_MODEL_STEP_SELECTOR}    visible    timeout=10s
+    Wait For Elements State    text="Deployment"    visible    timeout=10s
+    Wait For Elements State    text="Scaling"    visible    timeout=10s
 
 Get metric selector text
     [Documentation]    Returns the currently selected metric text from the metric selector.
@@ -286,11 +387,11 @@ Get metric selector text
     ${text}=    Get Text    ${selector}
     RETURN    ${text}
 
-Deploy drawer should show model title
-    [Documentation]    Verifies the deploy drawer shows the given model title.
+Deploy wizard should show model title
+    [Documentation]    Verifies the deploy wizard shows the given model title.
     [Arguments]    ${aim_name}
 
-    VAR    ${selector}    css=.text-2xl:has-text("${aim_name}")
+    VAR    ${selector}    ${DEPLOY_WIZARD_MODEL_HEADER_SELECTOR}:has-text("${aim_name}")
     Wait For Elements State    ${selector}    visible    timeout=10s
 
 Get deployed models row count
@@ -345,6 +446,29 @@ Close accelerator filter
 
     Press Keys    None    Escape
 
+Open status filter
+    [Documentation]    Opens the Statuses multi-select filter above the Deployed Models table.
+
+    Wait For Elements State    css=${STATUS_FILTER_TRIGGER}    visible    timeout=15s
+    Click    css=${STATUS_FILTER_TRIGGER}
+    Wait For Elements State    css=${STATUS_FILTER_LISTBOX}    visible    timeout=10s
+
+Get status filter option count for "${status}"
+    [Documentation]    Returns how many options the open Statuses filter offers for the given
+    ...                status. Matching is by substring because each option renders its label
+    ...                a second time as its description.
+
+    VAR    ${selector}    css=${STATUS_FILTER_LISTBOX} [role="option"]:has-text("${status}")
+    ${count}=    Get Element Count    ${selector}
+    RETURN    ${count}
+
+Get status filter options text
+    [Documentation]    Returns the full text of the open Statuses filter, so assertions about
+    ...                a missing status can report what was offered instead.
+
+    ${text}=    Get Text    css=${STATUS_FILTER_LISTBOX}
+    RETURN    ${text}
+
 Get request model card mailto href
     [Documentation]    Returns the href of the anchor inside the "Request model" card.
     ...                Waits for the card to be visible since it renders after the catalog list.
@@ -360,6 +484,190 @@ Navigate to custom models page
 
     Go To    ${base_url}/${project}${CUSTOM_MODELS_PATH}
     Wait For Elements State    css=[data-testid="custom-models"]    visible    timeout=30s
+
+Navigate to custom profiles page
+    [Documentation]    Opens the custom profiles list for a custom model by CR name.
+    [Arguments]    ${base_url}    ${project}    ${model_id}
+
+    Go To    ${base_url}/${project}${CUSTOM_MODELS_PATH}/${model_id}${CUSTOM_PROFILES_PATH_SUFFIX}
+    Wait For Elements State    ${CUSTOM_PROFILES_TABLE_SELECTOR}    visible    timeout=30s
+
+Wait for custom profiles table
+    [Documentation]    Waits for the custom profiles table to render.
+
+    Wait For Elements State    ${CUSTOM_PROFILES_TABLE_SELECTOR}    visible    timeout=30s
+
+Get custom profile row count
+    [Documentation]    Returns the number of profile rows currently shown.
+
+    ${rows}=    Get Elements    ${CUSTOM_PROFILES_ROW_SELECTOR}
+    ${count}=    Get Length    ${rows}
+    RETURN    ${count}
+
+Wait for custom profile row showing "${text}"
+    [Documentation]    Waits until some profile row shows the given text.
+
+    Wait For Elements State
+    ...    ${CUSTOM_PROFILES_ROW_SELECTOR} >> text=${text}    visible    timeout=10s
+
+Wait for custom profile row "${index}" showing "${text}"
+    [Documentation]    Waits until the profile row at the given index shows the given text.
+
+    Wait For Elements State
+    ...    ${CUSTOM_PROFILES_ROW_SELECTOR} >> nth=${index} >> text=${text}    visible    timeout=10s
+
+Wait for no custom profile row showing "${text}"
+    [Documentation]    Waits until no profile row shows the given text.
+
+    Wait For Elements State
+    ...    ${CUSTOM_PROFILES_ROW_SELECTOR} >> text=${text}    detached    timeout=10s
+
+Wait for custom profile name error
+    [Documentation]    Waits for the drawer's inline name feedback to show the given text.
+    [Arguments]    ${text}
+
+    Wait For Elements State    text=${text}    visible    timeout=10s
+
+Get custom profile summary at row "${index}"
+    [Documentation]    Returns the accelerator, metric, and precision shown on the profile
+    ...    row at the given index, in that order.
+
+    ${accelerator}=    Get custom profile cell    ${index}    ${CUSTOM_PROFILES_ACCELERATOR_COLUMN}
+    ${metric}=    Get custom profile cell    ${index}    ${CUSTOM_PROFILES_METRIC_COLUMN}
+    ${precision}=    Get custom profile cell    ${index}    ${CUSTOM_PROFILES_PRECISION_COLUMN}
+    RETURN    ${accelerator}    ${metric}    ${precision}
+
+Get custom profile summary for "${text}"
+    [Documentation]    Returns the accelerator, metric, and precision shown on the first
+    ...    profile row showing the given text, in that order.
+
+    VAR    ${row}    ${CUSTOM_PROFILES_ROW_SELECTOR}:has-text("${text}") >> nth=0
+    Wait For Elements State    ${row}    visible    timeout=10s
+    ${accelerator}=    Get Text    ${row} >> css=td:nth-child(${CUSTOM_PROFILES_ACCELERATOR_COLUMN})
+    ${metric}=    Get Text    ${row} >> css=td:nth-child(${CUSTOM_PROFILES_METRIC_COLUMN})
+    ${precision}=    Get Text    ${row} >> css=td:nth-child(${CUSTOM_PROFILES_PRECISION_COLUMN})
+    RETURN    ${accelerator}    ${metric}    ${precision}
+
+Get custom profile author at row "${index}"
+    [Documentation]    Returns the author shown on the profile row at the given index.
+
+    ${author}=    Get custom profile cell    ${index}    ${CUSTOM_PROFILES_AUTHOR_COLUMN}
+    RETURN    ${author}
+
+Get custom profile created time at row "${index}"
+    [Documentation]    Returns the creation time shown on the profile row at the given index.
+
+    ${created}=    Get custom profile cell    ${index}    ${CUSTOM_PROFILES_CREATED_COLUMN}
+    RETURN    ${created}
+
+Get custom profile cell
+    [Documentation]    Returns the text of one profile row cell, addressed by row index and
+    ...    1-based column position.
+    [Arguments]    ${index}    ${column}
+
+    VAR    ${cell}    ${CUSTOM_PROFILES_ROW_SELECTOR} >> nth=${index} >> css=td:nth-child(${column})
+    Wait For Elements State    ${cell}    visible    timeout=10s
+    ${text}=    Get Text    ${cell}
+    RETURN    ${text}
+
+Click actions menu on custom profile row showing "${text}"
+    [Documentation]    Opens the row actions menu on the first profile row showing the text.
+
+    VAR    ${row}    ${CUSTOM_PROFILES_ROW_SELECTOR}:has-text("${text}") >> nth=0
+    Wait For Elements State    ${row}    visible    timeout=30s
+    Click    ${row} >> css=button[aria-label="Actions"]
+
+Click actions menu on custom profile row
+    [Documentation]    Opens the row actions menu on the profile row at the given index.
+    [Arguments]    ${index}
+
+    Wait For Elements State    ${CUSTOM_PROFILES_ROW_SELECTOR}    visible    timeout=30s
+    ${buttons}=    Get Elements    ${CUSTOM_PROFILES_ROW_SELECTOR} >> css=button[aria-label="Actions"]
+    Should Be True    len($buttons) > ${index}    msg=Expected a profile row at index ${index}
+    Click    ${buttons}[${index}]
+
+Click edit action in custom profile row menu
+    [Documentation]    Clicks the "Edit" action in the open profile row actions menu.
+
+    Wait For Elements State
+    ...    ${CUSTOM_PROFILE_EDIT_MENU_ITEM_SELECTOR}    visible    timeout=10s
+    Click    ${CUSTOM_PROFILE_EDIT_MENU_ITEM_SELECTOR}
+
+Click deploy action in custom profile row menu
+    [Documentation]    Clicks the "Deploy with this profile" action in the open row menu.
+
+    Wait For Elements State
+    ...    ${CUSTOM_PROFILE_DEPLOY_MENU_ITEM_SELECTOR}    visible    timeout=10s
+    Click    ${CUSTOM_PROFILE_DEPLOY_MENU_ITEM_SELECTOR}
+
+Get custom profile delete action disabled state
+    [Documentation]    Returns the open row action menu's Delete item aria-disabled value.
+
+    Wait For Elements State
+    ...    ${CUSTOM_PROFILE_DELETE_MENU_ITEM_SELECTOR}    visible    timeout=10s
+    ${state}=    Get Attribute
+    ...    ${CUSTOM_PROFILE_DELETE_MENU_ITEM_SELECTOR}    aria-disabled
+    RETURN    ${state}
+
+Click back from custom profiles page
+    [Documentation]    Clicks the back control in the custom profiles page header.
+
+    Wait For Elements State    ${CUSTOM_PROFILES_BACK_SELECTOR}    visible    timeout=10s
+    Click    ${CUSTOM_PROFILES_BACK_SELECTOR}
+
+Click new profile on custom profiles page
+    [Documentation]    Opens the add profile drawer from the page header action.
+
+    Wait For Elements State    ${CUSTOM_PROFILES_NEW_SELECTOR}    visible    timeout=10s
+    Click    ${CUSTOM_PROFILES_NEW_SELECTOR}
+
+Wait for custom profile drawer
+    [Documentation]    Waits for the add/edit profile drawer to render its heading.
+
+    Wait For Elements State
+    ...    ${CUSTOM_PROFILE_DRAWER_HEADING_SELECTOR}    visible    timeout=30s
+
+Fill custom profile name
+    [Documentation]    Replaces the profile name in the add/edit profile drawer.
+    [Arguments]    ${name}
+
+    Wait For Elements State    ${CUSTOM_PROFILE_DRAWER_NAME_SELECTOR}    visible    timeout=10s
+    Fill Text    ${CUSTOM_PROFILE_DRAWER_NAME_SELECTOR}    ${name}
+
+Get custom profile name
+    [Documentation]    Returns the profile name currently shown in the drawer.
+
+    Wait For Elements State    ${CUSTOM_PROFILE_DRAWER_NAME_SELECTOR}    visible    timeout=10s
+    ${value}=    Get Property    ${CUSTOM_PROFILE_DRAWER_NAME_SELECTOR}    value
+    RETURN    ${value}
+
+Fill custom profile engine arguments
+    [Documentation]    Replaces the engine arguments YAML in the drawer.
+    [Arguments]    ${yaml}
+
+    Wait For Elements State
+    ...    ${CUSTOM_PROFILE_DRAWER_ENGINE_ARGS_SELECTOR}    visible    timeout=10s
+    Fill Text    ${CUSTOM_PROFILE_DRAWER_ENGINE_ARGS_SELECTOR}    ${yaml}
+
+Save custom profile drawer
+    [Documentation]    Submits the add/edit profile drawer.
+
+    Wait For Elements State    ${CUSTOM_PROFILE_DRAWER_SAVE_SELECTOR}    visible    timeout=10s
+    Click    ${CUSTOM_PROFILE_DRAWER_SAVE_SELECTOR}
+
+Save and deploy custom profile drawer
+    [Documentation]    Submits the add profile drawer through the action that carries the
+    ...                saved profile into a deploy.
+
+    Wait For Elements State
+    ...    ${CUSTOM_PROFILE_DRAWER_SAVE_DEPLOY_SELECTOR}    visible    timeout=10s
+    Click    ${CUSTOM_PROFILE_DRAWER_SAVE_DEPLOY_SELECTOR}
+
+Cancel custom profile drawer
+    [Documentation]    Dismisses the add/edit profile drawer without saving.
+
+    Wait For Elements State    ${CUSTOM_PROFILE_DRAWER_CANCEL_SELECTOR}    visible    timeout=10s
+    Click    ${CUSTOM_PROFILE_DRAWER_CANCEL_SELECTOR}
 
 Navigate to custom model edit page
     [Documentation]    Opens the full-page edit wizard for a custom model by CR name.
@@ -384,7 +692,7 @@ Custom model edit page should show edit title
 
 Navigate to fine-tune models page
     [Documentation]    Navigates to the Fine-tune Models tab on the models page.
-    ...                Fine-tune flows live on this tab since EAI-6124 split the
+    ...                Fine-tune flows live on this tab, split from the
     ...                previous Custom Models tab into Custom Models (imported
     ...                models) and Fine-tune Models (the fine-tune table).
     [Arguments]    ${base_url}    ${project}
@@ -392,8 +700,13 @@ Navigate to fine-tune models page
     Go To    ${base_url}/${project}${FINE_TUNE_MODELS_PATH}
     Wait For Elements State    css=${FINE_TUNE_MODELS_SELECTOR}    visible    timeout=30s
 
-Open finetune drawer
-    [Documentation]    Clicks the Fine-tune button on the Fine-tune Models tab to open the drawer.
+Wait for fine-tune models page
+    [Documentation]    Waits for the Fine-tune models page to become visible.
+
+    Wait For Elements State    css=${FINE_TUNE_MODELS_SELECTOR}    visible    timeout=30s
+
+Open finetune wizard
+    [Documentation]    Clicks the Fine-tune button on the Fine-tune Models tab to open the wizard.
     ...                Waits for the button to be enabled since workload data loads asynchronously
     ...                and the button is disabled until the initial load completes.
 
@@ -445,13 +758,128 @@ Click first base model option
     ${elements}=    Get Elements    ${BASE_MODEL_OPTION_SELECTOR}
     Click    ${elements}[0]
 
-Open advanced fine-tuning settings
-    [Documentation]    Expands the Advanced settings accordion in the fine-tuning drawer.
-    ...                Waits for the batch size input to attach since the accordion
-    ...                mounts its children only when expanded.
+Click fine-tuning wizard next button
+    [Documentation]    Advances to the next step of the fine-tuning wizard.
 
-    Click    ${ADVANCED_SETTINGS_TRIGGER}
+    Wait For Elements State    ${FINETUNE_WIZARD_NEXT_BTN}    enabled    timeout=10s
+    Click    ${FINETUNE_WIZARD_NEXT_BTN}
+
+Click fine-tuning wizard back button
+    [Documentation]    Returns to the previous step of the fine-tuning wizard.
+
+    Wait For Elements State    ${FINETUNE_WIZARD_BACK_BTN}    enabled    timeout=10s
+    Click    ${FINETUNE_WIZARD_BACK_BTN}
+
+Fine-tuning wizard display name should be
+    [Documentation]    Verifies the fine-tuning wizard still shows the entered model name.
+    [Arguments]    ${name}
+
+    ${value}=    Get Property    ${FINETUNE_DISPLAY_NAME_INPUT}    value
+    Should Be Equal    ${value}    ${name}
+
+Fine-tuning wizard next button should be disabled
+    [Documentation]    Verifies the current wizard step cannot be completed.
+
+    Wait For Elements State    ${FINETUNE_WIZARD_NEXT_BTN}    disabled    timeout=10s
+
+Select first training dataset
+    [Documentation]    Selects the first available dataset in the Training step.
+
+    Wait For Elements State    ${DATASET_SELECTOR_TABLE}    visible    timeout=10s
+    Wait For Elements State    ${DATASET_ROW_CHECKBOX_SELECTOR}    visible    timeout=10s
+    Click    ${DATASET_ROW_CHECKBOX_SELECTOR} >> nth=0
+
+Select training dataset by index
+    [Documentation]    Selects an available dataset by its zero-based row index.
+    [Arguments]    ${index}
+
+    VAR    ${selector}    ${DATASET_ROW_CHECKBOX_SELECTOR} >> nth=${index}
+    Wait For Elements State    ${selector}    visible    timeout=10s
+    Click    ${selector}
+
+Select all training datasets
+    [Documentation]    Selects every dataset available in the Training step.
+
+    Wait For Elements State    ${DATASET_SELECT_ALL_SELECTOR}    visible    timeout=10s
+    Click    ${DATASET_SELECT_ALL_SELECTOR}
+
+Dataset selector should show file sizes
+    [Documentation]    Verifies the dataset selector shows a formatted size for available data.
+
+    Wait For Elements State    ${DATASET_SIZE_HEADER_SELECTOR}    visible    timeout=10s
+    Wait For Elements State    ${DATASET_SIZE_CELL_SELECTOR}    visible    timeout=10s
+    ${size}=    Get Text    ${DATASET_SIZE_CELL_SELECTOR} >> nth=0
+    Should Match Regexp    ${size}    ^[0-9]+(?:\\.[0-9]{2})? (?:B|KB|MB|GB|TB|PB)$
+
+Select LoRA fine-tuning type
+    [Documentation]    Selects LoRA adapter output in the Training step.
+    Wait For Elements State    ${LORA_TYPE_RADIO_SELECTOR}    enabled    timeout=10s
+    Click    ${LORA_TYPE_RADIO_SELECTOR}
+
+Get LoRA fine-tuning type enabled state
+    [Documentation]    Returns whether the LoRA output option can be chosen in the Training step.
+
+    ${enabled}=    Get Element States    ${LORA_TYPE_RADIO_SELECTOR}    then    bool(value & enabled)
+    RETURN    ${enabled}
+
+Get LoRA fine-tuning type checked state
+    [Documentation]    Returns whether LoRA output is currently the chosen option.
+
+    ${checked}=    Get Element States    ${LORA_TYPE_RADIO_SELECTOR}    then    bool(value & checked)
+    RETURN    ${checked}
+
+Get fine-tuning type options text
+    [Documentation]    Returns everything the Training step's output options show the user,
+    ...                including the per-option explanations rendered beneath their labels.
+
+    Wait For Elements State    ${FINETUNE_TYPE_SELECTOR}    visible    timeout=15s
+    ${text}=    Get Text    ${FINETUNE_TYPE_SELECTOR}
+    RETURN    ${text}
+
+Get chosen fine-tuning type name
+    [Documentation]    Returns the label of the output option currently chosen.
+
+    ${name}=    Get Attribute    ${FINETUNE_TYPE_SELECTOR} >> input:checked    value
+    RETURN    ${name}
+
+Enable hyper-parameter customization
+    [Documentation]    Enables custom values in the Hyper-parameters step.
+
+    Wait For Elements State    ${CUSTOMIZE_HYPERPARAMETERS_TOGGLE}    visible    timeout=10s
+    Click    ${CUSTOMIZE_HYPERPARAMETERS_TOGGLE}
     Wait For Elements State    ${BATCH_SIZE_INPUT_SELECTOR}    attached    timeout=10s
+
+Get hyperparameter input placeholders
+    [Documentation]    Returns the epoch and learning-rate input placeholders.
+
+    ${epochs}=    Get Attribute    ${EPOCHS_INPUT_SELECTOR}    placeholder
+    ${learning_rate}=    Get Attribute    ${LEARNING_RATE_INPUT_SELECTOR}    placeholder
+    RETURN    ${epochs}    ${learning_rate}
+
+Fill LoRA rank
+    [Documentation]    Fills the LoRA rank input.
+    [Arguments]    ${rank}
+    Fill Text    ${LORA_RANK_INPUT_SELECTOR}    ${rank}
+
+Fill LoRA alpha
+    [Documentation]    Fills the LoRA alpha input.
+    [Arguments]    ${alpha}
+    Fill Text    ${LORA_ALPHA_INPUT_SELECTOR}    ${alpha}
+
+Fill LoRA dropout
+    [Documentation]    Fills the LoRA dropout input.
+    [Arguments]    ${dropout}
+    Fill Text    ${LORA_DROPOUT_INPUT_SELECTOR}    ${dropout}
+
+Fill learning rate
+    [Documentation]    Fills the learning-rate input.
+    [Arguments]    ${learning_rate}
+    Fill Text    ${LEARNING_RATE_INPUT_SELECTOR}    ${learning_rate}
+
+Get hyperparameters summary text
+    [Documentation]    Returns the collapsed hyperparameters summary on the confirmation step.
+
+    Get Text    ${HYPERPARAMETERS_SUMMARY_SELECTOR}
 
 Click batch size increment button
     [Documentation]    Clicks the + stepper button on the batch size NumberInput.
@@ -473,18 +901,22 @@ Get batch size value
     RETURN    ${value}
 
 Batch size input should be enabled
-    [Documentation]    Waits for the batch size input to be interactive. The form
-    ...                disables the input until a recipe is selected; this keyword
-    ...                verifies that selection has unlocked it.
+    [Documentation]    Waits for the customized batch size input to be interactive.
 
     Wait For Elements State    ${BATCH_SIZE_INPUT_SELECTOR}    enabled    timeout=5s
 
-Batch size input should be disabled
-    [Documentation]    Verifies the batch size input is disabled. The form keeps it
-    ...                disabled until a recipe is selected so the GPU-count-derived
-    ...                constraints (min, step) can be applied to a known recipe.
+Focus and blur batch size input
+    [Documentation]    Focuses the batch size input, then moves focus away without typing
+    ...                anything. Reproduces the exact interaction (tab in, tab out) that
+    ...                exposed the empty-value sentinel regression — as opposed to simply
+    ...                never mounting/touching the field.
 
-    Wait For Elements State    ${BATCH_SIZE_INPUT_SELECTOR}    disabled    timeout=5s
+    Press Keys    ${BATCH_SIZE_INPUT_SELECTOR}    Tab
+
+Fine-tuning wizard should be closed
+    [Documentation]    Verifies the fine-tuning wizard has been dismissed after submission.
+
+    Wait For Elements State    ${BASE_MODEL_SELECT_SELECTOR}    detached    timeout=10s
 
 Click import model button
     [Documentation]    Clicks the "Import model" toolbar button on the custom models tab.
@@ -510,6 +942,13 @@ Click make copy action in custom model card menu
 
     Wait For Elements State    ${CUSTOM_MODEL_COPY_MENU_ITEM_SELECTOR}    visible    timeout=10s
     Click    ${CUSTOM_MODEL_COPY_MENU_ITEM_SELECTOR}
+
+Click profiles action in custom model card menu
+    [Documentation]    Clicks the "Profiles" action in the open custom model card menu,
+    ...                which navigates to the custom profiles list for that model.
+
+    Wait For Elements State    ${CUSTOM_MODEL_PROFILES_MENU_ITEM_SELECTOR}    visible    timeout=10s
+    Click    ${CUSTOM_MODEL_PROFILES_MENU_ITEM_SELECTOR}
 
 Click model settings action in custom model card menu
     [Documentation]    Clicks the "Model settings" action in the open custom model card menu,
@@ -600,16 +1039,15 @@ Click import wizard submit
     Wait For Elements State    ${IMPORT_WIZARD_SUBMIT_SELECTOR}    enabled    timeout=15s
     Click    ${IMPORT_WIZARD_SUBMIT_SELECTOR}
 
-Custom model card with importing or ready status should be visible
-    [Documentation]    Asserts that at least one custom model card showing "Importing" or
-    ...                "Ready" status is visible. Used as a single-poll check inside a
+Custom model card with ready status should be visible
+    [Documentation]    Asserts that at least one custom model card is in a
+    ...                deployable ("Ready") state by checking for an enabled
+    ...                Deploy button. Used as a single-poll check inside a
     ...                Wait Until Keyword Succeeds wrapper.
 
-    ${importing}=    Get Elements    ${CUSTOM_MODEL_CARD_IMPORTING_SELECTOR}
-    ${ready}=        Get Elements    ${CUSTOM_MODEL_CARD_READY_SELECTOR}
-    ${total}=        Evaluate    len($importing) + len($ready)
-    Should Be True    ${total} > 0
-    ...    msg=Expected at least one custom model card with "Importing" or "Ready" status
+    ${ready}=    Get Elements    ${CUSTOM_MODEL_CARD_READY_SELECTOR}
+    Should Be True    len($ready) > 0
+    ...    msg=Expected at least one custom model card with enabled Deploy button
 
 Click import wizard cancel
     [Documentation]    Clicks the "Cancel" button on the source step of the wizard.
@@ -639,6 +1077,127 @@ Click Hugging Face token option labeled
 
     Wait For Elements State    css=[role="listbox"]    visible    timeout=15s
     Click    css=[role="listbox"] [role="option"]:has-text("${label}")
+
+Click Hugging Face token add new button
+    [Documentation]    Clicks the "Add new" affordance at the bottom of the open Hugging Face
+    ...                token dropdown, which opens the inline create-token popover.
+
+    Wait For Elements State    ${HF_TOKEN_ADD_NEW_SELECTOR}    visible    timeout=10s
+    Click    ${HF_TOKEN_ADD_NEW_SELECTOR}
+
+Fill Hugging Face token dialog fields
+    [Documentation]    Fills the create-token popover's display-name and token inputs.
+    [Arguments]    ${name}    ${token}
+
+    Wait For Elements State    ${HF_TOKEN_DIALOG_NAME_SELECTOR}    visible    timeout=10s
+    Fill Text    ${HF_TOKEN_DIALOG_NAME_SELECTOR}    ${name}
+    Fill Text    ${HF_TOKEN_DIALOG_TOKEN_SELECTOR}    ${token}
+
+Click Hugging Face token dialog submit button
+    [Documentation]    Submits the create-token popover form.
+
+    Wait For Elements State    ${HF_TOKEN_DIALOG_SUBMIT_SELECTOR}    enabled    timeout=10s
+    Click    ${HF_TOKEN_DIALOG_SUBMIT_SELECTOR}
+
+Select import wizard source type
+    [Documentation]    Picks a source family on the wizard's source step. Accepts the
+    ...                family key used by the radio testids: huggingFace or s3.
+    [Arguments]    ${source_type}
+
+    Wait For Elements State    ${IMPORT_WIZARD_SOURCE_TYPE_SELECTOR}    visible    timeout=15s
+    Click    css=[data-testid="custom-model-import-source-type-${source_type}"]
+
+Open project S3 configuration dropdown
+    [Documentation]    Opens the S3 configuration selector on the custom model import source
+    ...                step. Waits for it to become enabled — the selector stays disabled
+    ...                until the project's storages have loaded.
+
+    Wait For Elements State    ${PROJECT_S3_STORAGE_SELECTOR}    visible    timeout=15s
+    Wait For Elements State    ${PROJECT_S3_STORAGE_TRIGGER_SELECTOR}    enabled    timeout=30s
+    Click    ${PROJECT_S3_STORAGE_TRIGGER_SELECTOR}
+
+Click S3 configuration option labeled
+    [Documentation]    Selects an existing S3 configuration in the open listbox by its name.
+    [Arguments]    ${label}
+
+    Wait For Elements State    css=[role="listbox"]    visible    timeout=15s
+    Click    css=[role="listbox"] [role="option"]:has-text("${label}")
+
+Open S3 configuration create dialog
+    [Documentation]    Clicks the "Add new S3 configuration" affordance at the bottom of the
+    ...                open S3 configuration dropdown and waits for the create dialog to render.
+
+    Wait For Elements State    css=[data-testid="s3-storage-selector-add-new"]    visible    timeout=15s
+    Click    css=[data-testid="s3-storage-selector-add-new"]
+    Wait For Elements State    css=[data-testid="s3-storage-selector-dialog-name"]    visible    timeout=15s
+
+Fill S3 configuration dialog
+    [Documentation]    Fills the create dialog's name, bucket URL, and region inputs.
+    [Arguments]    ${name}    ${bucket_url}    ${region}
+
+    Fill Text    css=[data-testid="s3-storage-selector-dialog-name"]    ${name}
+    Fill Text    css=[data-testid="s3-storage-selector-dialog-bucket-url"]    ${bucket_url}
+    Fill Text    css=[data-testid="s3-storage-selector-dialog-region"]    ${region}
+
+Select S3 configuration dialog secret labeled
+    [Documentation]    Picks a backing S3 secret in the create dialog's secret dropdown by label.
+    [Arguments]    ${label}
+
+    Wait For Elements State    ${S3_STORAGE_DIALOG_SECRET_SELECTOR}    enabled    timeout=30s
+    Click    ${S3_STORAGE_DIALOG_SECRET_SELECTOR}
+    Wait For Elements State    css=[role="listbox"]    visible    timeout=15s
+    Click    css=[role="listbox"] [role="option"]:has-text("${label}")
+
+Submit S3 configuration create dialog
+    [Documentation]    Clicks the create dialog's submit button, saving the new S3 configuration.
+
+    Click    css=[data-testid="s3-storage-selector-dialog-submit"]
+
+Import wizard S3 configuration selector should be visible
+    [Documentation]    Verifies the S3 configuration selector is mounted on the source step.
+
+    Wait For Elements State    ${PROJECT_S3_STORAGE_SELECTOR}    visible    timeout=15s
+
+Import wizard S3 configuration selector should be absent
+    [Documentation]    Verifies the S3 configuration selector is not mounted on the source step.
+
+    Wait For Elements State    ${PROJECT_S3_STORAGE_SELECTOR}    detached    timeout=10s
+
+Import wizard Hugging Face token selector should be visible
+    [Documentation]    Verifies the Hugging Face token selector is mounted on the source step.
+
+    Wait For Elements State    ${PROJECT_HF_TOKEN_SELECTOR}    visible    timeout=15s
+
+Import wizard Hugging Face token selector should be absent
+    [Documentation]    Verifies the Hugging Face token selector is not mounted on the source step.
+
+    Wait For Elements State    ${PROJECT_HF_TOKEN_SELECTOR}    detached    timeout=10s
+
+Import wizard source input should be read only
+    [Documentation]    Verifies the source input cannot be edited — the wizard renders it
+    ...                read-only once a model has been onboarded from it.
+
+    Wait For Elements State    ${IMPORT_WIZARD_SOURCE_INPUT_SELECTOR}    readonly    timeout=15s
+
+Import wizard source type field should read
+    [Documentation]    Reads the value shown in the source-type field. In edit mode the field
+    ...                is a read-only input rather than the radio group.
+    [Arguments]    ${expected}
+
+    Wait For Elements State    ${IMPORT_WIZARD_SOURCE_TYPE_FIELD_SELECTOR}    visible    timeout=30s
+    ${value}=    Get Property    ${IMPORT_WIZARD_SOURCE_TYPE_FIELD_SELECTOR}    value
+    Should Be Equal    ${value}    ${expected}
+
+Import wizard information step should be visible
+    [Documentation]    Verifies the wizard is on the model information step — its display-name
+    ...                input only mounts once the wizard has advanced past the source step.
+
+    Wait For Elements State    ${IMPORT_WIZARD_DISPLAY_NAME_SELECTOR}    visible    timeout=60s
+
+Import wizard preview warnings should be visible
+    [Documentation]    Verifies the information step surfaces the preview's warnings Alert.
+
+    Wait For Elements State    ${IMPORT_WIZARD_PREVIEW_WARNINGS_SELECTOR}    visible    timeout=30s
 
 Import wizard should show stepper labels
     [Documentation]    Verifies the wizard renders the three step labels: source,
@@ -689,7 +1248,7 @@ Custom models tab should be visible
 
 Import model button should be absent
     [Documentation]    Verifies the "Import model" toolbar button is not present
-    ...                on the current tab. EAI-6124 placed the button on the
+    ...                on the current tab. The button belongs on the
     ...                Custom Models tab only; it must not appear on the
     ...                Fine-tune Models tab.
 
@@ -726,6 +1285,75 @@ Fill runtime profile environment variables
     Wait For Elements State    ${RUNTIME_ENV_VARS_YAML_SELECTOR}    visible    timeout=15s
     Fill Text    ${RUNTIME_ENV_VARS_YAML_SELECTOR}    ${yaml}
 
+Select runtime profile precision
+    [Documentation]    Picks a precision value in the import/edit wizard runtime step's
+    ...                precision select.
+    [Arguments]    ${precision}
+
+    Wait For Elements State    ${RUNTIME_MODEL_PRECISION_SELECTOR}    visible    timeout=15s
+    Click    ${RUNTIME_MODEL_PRECISION_SELECTOR}
+    Wait For Elements State    css=[role="listbox"]    visible    timeout=10s
+    Click    css=[role="listbox"] [role="option"]:has-text("${precision}")
+
+Select the last offered runtime precision
+    [Documentation]    Opens the precision select and picks the last option offered. The
+    ...                select lists only precisions reachable from the current
+    ...                accelerator/count selection (the base's emitted combinations), so any
+    ...                offered value resolves to a single base profile and the save succeeds.
+    ...                Returns the chosen precision text for the caller to assert on.
+
+    Wait For Elements State    ${RUNTIME_MODEL_PRECISION_SELECTOR}    visible    timeout=15s
+    Click    ${RUNTIME_MODEL_PRECISION_SELECTOR}
+    Wait For Elements State    css=[role="listbox"] [role="option"]    visible    timeout=10s
+    ${chosen}=    Get Text    css=[role="listbox"] [role="option"] >> nth=-1
+    Click    css=[role="listbox"] [role="option"] >> nth=-1
+    RETURN    ${chosen}
+
+Open runtime profile container image selector
+    [Documentation]    Opens the runtime step's container-image family dropdown.
+
+    Wait For Elements State    ${RUNTIME_CONTAINER_IMAGE_SELECTOR}    visible    timeout=15s
+    Click    ${RUNTIME_CONTAINER_IMAGE_SELECTOR}
+    Wait For Elements State    css=[role="listbox"]    visible    timeout=10s
+
+Select runtime profile container image family
+    [Documentation]    Selects a container-image family in the runtime step.
+    [Arguments]    ${family_label}
+
+    Open runtime profile container image selector
+    Click    css=[role="listbox"] [role="option"]:has-text("${family_label}")
+
+Open runtime profile container version selector
+    [Documentation]    Opens the runtime step's container-version dropdown.
+
+    Wait For Elements State    ${RUNTIME_CONTAINER_VERSION_SELECTOR}    visible    timeout=15s
+    Wait For Elements State    ${RUNTIME_CONTAINER_VERSION_SELECTOR}    enabled    timeout=15s
+    Click    ${RUNTIME_CONTAINER_VERSION_SELECTOR}
+    Wait For Elements State    css=[role="listbox"]    visible    timeout=10s
+
+Get open select option count
+    [Documentation]    Returns the number of options in the currently open select listbox.
+
+    ${options}=    Get Elements    ${SELECT_LISTBOX_OPTIONS_SELECTOR}
+    ${count}=    Get Length    ${options}
+    RETURN    ${count}
+
+Get open select option text
+    [Documentation]    Returns the option label text at the provided index from the open listbox.
+    [Arguments]    ${index}
+
+    VAR    ${selector}    ${SELECT_LISTBOX_OPTIONS_SELECTOR} >> nth=${index}
+    ${text}=    Get Text    ${selector}
+    RETURN    ${text}
+
+Get runtime profile selected container version text
+    [Documentation]    Returns the currently selected text shown by the runtime
+    ...                container-version select trigger.
+
+    Wait For Elements State    ${RUNTIME_CONTAINER_VERSION_SELECTOR}    visible    timeout=15s
+    ${text}=    Get Text    ${RUNTIME_CONTAINER_VERSION_SELECTOR}
+    RETURN    ${text}
+
 Submit import wizard runtime step
     [Documentation]    Clicks the runtime step's primary action (Save and start onboarding
     ...                on import, Save on edit) to submit the wizard.
@@ -743,11 +1371,11 @@ Open model settings on first custom model card
     Click    ${CUSTOM_MODEL_SETTINGS_MENU_ITEM_SELECTOR}
 
 # =============================================================================
-# Catalog deploy drawer — advanced profile override page keywords
+# Catalog deploy wizard — advanced profile override page keywords
 # =============================================================================
 
 Expand advanced profile parameters
-    [Documentation]    Clicks the advanced-profile-parameters expander in the deploy drawer
+    [Documentation]    Clicks the advanced-profile-parameters option in the deploy wizard
     ...                and waits for the precision override select to render.
 
     Wait For Elements State    ${DEPLOY_ADVANCED_TOGGLE_SELECTOR}    visible    timeout=10s
@@ -767,12 +1395,112 @@ Select deploy precision override
     Wait For Elements State    css=[role="listbox"]    visible    timeout=10s
     Click    css=[role="listbox"] [role="option"]:has-text("${precision}")
 
-Submit catalog deploy drawer
-    [Documentation]    Clicks the Deploy confirm button in the catalog deploy drawer footer.
+# =============================================================================
+# Deploy AIM wizard — step navigation page keywords
+# =============================================================================
 
-    Wait For Elements State    ${CUSTOM_DEPLOY_SUBMIT_BTN}    visible    timeout=10s
-    Wait For Elements State    ${CUSTOM_DEPLOY_SUBMIT_BTN}    enabled    timeout=10s
-    Click    ${CUSTOM_DEPLOY_SUBMIT_BTN}
+Click deploy wizard next
+    [Documentation]    Clicks the deploy wizard's Next button to advance to the next step.
+
+    Wait For Elements State    ${DEPLOY_WIZARD_NEXT_BUTTON_SELECTOR}    enabled    timeout=15s
+    Click    ${DEPLOY_WIZARD_NEXT_BUTTON_SELECTOR}
+
+Select deploy wizard image pull secret
+    [Documentation]    Picks an option in the model step's image pull secrets dropdown by its
+    ...                visible label, then closes the dropdown. The options list renders in a
+    ...                popover outside the wizard dialog, so it is not scoped to the dialog.
+    [Arguments]    ${option_label}
+
+    VAR    ${trigger}    ${DEPLOY_WIZARD_SELECTOR} >> css=button[aria-label="Image pull secrets"]
+    Wait For Elements State    ${trigger}    visible    timeout=30s
+    Click    ${trigger}
+    VAR    ${listbox}    css=ul[role="listbox"][data-slot="listbox"]
+    VAR    ${option}    ${listbox} [role="option"]:has-text("${option_label}")
+    Wait For Elements State    ${option}    visible    timeout=10s
+    Click    ${option}
+    # Multi-select keeps the popover open, and while open it hides the wizard's Next button.
+    Keyboard Key    press    Escape
+    Wait For Elements State    ${listbox}    detached    timeout=10s
+
+Advance deploy wizard to review and submit
+    [Documentation]    Clicks Next until the wizard reaches its review step, then submits.
+    ...                The step count varies by model (adapter-capable models add a
+    ...                personalization step), so it is not hard-coded.
+
+    VAR    ${submit}    ${DEPLOY_WIZARD_SELECTOR} >> role=button[name="Submit"]
+    FOR    ${_}    IN RANGE    6
+        ${at_review}=    Run Keyword And Return Status
+        ...    Wait For Elements State    ${submit}    visible    timeout=2s
+        IF    ${at_review}    BREAK
+        Click deploy wizard next
+    END
+    Wait For Elements State    ${submit}    enabled    timeout=15s
+    Click    ${submit}
+
+Enable dynamic LoRA adapters
+    [Documentation]    Enables dynamic LoRA adapter support in the personalization step.
+
+    Wait For Elements State    ${DEPLOY_PERSONALIZATION_TOGGLE_SELECTOR}    visible    timeout=15s
+    Click    ${DEPLOY_PERSONALIZATION_TOGGLE_SELECTOR}
+
+Select maximum LoRA rank
+    [Documentation]    Chooses the maximum adapter rank in the personalization step.
+    [Arguments]    ${rank}
+
+    Wait For Elements State    ${DEPLOY_PERSONALIZATION_MAX_RANK_SELECTOR}    visible    timeout=15s
+    Click    ${DEPLOY_PERSONALIZATION_MAX_RANK_SELECTOR}
+    VAR    ${option}    css=[role="listbox"] [role="option"]:has-text("${rank}")
+    Wait For Elements State    ${option}    visible    timeout=15s
+    Click    ${option}
+
+Select LoRA adapter named "${adapter_name}"
+    [Documentation]    Selects an available adapter from the personalization table.
+
+    VAR    ${checkbox}    ${DEPLOY_PERSONALIZATION_ADAPTERS_SELECTOR} [role="row"]:has-text("${adapter_name}") [role="checkbox"]
+    Wait For Elements State    ${checkbox}    visible    timeout=15s
+    Click    ${checkbox}
+
+Wait for deploy wizard LoRA adapter choices
+    [Documentation]    Waits for the personalization step's adapter table to finish loading. The
+    ...    table mounts before the adapters and profile data it filters against arrive, so a read
+    ...    taken on mount sees a list that is merely incomplete rather than filtered.
+
+    Wait For Elements State    ${DEPLOY_PERSONALIZATION_ADAPTERS_SELECTOR}    visible    timeout=30s
+    Wait For Elements State
+    ...    ${DEPLOY_PERSONALIZATION_ADAPTERS_READY_SELECTOR}    visible    timeout=30s
+
+Get deploy wizard LoRA adapter choices text
+    [Documentation]    Returns the visible content of the personalization step's adapter table.
+
+    ${text}=    Get Text    ${DEPLOY_PERSONALIZATION_ADAPTERS_SELECTOR}
+    RETURN    ${text}
+
+Deploy wizard LoRA adapter row is visible
+    [Documentation]    Reports whether the personalization step lists the named adapter.
+    [Arguments]    ${display_name}
+
+    VAR    ${row}    ${DEPLOY_PERSONALIZATION_ADAPTERS_SELECTOR} [role="row"]:has-text("${display_name}")
+    ${count}=    Get Element Count    ${row}
+    RETURN    ${{ $count > 0 }}
+
+Submit deploy wizard
+    [Documentation]    Submits the completed deployment wizard.
+
+    Wait For Elements State    ${DEPLOY_WIZARD_SUBMIT_BUTTON_SELECTOR}    enabled    timeout=15s
+    Click    ${DEPLOY_WIZARD_SUBMIT_BUTTON_SELECTOR}
+
+Navigate to scaling step in deploy wizard
+    [Documentation]    Advances the deploy wizard from the Model step, through the Target
+    ...                step, to reach the Scaling step.
+
+    Click deploy wizard next
+    Click deploy wizard next
+
+Target step summary should show unoptimized profile warning
+    [Documentation]    Verifies the collapsed Target step summary shows the warning that
+    ...                no optimized profile is available for the current selection.
+
+    Wait For Elements State    ${DEPLOY_WIZARD_UNOPTIMIZED_WARNING_SELECTOR}    visible    timeout=10s
 
 # =============================================================================
 # Custom-model deploy drawer page keywords
@@ -796,11 +1524,46 @@ Open deploy action from model row
 
 Wait for custom model deploy drawer
     [Documentation]    Waits for the custom-model deploy drawer to mount, anchored on the
-    ...                runtime-profile placeholder (stable ``data-testid``). The placeholder
-    ...                is an intentionally-empty reserved <div>, so it is never "visible" to
-    ...                Playwright (zero bounding box) — assert presence (attached) instead.
+    ...                runtime-profile slot (stable ``data-testid``). For a model with no
+    ...                profiles to choose from the slot is an empty <div>, which Playwright
+    ...                never reports as "visible" (zero bounding box) — assert presence
+    ...                (attached) instead so both kinds of model are covered.
 
     Wait For Elements State    ${CUSTOM_DEPLOY_DRAWER_SELECTOR}    attached    timeout=15s
+
+Deploy drawer should show profile selector
+    [Documentation]    Verifies the profile selector is present in the deploy drawer.
+
+    Wait For Elements State    ${CUSTOM_DEPLOY_PROFILE_SELECT}    visible    timeout=15s
+
+Deploy drawer should show profile information
+    [Documentation]    Verifies the panel describing the selected profile is present.
+
+    Wait For Elements State    ${CUSTOM_DEPLOY_PROFILE_DETAILS}    visible    timeout=15s
+
+Open deploy drawer profile options
+    [Documentation]    Opens the profile dropdown and waits for its listbox to render.
+
+    Wait For Elements State    ${CUSTOM_DEPLOY_PROFILE_TRIGGER}    visible    timeout=15s
+    Click    ${CUSTOM_DEPLOY_PROFILE_TRIGGER}
+    Wait For Elements State    ${CUSTOM_DEPLOY_PROFILE_LISTBOX}    visible    timeout=10s
+
+Choose deploy drawer profile named "${name}"
+    [Documentation]    Opens the profile dropdown and picks the option carrying the given
+    ...                label. Matched on the option's text because the label is what the
+    ...                user reads; a profile that is offered as unavailable cannot be picked.
+
+    Open deploy drawer profile options
+    VAR    ${option}    ${CUSTOM_DEPLOY_PROFILE_LISTBOX} >> css=[role="option"]:has-text("${name}")
+    Wait For Elements State    ${option}    visible    timeout=10s
+    Click    ${option}
+    Wait For Elements State    ${CUSTOM_DEPLOY_PROFILE_LISTBOX}    detached    timeout=10s
+
+Get deploy drawer selected profile text
+    [Documentation]    Returns the label the profile selector currently shows.
+
+    ${text}=    Get Text    ${CUSTOM_DEPLOY_PROFILE_TRIGGER}
+    RETURN    ${text}
 
 Deploy drawer header should show model name
     [Documentation]    Verifies the deploy drawer header shows the model name as a
@@ -864,6 +1627,11 @@ Wait for fine-tune models table to load
 
     Wait For Elements State    ${FINE_TUNE_MODELS_TABLE_ROW}    visible    timeout=30s
 
+Wait for fine-tune models table to settle
+    [Documentation]    Waits until the table's asynchronous data loading is complete.
+
+    Wait For Elements State    ${FINETUNE_BTN_SELECTOR}    enabled    timeout=30s
+
 Get fine-tune models row count
     [Documentation]    Returns the number of rows currently displayed in the fine-tune models table body.
 
@@ -895,6 +1663,40 @@ Get fine-tune models first row text
     ${text}=    Get Text    ${elements}[0]
     RETURN    ${text}
 
+Get fine-tune models row text
+    [Documentation]    Returns the text content of the fine-tune model row matching the given name.
+    [Arguments]    ${model_name}
+
+    VAR    ${row}    ${FINE_TUNE_MODELS_TABLE_ROW}:has-text("${model_name}")
+    Wait For Elements State    ${row}    visible    timeout=30s
+    ${text}=    Get Text    ${row}
+    RETURN    ${text}
+
+Get fine-tune model name cell text
+    [Documentation]    Returns the Name cell text for the fine-tuned model matching the given name.
+    [Arguments]    ${model_name}
+
+    VAR    ${row}    ${FINE_TUNE_MODELS_TABLE_ROW}:has-text("${model_name}")
+    Wait For Elements State    ${row}    visible    timeout=30s
+    ${text}=    Get Text    ${row} >> css=td:nth-child(1)
+    RETURN    ${text}
+
+Get fine-tune models table header text
+    [Documentation]    Returns the text content of the fine-tune models table header.
+
+    ${text}=    Get Text    css=${FINE_TUNE_MODELS_SELECTOR} table thead
+    RETURN    ${text}
+
+Fine-tune models row is visible
+    [Documentation]    Returns whether a fine-tuned model row with the given name is visible.
+    [Arguments]    ${model_name}
+
+    Wait for fine-tune models table to settle
+    VAR    ${row}    ${FINE_TUNE_MODELS_TABLE_ROW}:has-text("${model_name}")
+    ${count}=    Get Element Count    ${row}
+    ${visible}=    Evaluate    ${count} > 0
+    RETURN    ${visible}
+
 Click base model option with name
     [Documentation]    Selects a specific base model option by canonical name.
     [Arguments]    ${canonical_name}
@@ -904,7 +1706,7 @@ Click base model option with name
     Click    ${selector}
 
 HF token section should be present
-    [Documentation]    Verifies the Hugging Face Authentication section is visible in the drawer.
+    [Documentation]    Verifies the Hugging Face Authentication section is visible in the wizard.
     ...                The section is only mounted when the selected base model is gated.
 
     Wait For Elements State    ${HF_TOKEN_SECTION_SELECTOR}    visible    timeout=10s
@@ -915,16 +1717,47 @@ HF token section should not be present
 
     Wait For Elements State    ${HF_TOKEN_SECTION_SELECTOR}    detached    timeout=10s
 
-Click finetune confirm button
-    [Documentation]    Clicks the "Start training" confirm button in the fine-tuning drawer.
+Click finetune wizard submit button
+    [Documentation]    Clicks the "Start training" button in the fine-tuning wizard.
 
     Click    ${FINETUNE_CONFIRM_BTN_SELECTOR}
 
+Fine-tuning success toast link should be visible
+    [Documentation]    Verifies the fine-tuning success toast contains the expected link.
+    [Arguments]    ${link_label}
+
+    VAR    ${toast_link}    css=[data-slot="toast"]:has-text("Fine-tuning started") a:has-text("${link_label}")
+    Wait For Elements State    ${toast_link}    visible    timeout=30s
+
 Fill finetune display name
-    [Documentation]    Types a display name into the fine-tuning drawer's model name input.
+    [Documentation]    Types a display name into the fine-tuning wizard's model name input.
     [Arguments]    ${name}
 
     Fill Text    ${FINETUNE_DISPLAY_NAME_INPUT}    ${name}
+
+Fill finetune description
+    [Documentation]    Types a description into the fine-tuning wizard's description input.
+    [Arguments]    ${description}
+
+    Fill Text    ${FINETUNE_DESCRIPTION_INPUT}    ${description}
+
+Open details action from model row
+    [Documentation]    Opens the row actions menu for the given model and selects Details.
+    [Arguments]    ${model_name}
+
+    VAR    ${row}    css=${FINE_TUNE_MODELS_SELECTOR} table tbody tr:has-text("${model_name}")
+    Wait For Elements State    ${row}    visible    timeout=30s
+    ${actions_btn}=    Get Element    ${row} >> ${FINE_TUNE_MODELS_ROW_ACTION_BTN}
+    Click    ${actions_btn}
+    Wait For Elements State    ${FINE_TUNE_MODELS_DETAILS_OPTION}    visible    timeout=5s
+    Click    ${FINE_TUNE_MODELS_DETAILS_OPTION}
+
+Model details should show description
+    [Documentation]    Verifies the open model details dialog contains a description.
+    [Arguments]    ${description}
+
+    VAR    ${dialog}    css=[role="dialog"]:has-text("Description"):has-text("${description}")
+    Wait For Elements State    ${dialog}    visible    timeout=10s
 
 Custom models empty state should be visible
     [Documentation]    Waits for the empty-state placeholder shown when a project has no
@@ -941,11 +1774,10 @@ Custom model card with text "${text}" should be visible
 
 Click deploy button on custom model card
     [Documentation]    Clicks the deploy button of a Ready custom model card. The button is
-    ...                enabled only for Ready models (disabled while Importing or Failed), and a
-    ...                Ready card renders no status pill — so the enabled button, not a "Ready"
-    ...                text match, is the deployability signal. Waits for an enabled deploy button
-    ...                to appear so a stale Importing/Failed card whose button never enables cannot
-    ...                make this flaky, and acts on [0] to avoid strict mode with several cards.
+    ...                enabled only for deployable models, and a Ready card renders no status pill
+    ...                — so the enabled button, not a "Ready" text match, is the deployability
+    ...                signal. Waits for an enabled deploy button and acts on [0] to avoid strict
+    ...                mode with several cards.
 
     Wait For Elements State    ${CUSTOM_MODEL_CARD_SELECTOR}    visible    timeout=30s
     VAR    ${enabled_deploy}    ${CUSTOM_MODEL_CARD_DEPLOY_BUTTON_SELECTOR}:not([disabled])

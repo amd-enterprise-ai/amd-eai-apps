@@ -127,9 +127,13 @@ describe('DeleteUser', () => {
         wrapper,
       });
     });
-    const deleteButton = screen.getByRole('button', {
-      name: 'detail.delete.action.label',
-    }) as HTMLInputElement;
-    expect(deleteButton.disabled).toBeTruthy();
+    // HeroUI v3 wraps a disabled tooltip trigger in an extra focusable node, so
+    // the accessible name now matches more than one element. Assert on the real
+    // <button> element specifically.
+    const deleteButton = screen
+      .getAllByRole('button', { name: 'detail.delete.action.label' })
+      .find((el): el is HTMLButtonElement => el.tagName === 'BUTTON');
+    expect(deleteButton).toBeDefined();
+    expect(deleteButton?.disabled).toBeTruthy();
   });
 });

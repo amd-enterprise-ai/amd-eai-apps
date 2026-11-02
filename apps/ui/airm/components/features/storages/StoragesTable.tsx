@@ -127,7 +127,12 @@ export const StoragesTable: React.FC<Props> = ({
             }
             placement="top"
           >
-            <span className="cursor-pointer underline">{`${item.projectStorages.length} projects`}</span>
+            {/* biome-ignore lint/a11y/useSemanticElements: the element reveals supplemental text rather than performing an action. */}
+            <span
+              className="cursor-pointer underline"
+              role="button"
+              tabIndex={0}
+            >{`${item.projectStorages.length} projects`}</span>
           </Tooltip>
         ) : (
           <NoDataDisplay />

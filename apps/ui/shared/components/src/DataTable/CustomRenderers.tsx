@@ -137,7 +137,7 @@ const TranslationDisplay = (props: TranslationDisplayProps) => {
  *
  */
 const NoDataDisplay = () => {
-  return <span className="text-default-300">&mdash;</span>;
+  return <span className="text-muted">&mdash;</span>;
 };
 
 export interface BadgeStackVariants {
@@ -216,7 +216,12 @@ const BadgeStackDisplay = ({
 
   return (
     <Tooltip content={tooltipContent}>
-      <span className="flex flex-row items-center cursor-help">
+      {/* biome-ignore lint/a11y/useSemanticElements: the element reveals supplemental text rather than performing an action. */}
+      <span
+        className="flex flex-row items-center cursor-help"
+        role="button"
+        tabIndex={0}
+      >
         {displayedTypes.map((type, index) => {
           const {
             label = type,
@@ -238,7 +243,7 @@ const BadgeStackDisplay = ({
         })}
 
         {remainingCount > 0 && (
-          <span className="text-default-500 text-sm font-medium ml-1">
+          <span className="text-muted text-sm font-medium ml-1">
             +{remainingCount}
           </span>
         )}

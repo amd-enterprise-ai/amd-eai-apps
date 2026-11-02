@@ -28,6 +28,25 @@ rules:
     resources: ["aigatewayroutes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
+  # Create and manage the per-model SecurityPolicy that enforces native apiKeyAuth.
+  - apiGroups: ["gateway.envoyproxy.io"]
+    resources: ["securitypolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Create and manage the ReferenceGrant that lets the per-model catch-all SecurityPolicy (in the
+  # workload namespace) reference this controller's ext_authz Service cross-namespace. One grant
+  # per workload namespace, stamped in the controller's namespace during reconcile.
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["referencegrants"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Read the per-backend API-key Secret (aim-keys-<workload-id>, materialized by ESO) to gate
+  # SecurityPolicy creation on the credential Secret existing, and watch it so a model is
+  # reconciled when its first key is bound or its last key removed.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+
   # Create and manage the inference-epp Deployment in each IS namespace.
   - apiGroups: ["apps"]
     resources: ["deployments"]

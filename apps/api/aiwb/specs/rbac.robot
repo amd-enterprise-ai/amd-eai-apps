@@ -30,11 +30,16 @@ Initialize AIWB RBAC Test Suite
     ...    creates an AIRM project with the team member assigned, and captures the project's
     ...    namespace for use in AIWB endpoint URLs.
 
-    Skip the suite if team member is not provisioned
+    Require the team member account
     Create team member API session
 
-    ${member_name}=    Test Name    aiwb-rbac-member-project
-    A Ready Project "${member_name}" With User Access Exists
+    # A fresh project, not a fixed name. This suite deletes its project at teardown, so a
+    # fixed name means the next run's setup can find the previous one still Deleting and sit
+    # in the 3-minute Wait Until Project Deleted branch until it gives up — which fails the
+    # setup and takes every test in the suite with it. A name nobody used before cannot be
+    # mid-deletion. The tests only need the project's name to build AIWB namespace URLs, and
+    # a fresh project supplies that the same way.
+    A Fresh Project With User Access Exists
     Add team member to project    ${TEST_PROJECT_ID}
     # The AIRM project name is also the Kubernetes namespace used by AIWB endpoints
     # such as /projects/{project}/inference. Capture it so cross-service RBAC tests

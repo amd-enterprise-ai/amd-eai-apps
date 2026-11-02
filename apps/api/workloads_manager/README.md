@@ -76,6 +76,22 @@ uv run wm create-patches
 uv run wm status
 ```
 
+### Patch failures
+
+`wm init` exits non-zero if any patch fails to apply. A failed three-way merge writes
+conflict markers into the chart files, so the checkout it leaves behind is not safe to
+package or register — fix the patches and re-run rather than continuing. `wm update` is
+the exception: conflicts are the expected result of moving to a newer upstream version,
+so it reports them and leaves the tree for you to resolve by hand.
+
+To check a patched checkout independently — for conflict markers and unparseable chart
+YAML — run `tooling/validate_patched_workloads.py`, which is what CI does before the
+image is built:
+
+```bash
+uv run python ../../../tooling/validate_patched_workloads.py
+```
+
 ## Creating Custom Patches
 
 To create your own patches for workloads:

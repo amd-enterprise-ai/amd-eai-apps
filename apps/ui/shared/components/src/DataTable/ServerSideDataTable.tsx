@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 import type { Selection } from '../Select/Select';
-import { SortDescriptor } from './TablePrimitive';
+import type { SortDescriptor } from '@heroui/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
@@ -43,7 +43,7 @@ interface Props<T, K extends keyof T, C, S> {
   isRowDisabled?: (item: T) => boolean;
 }
 
-export const ServerSideDataTable = <T, K extends keyof T, C, S>({
+export const ServerSideDataTable = <T extends object, K extends keyof T, C, S>({
   data,
   filters,
   total,

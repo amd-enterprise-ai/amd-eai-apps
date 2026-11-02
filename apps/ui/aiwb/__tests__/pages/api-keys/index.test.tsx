@@ -16,16 +16,21 @@ vi.mock('next-i18next/serverSideTranslations', () => ({
   serverSideTranslations: vi.fn().mockResolvedValue({}),
 }));
 
-// Mock the project context
-vi.mock('@/contexts/ProjectContext', () => ({
-  useProject: () => ({
-    activeProject: 'project1',
-    clusterAuthEnabled: true,
-    projects: [{ id: 'project1', name: 'Project 1' }],
-    isLoading: false,
-    setActiveProject: vi.fn(),
-  }),
+const { mockUseProject } = vi.hoisted(() => ({
+  mockUseProject: vi.fn(),
 }));
+
+vi.mock('@/contexts/ProjectContext', () => ({
+  useProject: () => mockUseProject(),
+}));
+
+const defaultProjectContext = {
+  activeProject: 'project1',
+  apiKeysManagementEnabled: true,
+  projects: [{ id: 'project1', name: 'Project 1' }],
+  isLoading: false,
+  setActiveProject: vi.fn(),
+};
 
 // Mock the API keys components
 vi.mock('@/components/features/api-keys/ApiKeysTable', () => ({
@@ -47,6 +52,7 @@ vi.mock('@/components/features/api-keys/CreateApiKey', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockUseProject.mockReturnValue(defaultProjectContext);
 });
 
 describe('ApiKeysPage', () => {
@@ -72,6 +78,21 @@ describe('ApiKeysPage', () => {
 
       const modal = screen.getByTestId('create-api-key');
       expect(modal).toHaveAttribute('data-open', 'false');
+    });
+  });
+
+  describe('with API-key management disabled', () => {
+    it('shows the disabled notice instead of the table', () => {
+      mockUseProject.mockReturnValue({
+        ...defaultProjectContext,
+        apiKeysManagementEnabled: false,
+      });
+
+      render(<ApiKeysPage />, { wrapper });
+
+      expect(screen.getByText('list.apiKeysDisabled')).toBeInTheDocument();
+      expect(screen.queryByTestId('api-keys-table')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('create-api-key')).not.toBeInTheDocument();
     });
   });
 });

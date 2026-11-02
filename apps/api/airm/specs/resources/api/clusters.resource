@@ -47,6 +47,14 @@ Create cluster
 
     RETURN                  ${response}
 
+Delete cluster
+    [Documentation]    Delete a cluster by ID
+    [Arguments]             ${cluster_id}           ${expected_status}=any
+    Create api session    airm
+    ${endpoint}=            Clusters endpoint       ${cluster_id}
+    ${response}=            Safe Delete Request       ${endpoint}             expected_status=${expected_status}
+    RETURN                  ${response}
+
 Get cluster
     [Documentation]    Get a cluster by ID
     ...

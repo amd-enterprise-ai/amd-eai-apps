@@ -2,35 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-export enum DatasetType {
-  Finetuning = 'Fine-tuning',
-}
+import type { components } from '@/types/api';
 
-export interface Dataset {
-  id: string;
-  name: string;
-  path: string;
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
-  type: string;
-  description: string;
-}
-
-export type DatasetsResponse = {
-  datasets: Dataset[];
-};
-
-export interface UploadDatasetFormData {
-  name: string;
-  description?: string;
-  datasetType: string;
-  file: File;
-}
-
-export interface UploadDatasetParams {
-  name: string;
-  description: string;
-  datasetType: DatasetType;
-  file: File;
-}
+export type DatasetType = components['schemas']['DatasetType'];

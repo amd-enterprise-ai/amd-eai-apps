@@ -3,8 +3,13 @@
 # SPDX-License-Identifier: MIT
 
 controller:
+  # Number of controller replicas. The controller only reconciles, and leader election means a second
+  # replica just stands by, so one is enough. The ext_authz data path (which does need HA) is now a
+  # separate Deployment; see the authz section below.
+  replicaCount: 1
+
   image:
-    repository: amdenterpriseai/ai-gateway-discovery
+    repository: silogenai/ai-gateway-discovery
     tag: ""
     pullPolicy: IfNotPresent
 
@@ -17,12 +22,23 @@ controller:
     managedBy:
       name: app.kubernetes.io/managed-by
       value: aim-engine
+    # Label carrying the AIM workload UUID on each InferenceService. It is the x-ai-eg-backend
+    # routing id and the suffix of the bound-<workload-id> membership label, so routing, the
+    # per-model SecurityPolicy, and the body-path ext_authz agree on which keys a model accepts.
+    workloadId: airm.silogen.ai/workload-id
 
   annotations:
-    allowedGroup: cluster-auth/allowed-group
     # Annotation set by AIM-engine on each InferenceService with the actual
     # vLLM-served model name (HF model ID). ISes without this annotation are skipped.
     modelName: aim.eai.amd.com/model-id
+
+  # Native Envoy Gateway apiKeyAuth enforcement. Always on
+  # and fleet-wide: every model with a workload-id AND a bound key (its aim-keys-<workload-id>
+  # Secret exists) is enforced; a model with no bound key gets no policy and falls through to
+  # the gateway backstop (default-deny / cluster-auth) rather than 500-ing. Set the annotation
+  # below to "false" on a model to exclude it (per-model rollout kill switch).
+  apiKeyAuth:
+    annotation: aim.eai.amd.com/api-key-auth
 
   # Envoy Gateway resource that the AIGatewayRoute attaches to.
   gateway:
@@ -50,8 +66,8 @@ controller:
   # Endpoint Picker Plugin deployed by the controller alongside each InferenceService.
   epp:
     image:
-      repository: registry.k8s.io/gateway-api-inference-extension/epp
-      tag: v1.5.0-rc.2
+      repository: ghcr.io/llm-d/llm-d-router-endpoint-picker
+      tag: v0.10.0
     # gRPC port used by both the EPP container and the Service it exposes.
     port: 9002
 
@@ -61,13 +77,27 @@ controller:
     # Port exposed by the KServe predictor pods (vLLM default).
     targetPort: 8000
 
-  # cluster-auth extAuth service used for per-IS SecurityPolicy group enforcement.
-  clusterAuth:
-    service: cluster-auth
-    namespace: cluster-auth
-    port: 50051
-
   healthPort: 8081
+
+  # Port for the body-aware ext_authz HTTP handler. Envoy Gateway's extAuth (with
+  # bodyToExtAuth) calls it to authorize header-less (model-in-body) inference requests
+  # that native per-route apiKeyAuth cannot reach.
+  authzPort: 8083
+
+  # Separate port for the workloads-route ext_authz handler. The workloads SecurityPolicy targets
+  # this port; the handler authorizes requests arriving here on the path's workload-id. Kept distinct
+  # from authzPort so the port (set by each policy, not the client) is what tells the two request
+  # families apart — a path-based classifier on the shared handler would be client-forgeable.
+  workloadsAuthzPort: 8084
+
+  # Request-body ceiling (bytes) for the header-less (model-in-body) path, used both as
+  # bodyToExtAuth.maxRequestBytes on the per-model catch-all SecurityPolicies and as the limit the
+  # authz handler reads a body at. Must be a plain integer of bytes: a quantity suffix such as 4Mi
+  # is rejected at template time. See common.DefaultBodyAuthMaxRequestBytes in the controller
+  # source for why 4MiB, and keep it equal to aiGateway.bodyAuthMaxRequestBytes on the
+  # envoy-gateway-config chart. Raising it means raising authz.resources.limits.memory below with
+  # it — the authz pod buffers the body, not the controller.
+  bodyAuthMaxRequestBytes: 4194304
 
   resources:
     requests:
@@ -87,3 +117,31 @@ controller:
       drop:
         - ALL
     readOnlyRootFilesystem: true
+
+# ext_authz data path, split out of the controller. It is the sole, fail-closed authenticator for
+# the workloads route and header-less inference, so unlike the controller it must be highly
+# available. It runs the /authz entrypoint of the same image and reuses the controller's image,
+# security context, and label/port config above.
+authz:
+  # Two replicas so the fail-closed authenticator survives a node loss or rollout. Backed by a
+  # PodDisruptionBudget (minAvailable 1) and hostname topology spread.
+  replicaCount: 2
+
+  # Graceful-termination drain. On rollout/drain/scale-down a pod stops being routed to only after
+  # it leaves the Service EndpointSlice and Envoy's EDS, which lags SIGTERM. drainSeconds is a
+  # preStop sleep that keeps the server accepting during that lag so no request hits a stopping pod
+  # (a fail-closed 401 otherwise). terminationGracePeriodSeconds must exceed drainSeconds plus the
+  # server's ~5s graceful shutdown. Does not cover hard crashes/SIGKILL — those rely on the second
+  # replica.
+  drainSeconds: 5
+  terminationGracePeriodSeconds: 15
+
+  # Sized for the scoped cache (api-key Secrets + managed InferenceServices only), not the whole
+  # Secret population. The 256Mi ceiling is a starting point — measure real api-key Secret volume on
+  # a target cluster before trusting it, since it was never sized against actual data.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi

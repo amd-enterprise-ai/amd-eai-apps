@@ -34,7 +34,7 @@ export const UserListEntry: React.FC<Props> = ({
         </div>
         <div
           title={description}
-          className="text-sm text-default-500 overflow-hidden text-nowrap text-ellipsis"
+          className="text-sm text-muted overflow-hidden text-nowrap text-ellipsis"
         >
           {description}
         </div>

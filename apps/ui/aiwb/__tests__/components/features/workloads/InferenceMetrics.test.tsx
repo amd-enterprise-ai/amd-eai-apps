@@ -107,6 +107,10 @@ vi.mock('@/components/features/workloads/InferenceRequestsCard', () => ({
 vi.mock('@/components/features/projects', () => ({
   GPUDeviceUsageCard: vi.fn(() => <div data-testid="gpu-device-usage-card" />),
   GPUMemoryUsageCard: vi.fn(() => <div data-testid="gpu-memory-usage-card" />),
+  CPUCoreUsageCard: vi.fn(() => <div data-testid="cpu-core-usage-card" />),
+  SystemMemoryUsageCard: vi.fn(() => (
+    <div data-testid="system-memory-usage-card" />
+  )),
 }));
 
 // Mock metrics fetch
@@ -193,6 +197,8 @@ describe('InferenceMetrics', () => {
     // GPU cards
     expect(screen.getByTestId('gpu-device-usage-card')).toBeInTheDocument();
     expect(screen.getByTestId('gpu-memory-usage-card')).toBeInTheDocument();
+    expect(screen.getByTestId('cpu-core-usage-card')).toBeInTheDocument();
+    expect(screen.getByTestId('system-memory-usage-card')).toBeInTheDocument();
   });
 
   it('passes correct props to metric cards', () => {

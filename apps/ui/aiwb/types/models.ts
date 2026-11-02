@@ -2,19 +2,29 @@
 //
 // SPDX-License-Identifier: MIT
 
+import type { components } from '@/types/api';
+
 export enum ModelOnboardingStatus {
   READY = 'ready',
   PENDING = 'pending',
   FAILED = 'failed',
 }
 
-export type ModelFinetuneParams = {
-  displayName: string;
-  datasetId: string;
-  epochs?: number;
-  learningRate?: number;
-  batchSize?: number;
-  hfTokenSecretName?: string;
+type FineTuningJobRequest = components['schemas']['FineTuningJobRequest'];
+type OptionalFinetuneField =
+  | 'description'
+  | 'epochs'
+  | 'learningRate'
+  | 'batchSize'
+  | 'hfTokenSecretName'
+  | 'output'
+  | 'lora';
+
+export type ModelFinetuneParams = Pick<
+  FineTuningJobRequest,
+  'displayName' | 'datasetIds'
+> & {
+  [Key in OptionalFinetuneField]?: NonNullable<FineTuningJobRequest[Key]>;
 };
 
 export interface Model {
@@ -36,14 +46,6 @@ export interface Model {
   hfTokenRequired?: boolean | null;
 }
 
-export interface ModelRequirements {
-  minGpuCount: number;
-  minGpuMemoryGb: number;
-  minCpuCores: number;
-  minRamGb: number;
-  minStorageGb: number;
-}
-
 export interface InferenceSettings {
   systemPrompt: string;
   temperature: number;
@@ -51,14 +53,14 @@ export interface InferenceSettings {
   presencePenalty: number;
 }
 
-export interface FinetunableModel {
-  canonicalName: string;
-  gpuCount: number | null;
-  compatibleAccelerators: string[];
-  compatibleAcceleratorNames: string[];
-  /** Whether this recipe targets gated base weights. Null when the overlay does not declare it. */
-  hfTokenRequired?: boolean | null;
-}
+type FinetunableModelResponse =
+  components['schemas']['FinetunableModelResponse'];
+
+/** API model normalized with defaults for fields the backend may omit. */
+export type FinetunableModel = Required<
+  Omit<FinetunableModelResponse, 'hfTokenRequired'>
+> &
+  Pick<FinetunableModelResponse, 'hfTokenRequired'>;
 
 export const DEFAULT_SETTINGS: InferenceSettings = {
   systemPrompt: '',

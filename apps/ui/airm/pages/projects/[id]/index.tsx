@@ -32,10 +32,10 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { getServerSession } from 'next-auth';
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import { useRouter } from 'next/router';
 
 import { useAccessControl } from '@/hooks/useAccessControl';
+import { getPageTranslations } from '@/utils/i18n';
 import {
   deleteProject as deleteProjectAPI,
   fetchProjectAverageGPUIdleTime,
@@ -298,23 +298,16 @@ const ProjectDashboardPage: React.FC<Props> & WithDocumentationLink = ({
                     ? ['viewInAiwb']
                     : []),
                   ...(!isAdministrator ? ['delete'] : []),
-                  'teamMemberAlert',
                 ]}
               >
                 {!isAdministrator ? (
                   <DropdownItem
                     key="teamMemberAlert"
-                    isReadOnly
-                    className="opacity-100"
+                    className="pointer-events-none"
                   >
                     <Alert
-                      color="warning"
-                      classNames={{
-                        base: 'p-2',
-                        title: 'text-xs leading-3.5',
-                        description: 'text-xs leading-tight',
-                      }}
-                      radius="sm"
+                      status="warning"
+                      isTight
                       title={t('dashboard.action.teamMemberAlert.title')}
                       hideIcon
                       className="w-[240px]"
@@ -347,8 +340,7 @@ const ProjectDashboardPage: React.FC<Props> & WithDocumentationLink = ({
                 </DropdownItem>
                 <DropdownItem
                   key="delete"
-                  className="text-danger"
-                  color="danger"
+                  variant="danger"
                   onPress={onDeleteModalOpen}
                   startContent={<IconTrash />}
                 >
@@ -431,12 +423,10 @@ export async function getServerSideProps(context: any) {
       session?.accessToken as string,
     );
 
-    const translations = await serverSideTranslations(locale, [
-      'common',
+    const translations = await getPageTranslations(locale, [
       'projects',
       'users',
       'workloads',
-      'sharedComponents',
     ]);
 
     const breadcrumb = [

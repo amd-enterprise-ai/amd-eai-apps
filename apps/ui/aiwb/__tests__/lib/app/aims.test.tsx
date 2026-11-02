@@ -9,16 +9,16 @@ import {
   aimParser,
   resolveAIMServiceDisplay,
   getAIMServiceStatusVariants,
+  getModelCapability,
+  getInferenceApiPath,
 } from '@/lib/app/aims';
 import { IconCircleCaretRight } from '@tabler/icons-react';
 import {
   AIMServiceStatus,
-  AIMStatus,
   AIMWorkloadStatus,
   ParsedAIM,
   AIMClusterModel,
   AIMService,
-  AIMMetric,
 } from '@/types/aims';
 
 describe('getAIMServiceStatusVariants', () => {
@@ -26,10 +26,51 @@ describe('getAIMServiceStatusVariants', () => {
 
   it('maps RUNNING to primary color with play icon', () => {
     const variants = getAIMServiceStatusVariants(t);
-    const running = variants[AIMServiceStatus.RUNNING];
+    const running = variants['Running'];
     expect(running.color).toBe('primary');
     expect(running.icon).toBe(IconCircleCaretRight);
     expect(running.intent).toBeUndefined();
+  });
+});
+
+describe('getModelCapability', () => {
+  it.each(['transcription', 'speech-to-text', 'automatic-speech-recognition'])(
+    'classifies a model tagged "%s" as transcription',
+    (tag) => {
+      expect(getModelCapability([tag])).toBe('transcription');
+    },
+  );
+
+  it('classifies a chat-tagged model as chat', () => {
+    expect(getModelCapability(['chat'])).toBe('chat');
+  });
+
+  it('defaults to chat when tags are missing or empty', () => {
+    expect(getModelCapability(undefined)).toBe('chat');
+    expect(getModelCapability([])).toBe('chat');
+  });
+
+  it('detects transcription among other tags', () => {
+    expect(getModelCapability(['audio', 'speech-to-text', 'preview'])).toBe(
+      'transcription',
+    );
+  });
+
+  it('matches tags exactly (case-sensitive, mirroring the backend frozenset)', () => {
+    expect(getModelCapability(['Transcription'])).toBe('chat');
+    expect(getModelCapability(['Speech-To-Text'])).toBe('chat');
+  });
+});
+
+describe('getInferenceApiPath', () => {
+  it('returns the audio transcriptions path for transcription', () => {
+    expect(getInferenceApiPath('transcription')).toBe(
+      '/v1/audio/transcriptions',
+    );
+  });
+
+  it('returns the chat completions path for chat', () => {
+    expect(getInferenceApiPath('chat')).toBe('/v1/chat/completions');
   });
 });
 
@@ -69,7 +110,7 @@ describe('aims utility functions', () => {
       overrides: Partial<{
         id: string | null;
         'spec.model.name': string;
-        'spec.overrides.metric': string;
+        'spec.profile.selector.metric': string;
       }> = {},
     ): AIMService => {
       const modelName = overrides['spec.model.name'] ?? 'aim-test-model';
@@ -87,20 +128,19 @@ describe('aims utility functions', () => {
         spec: {
           model: { name: modelName },
           replicas: 1,
-          overrides: {
-            metric: overrides['spec.overrides.metric'],
+          profile: {
+            name: 'mock-profile',
+            selector: { metric: overrides['spec.profile.selector.metric'] },
           },
-          cacheModel: false,
           routing: { annotations: {}, enabled: false },
           runtimeConfigName: '',
         },
         status: {
-          status: AIMServiceStatus.RUNNING,
+          status: 'Running',
           resolvedModel: { name: modelName },
           routing: { path: '' },
           endpoints: { internal: '', external: '' },
         },
-        clusterAuthGroupId: null,
         endpoints: { internal: '', external: '' },
       } as AIMService;
     };
@@ -121,7 +161,7 @@ describe('aims utility functions', () => {
       imageVersion: '1.2.3',
       canonicalName: 'org/test-model',
       tags: [],
-      status: AIMStatus.READY,
+      status: 'Ready',
       workloadStatuses: [],
       isPreview: false,
       isHfTokenRequired: false,
@@ -174,37 +214,37 @@ describe('aims utility functions', () => {
       expect(result.name).toBe('standalone');
     });
 
-    it('returns throughput metric when spec.overrides.metric is throughput', () => {
+    it('returns throughput metric when spec.profile.selector.metric is throughput', () => {
       const aimService = createMockAIMService({
-        'spec.overrides.metric': 'throughput',
+        'spec.profile.selector.metric': 'throughput',
       });
 
       const result = resolveAIMServiceDisplay(aimService, []);
 
-      expect(result.metric).toBe(AIMMetric.Throughput);
+      expect(result.metric).toBe('throughput');
     });
 
-    it('returns latency metric when spec.overrides.metric is latency', () => {
+    it('returns latency metric when spec.profile.selector.metric is latency', () => {
       const aimService = createMockAIMService({
-        'spec.overrides.metric': 'latency',
+        'spec.profile.selector.metric': 'latency',
       });
 
       const result = resolveAIMServiceDisplay(aimService, []);
 
-      expect(result.metric).toBe(AIMMetric.Latency);
+      expect(result.metric).toBe('latency');
     });
 
-    it('returns default metric when spec.overrides.metric is missing or unknown', () => {
+    it('returns default metric when spec.profile.selector.metric is missing or unknown', () => {
       const aimServiceNoOverride = createMockAIMService({});
       const aimServiceUnknown = createMockAIMService({
-        'spec.overrides.metric': 'unknown',
+        'spec.profile.selector.metric': 'unknown',
       });
 
       expect(resolveAIMServiceDisplay(aimServiceNoOverride, []).metric).toBe(
-        AIMMetric.Default,
+        'default',
       );
       expect(resolveAIMServiceDisplay(aimServiceUnknown, []).metric).toBe(
-        AIMMetric.Default,
+        'default',
       );
     });
 
@@ -223,13 +263,10 @@ describe('aims utility functions', () => {
         spec: {
           model: { image: 'repo/model:1.0' },
           replicas: 1,
-          overrides: {},
-          cacheModel: false,
           routing: { annotations: {}, enabled: false },
           runtimeConfigName: '',
         },
-        status: { status: AIMServiceStatus.PENDING },
-        clusterAuthGroupId: null,
+        status: { status: 'Pending' },
         endpoints: { internal: '', external: '' },
       };
 
@@ -242,7 +279,7 @@ describe('aims utility functions', () => {
     it('returns AIMServiceDisplayInfo with all required fields', () => {
       const aimService = createMockAIMService({
         'spec.model.name': 'my-aim',
-        'spec.overrides.metric': 'latency',
+        'spec.profile.selector.metric': 'latency',
       });
       const parsedAIMs = [
         createMockParsedAIM({
@@ -260,7 +297,7 @@ describe('aims utility functions', () => {
         canonicalName: 'org/my-aim',
         imageVersion: '1.0.0',
         name: 'my-aim',
-        metric: AIMMetric.Latency,
+        metric: 'latency',
         tags: [],
       });
     });
@@ -316,7 +353,7 @@ describe('aims utility functions', () => {
     });
 
     const createMockService = (
-      status: AIMServiceStatus = AIMServiceStatus.RUNNING,
+      status: AIMServiceStatus = 'Running',
     ): AIMService => ({
       id: 'service-123',
       metadata: {
@@ -333,8 +370,6 @@ describe('aims utility functions', () => {
           name: 'test-aim',
         },
         replicas: 1,
-        overrides: {},
-        cacheModel: true,
         routing: {
           annotations: {},
           enabled: true,
@@ -344,7 +379,6 @@ describe('aims utility functions', () => {
       status: {
         status,
       },
-      clusterAuthGroupId: null,
       endpoints: {
         internal: 'http://test-service.test-namespace.svc.cluster.local',
         external: 'https://api.example.com/test-namespace/service-123',
@@ -363,7 +397,7 @@ describe('aims utility functions', () => {
 
     it('parses AIM with single deployed service', () => {
       const aim = createMockAIM();
-      const service = createMockService(AIMServiceStatus.RUNNING);
+      const service = createMockService('Running');
       const parsed = aimParser(aim, [service]);
 
       expect(parsed.workloadStatuses).toEqual([AIMWorkloadStatus.DEPLOYED]);
@@ -373,8 +407,8 @@ describe('aims utility functions', () => {
     it('parses AIM with multiple deployed services', () => {
       const aim = createMockAIM();
       const services = [
-        createMockService(AIMServiceStatus.RUNNING),
-        createMockService(AIMServiceStatus.PENDING),
+        createMockService('Running'),
+        createMockService('Pending'),
       ];
       const parsed = aimParser(aim, services);
 
@@ -387,7 +421,7 @@ describe('aims utility functions', () => {
 
     it('maps RUNNING status to DEPLOYED', () => {
       const aim = createMockAIM();
-      const service = createMockService(AIMServiceStatus.RUNNING);
+      const service = createMockService('Running');
       const parsed = aimParser(aim, [service]);
 
       expect(parsed.workloadStatuses).toContain(AIMWorkloadStatus.DEPLOYED);
@@ -395,7 +429,7 @@ describe('aims utility functions', () => {
 
     it('maps PENDING status to PENDING', () => {
       const aim = createMockAIM();
-      const service = createMockService(AIMServiceStatus.PENDING);
+      const service = createMockService('Pending');
       const parsed = aimParser(aim, [service]);
 
       expect(parsed.workloadStatuses).toContain(AIMWorkloadStatus.PENDING);
@@ -403,7 +437,7 @@ describe('aims utility functions', () => {
 
     it('maps STARTING status to STARTING', () => {
       const aim = createMockAIM();
-      const service = createMockService(AIMServiceStatus.STARTING);
+      const service = createMockService('Starting');
       const parsed = aimParser(aim, [service]);
 
       expect(parsed.workloadStatuses).toContain(AIMWorkloadStatus.STARTING);
@@ -411,7 +445,7 @@ describe('aims utility functions', () => {
 
     it('maps FAILED status to FAILED', () => {
       const aim = createMockAIM();
-      const service = createMockService(AIMServiceStatus.FAILED);
+      const service = createMockService('Failed');
       const parsed = aimParser(aim, [service]);
 
       expect(parsed.workloadStatuses).toContain(AIMWorkloadStatus.FAILED);
@@ -419,7 +453,7 @@ describe('aims utility functions', () => {
 
     it('maps DEGRADED status to DEGRADED', () => {
       const aim = createMockAIM();
-      const service = createMockService(AIMServiceStatus.DEGRADED);
+      const service = createMockService('Degraded');
       const parsed = aimParser(aim, [service]);
 
       expect(parsed.workloadStatuses).toContain(AIMWorkloadStatus.DEGRADED);
@@ -536,7 +570,7 @@ describe('aims utility functions', () => {
     it('propagates status from AIMClusterModel', () => {
       const aim = createMockAIM({
         status: {
-          status: AIMStatus.NOT_AVAILABLE,
+          status: 'NotAvailable',
           imageMetadata: {
             model: {
               canonicalName: 'test/model',
@@ -552,14 +586,14 @@ describe('aims utility functions', () => {
       });
       const parsed = aimParser(aim);
 
-      expect(parsed.status).toBe(AIMStatus.NOT_AVAILABLE);
+      expect(parsed.status).toBe('NotAvailable');
     });
 
     it('sets status to Ready for supported models', () => {
       const aim = createMockAIM();
       const parsed = aimParser(aim);
 
-      expect(parsed.status).toBe(AIMStatus.READY);
+      expect(parsed.status).toBe('Ready');
     });
 
     it('returns empty acceleratorTypes when discoveredProfiles is absent', () => {
@@ -572,7 +606,7 @@ describe('aims utility functions', () => {
     it('projects distinct accelerator types from discoveredProfiles.byHardware', () => {
       const aim = createMockAIM({
         status: {
-          status: AIMStatus.READY,
+          status: 'Ready',
           imageMetadata: {
             model: {
               canonicalName: 'test/model',
@@ -620,7 +654,7 @@ describe('aims utility functions', () => {
       imageVersion: version,
       canonicalName: 'test/model',
       tags: ['test'],
-      status: AIMStatus.READY,
+      status: 'Ready',
       workloadStatuses: [AIMWorkloadStatus.NOT_DEPLOYED],
       isPreview: false,
       isHfTokenRequired: false,
@@ -842,10 +876,10 @@ describe('aims utility functions', () => {
     it('sets isSupported to true when at least one version is Ready', () => {
       const aims = [
         createMockParsedAIM('amdenterpriseai/model-a', '2.0.0', {
-          status: AIMStatus.READY,
+          status: 'Ready',
         }),
         createMockParsedAIM('amdenterpriseai/model-a', '1.0.0', {
-          status: AIMStatus.NOT_AVAILABLE,
+          status: 'NotAvailable',
         }),
       ];
 
@@ -857,10 +891,10 @@ describe('aims utility functions', () => {
     it('latestAim is latest official READY version, null when no official READY exists', () => {
       const aims = [
         createMockParsedAIM('amdenterpriseai/model-a', '2.0.0', {
-          status: AIMStatus.NOT_AVAILABLE,
+          status: 'NotAvailable',
         }),
         createMockParsedAIM('amdenterpriseai/model-a', '1.5.0', {
-          status: AIMStatus.READY,
+          status: 'Ready',
         }),
       ];
 
@@ -872,10 +906,10 @@ describe('aims utility functions', () => {
     it('sets isSupported to false and latestAim to null when no version is Ready', () => {
       const aims = [
         createMockParsedAIM('amdenterpriseai/model-a', '2.0.0', {
-          status: AIMStatus.NOT_AVAILABLE,
+          status: 'NotAvailable',
         }),
         createMockParsedAIM('amdenterpriseai/model-a', '1.0.0', {
-          status: AIMStatus.NOT_AVAILABLE,
+          status: 'NotAvailable',
         }),
       ];
 
@@ -888,10 +922,10 @@ describe('aims utility functions', () => {
     it('sorts supported models before unsupported models', () => {
       const aims = [
         createMockParsedAIM('amdenterpriseai/unsupported', '1.0.0', {
-          status: AIMStatus.NOT_AVAILABLE,
+          status: 'NotAvailable',
         }),
         createMockParsedAIM('amdenterpriseai/supported', '1.0.0', {
-          status: AIMStatus.READY,
+          status: 'Ready',
         }),
       ];
 
@@ -923,7 +957,7 @@ describe('aims utility functions', () => {
       imageVersion: version,
       canonicalName: 'test/model',
       tags: ['test'],
-      status: AIMStatus.READY,
+      status: 'Ready',
       workloadStatuses: [AIMWorkloadStatus.NOT_DEPLOYED],
       isPreview: false,
       isHfTokenRequired: false,
@@ -938,7 +972,7 @@ describe('aims utility functions', () => {
         'amdenterpriseai/gated-model',
         '2.0.0',
         {
-          status: AIMStatus.READY,
+          status: 'Ready',
           acceleratorTypes: [],
           title: 'Gated Model',
         },
@@ -947,7 +981,7 @@ describe('aims utility functions', () => {
         'amdenterpriseai/gated-model',
         '1.0.0',
         {
-          status: AIMStatus.NOT_AVAILABLE,
+          status: 'NotAvailable',
           acceleratorTypes: ['cpu'],
           title: 'Gated Model',
         },
@@ -970,7 +1004,7 @@ describe('aims utility functions', () => {
         'amdenterpriseai/family-a',
         '2.0.0',
         {
-          status: AIMStatus.READY,
+          status: 'Ready',
           acceleratorTypes: [],
           title: 'Family A',
         },
@@ -979,7 +1013,7 @@ describe('aims utility functions', () => {
         'amdenterpriseai/family-a',
         '1.0.0',
         {
-          status: AIMStatus.NOT_AVAILABLE,
+          status: 'NotAvailable',
           acceleratorTypes: ['cpu'],
           title: 'Family A',
         },
@@ -989,7 +1023,7 @@ describe('aims utility functions', () => {
         'amdenterpriseai/family-b',
         '1.0.0',
         {
-          status: AIMStatus.NOT_AVAILABLE,
+          status: 'NotAvailable',
           acceleratorTypes: ['cpu'],
           title: 'Family B',
         },
@@ -1007,16 +1041,96 @@ describe('aims utility functions', () => {
       expect(result[1].isSupported).toBe(false);
     });
 
+    it('keeps full-catalog family order within the supported group under a filter', () => {
+      // Families A, B, C are all supported in the full catalog (API order A, B, C).
+      // A and C are supported only via a GPU-only Ready version; B via a CPU Ready
+      // version. Under a CPU filter the inner aggregation sees A and C as
+      // unsupported and B as supported, so it would emit [B, A, C]. The catalog
+      // must preserve canonical order [A, B, C] regardless of the active filter.
+      const aReady = createMockParsedAIM('amdenterpriseai/family-a', '2.0.0', {
+        status: 'Ready',
+        acceleratorTypes: ['gpu'],
+        title: 'Family A',
+      });
+      const aCpu = createMockParsedAIM('amdenterpriseai/family-a', '1.0.0', {
+        status: 'NotAvailable',
+        acceleratorTypes: ['cpu'],
+        title: 'Family A',
+      });
+      const bCpu = createMockParsedAIM('amdenterpriseai/family-b', '1.0.0', {
+        status: 'Ready',
+        acceleratorTypes: ['cpu'],
+        title: 'Family B',
+      });
+      const cReady = createMockParsedAIM('amdenterpriseai/family-c', '2.0.0', {
+        status: 'Ready',
+        acceleratorTypes: ['gpu'],
+        title: 'Family C',
+      });
+      const cCpu = createMockParsedAIM('amdenterpriseai/family-c', '1.0.0', {
+        status: 'NotAvailable',
+        acceleratorTypes: ['cpu'],
+        title: 'Family C',
+      });
+
+      const allAims = [aReady, aCpu, bCpu, cReady, cCpu];
+      const filteredAims = [aCpu, bCpu, cCpu]; // CPU filter
+
+      const result = buildFilteredCatalog(allAims, filteredAims);
+
+      expect(result.map((r) => r.aggregated.title)).toEqual([
+        'Family A',
+        'Family B',
+        'Family C',
+      ]);
+      expect(result.every((r) => r.isSupported)).toBe(true);
+    });
+
+    it('preserves deployment counts when a filter hides the deployed version', () => {
+      // The deployed version is GPU-only; the CPU filter hides it. The family must
+      // still report its deployment so the "Has deployments" badge keeps showing.
+      const deployedGpu = createMockParsedAIM(
+        'amdenterpriseai/deployed-model',
+        '2.0.0',
+        {
+          status: 'Ready',
+          acceleratorTypes: ['gpu'],
+          workloadStatuses: [AIMWorkloadStatus.DEPLOYED],
+          title: 'Deployed Model',
+        },
+      );
+      const cpuVersion = createMockParsedAIM(
+        'amdenterpriseai/deployed-model',
+        '1.0.0',
+        {
+          status: 'NotAvailable',
+          acceleratorTypes: ['cpu'],
+          workloadStatuses: [AIMWorkloadStatus.NOT_DEPLOYED],
+          title: 'Deployed Model',
+        },
+      );
+
+      const allAims = [deployedGpu, cpuVersion];
+      const filteredAims = [cpuVersion]; // CPU filter hid the deployed GPU version
+
+      const result = buildFilteredCatalog(allAims, filteredAims);
+
+      expect(result).toHaveLength(1);
+      expect(
+        result[0].deploymentCounts[AIMWorkloadStatus.DEPLOYED],
+      ).toBeGreaterThan(0);
+    });
+
     it('sorts supported families before unsupported', () => {
       const supported = createMockParsedAIM('amdenterpriseai/zebra', '1.0.0', {
-        status: AIMStatus.READY,
+        status: 'Ready',
         title: 'Zebra Model',
       });
       const unsupported = createMockParsedAIM(
         'amdenterpriseai/alpha',
         '1.0.0',
         {
-          status: AIMStatus.NOT_AVAILABLE,
+          status: 'NotAvailable',
           title: 'Alpha Model',
         },
       );

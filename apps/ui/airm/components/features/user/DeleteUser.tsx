@@ -64,12 +64,7 @@ export const DeleteUser: React.FC<Props> = ({ id, email }) => {
 
   return (
     <>
-      <Card
-        shadow="sm"
-        classNames={{
-          base: 'border-1 border-default-200 rounded-sm overflow-visible',
-        }}
-      >
+      <Card>
         <CardHeader>
           <h2 className="font-bold text-danger">{t('detail.delete.title')}</h2>
         </CardHeader>

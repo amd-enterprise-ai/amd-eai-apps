@@ -321,9 +321,9 @@ describe('AddSecret', () => {
       name: /form.add.field.type.label/i,
     });
     await fireEvent.click(typeButton);
-    const kubernetesOption = screen.getAllByText(
-      'secretType.KubernetesSecret',
-    )[1];
+    const kubernetesOption = await screen.findByRole('option', {
+      name: 'secretType.KubernetesSecret',
+    });
     await fireEvent.click(kubernetesOption);
 
     await waitFor(() => {
@@ -600,8 +600,10 @@ describe('AddSecret', () => {
     fireEvent.click(
       screen.getByRole('button', { name: /form.add.field.projectIds.label/i }),
     );
-    const options = await screen.findAllByText(projects[0].name);
-    fireEvent.click(options[1]);
+    const option = await screen.findByRole('option', {
+      name: projects[0].name,
+    });
+    fireEvent.click(option);
 
     await fillFormAndSubmit();
 
@@ -725,7 +727,7 @@ describe('AddSecret', () => {
   // Both issues together are asserted in __tests__/components/features/secrets/
   // addSecretFormSchema.test.ts (HeroUI Select does not always expose projectIds
   // field errors as queryable text).
-  it('reports manifest YAML errors together with project selection errors (SDA-3402)', async () => {
+  it('reports manifest YAML errors together with project selection errors', async () => {
     act(() => {
       render(
         <AddSecret
@@ -894,8 +896,8 @@ describe('AddSecret', () => {
       expect(screen.getAllByText('useCase.Generic').length).toBeGreaterThan(0);
     });
 
-    it('allows multiple use cases when restrictToUseCases has multiple values', () => {
-      act(() => {
+    it('allows multiple use cases when restrictToUseCases has multiple values', async () => {
+      await act(async () => {
         render(
           <AddSecret
             secrets={[]}
@@ -912,9 +914,16 @@ describe('AddSecret', () => {
         );
       });
 
-      // Should show both S3 and Database options
-      expect(screen.getAllByText('useCase.S3').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('useCase.Database').length).toBeGreaterThan(0);
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /useCase/i }));
+      });
+
+      expect(
+        screen.getByRole('option', { name: 'useCase.S3' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('option', { name: 'useCase.Database' }),
+      ).toBeInTheDocument();
     });
 
     it('submits with restricted use case for project secrets', async () => {

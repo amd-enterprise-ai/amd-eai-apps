@@ -11,7 +11,7 @@ export async function POST() {
   const session = await getServerSession(authOptions);
 
   try {
-    const path = logOutUrl(session?.idToken);
+    const path = await logOutUrl(session?.idToken);
     return NextResponse.json({ path });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

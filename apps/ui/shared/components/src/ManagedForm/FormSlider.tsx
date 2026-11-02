@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { cn } from '@heroui/react';
 import { Slider, SliderProps } from '@amdenterpriseai/components';
 import { useMemo } from 'react';
 import { FieldValues, Path, UseFormReturn } from 'react-hook-form';
@@ -19,9 +18,6 @@ interface Props<T extends FieldValues>
 export const FormSlider = <T extends FieldValues>({
   form,
   name,
-  className,
-  description = '',
-  color,
   ...props
 }: Props<T>) => {
   const { currentValue, updateFormValue } = useBoundaryValidation(
@@ -42,40 +38,33 @@ export const FormSlider = <T extends FieldValues>({
       ? form.formState.errors[name]?.message
       : undefined;
 
-  const safeCurrentValue = useMemo(() => {
-    if (currentValue !== undefined && currentValue !== null)
+  const safeCurrentValue = useMemo((): number => {
+    if (
+      currentValue !== undefined &&
+      currentValue !== null &&
+      typeof currentValue === 'number' &&
+      Number.isFinite(currentValue)
+    ) {
       return currentValue;
-
-    if (props.defaultValue !== undefined) return props.defaultValue;
-
+    }
+    if (
+      typeof props.defaultValue === 'number' &&
+      Number.isFinite(props.defaultValue)
+    ) {
+      return props.defaultValue;
+    }
     return props.minValue ?? 0;
   }, [currentValue, props.defaultValue, props.minValue]);
 
   return (
-    <div className={cn('flex flex-col gap-1', className)}>
-      <Slider
-        {...props}
-        {...registration}
-        value={safeCurrentValue}
-        isInvalid={!!errorMessage}
-        errorMessage={errorMessage}
-        onChange={updateFormValue}
-        color={!errorMessage ? color : 'danger'}
-        classNames={{
-          mark: 'text-xs',
-        }}
-      />
-      {(!!errorMessage || description) && (
-        <div
-          className={cn('text-xs p-1 relative flex flex-col gap-1.5', {
-            'text-foreground-400': !errorMessage,
-            'text-danger': !!errorMessage,
-          })}
-        >
-          {errorMessage || description}
-        </div>
-      )}
-    </div>
+    <Slider
+      {...props}
+      {...registration}
+      value={safeCurrentValue}
+      onChange={updateFormValue}
+      isInvalid={!!errorMessage}
+      errorMessage={errorMessage}
+    />
   );
 };
 

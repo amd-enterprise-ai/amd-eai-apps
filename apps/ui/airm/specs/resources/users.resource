@@ -203,6 +203,32 @@ The user invites a new user with email, role, and project assignment
     VAR    ${dialog}    css=[role="dialog"]
     Wait For Elements State    ${dialog}    detached    timeout=60s
 
+The user invites a new team member and assigns the prepared project
+    [Documentation]    Opens the invite drawer, sets team member role, selects the
+    ...                project from the precondition, fills temp password when required, and submits.
+
+    ${timestamp}=    Evaluate    str(int(__import__('time').time()))[-6:]
+    VAR    ${email}    e2e-invite-tm-${timestamp}@test.local
+    Set Test Variable    ${TEST_INVITED_EMAIL}    ${email}
+    ${project_name}=    Get From Dictionary    ${TEST_PROJECT}    name
+
+    Click invite user button
+    Invite drawer should be visible
+    Fill invite email    ${email}
+    Click invite form role selector trigger
+    Invite overlay option with text is clicked    Team Member
+    Click invite form project selector trigger
+    Wait Until Keyword Succeeds    30s    2s
+    ...    Invite overlay option with text is clicked    ${project_name}
+    ${temp_pw_visible}=    Run Keyword And Return Status
+    ...    Wait For Elements State    css=[role="dialog"] input[name="tempPassword"]    visible    timeout=5s
+    IF    ${temp_pw_visible}
+        Fill invite temporary password    TempPassword123!${timestamp}
+    END
+    Click invite submit button
+    VAR    ${dialog}    css=[role="dialog"]
+    Wait For Elements State    ${dialog}    detached    timeout=60s
+
 The user updates the profile name and saves
     [Documentation]    Updates the first and last name on the user detail page.
 

@@ -4,9 +4,7 @@
 
 import { fireEvent, render, screen } from '@testing-library/react';
 
-import { WorkloadStatus } from '@/types/enums/workloads';
-import { WorkloadType } from '@amdenterpriseai/types';
-import { Workload } from '@/types/workloads';
+import type { Workload } from '@/types/workloads';
 
 import DeleteWorkloadModal from '@/components/features/workloads/DeleteWorkloadModal';
 
@@ -14,13 +12,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockWorkload: Workload = {
   id: 'wl-123',
-  type: WorkloadType.INFERENCE,
+  type: 'INFERENCE',
   name: 'test-workload',
   displayName: 'Test Workload',
   createdBy: 'user',
+  updatedBy: null,
+  namespace: 'test-namespace',
+  description: null,
+  endpoints: {},
   createdAt: '2023-01-01T00:00:00Z',
   updatedAt: '2023-01-01T00:00:00Z',
-  status: WorkloadStatus.RUNNING,
+  status: 'Running',
 };
 
 describe('DeleteWorkloadModal', () => {

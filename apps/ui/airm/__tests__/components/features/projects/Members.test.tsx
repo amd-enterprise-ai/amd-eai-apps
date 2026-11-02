@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 
 import { addUsersToProject, deleteUserFromProject } from '@/services/app';
@@ -241,7 +242,7 @@ describe('Members', () => {
       render(<Members project={mockProjectWithMembers} />, { wrapper });
     });
     const addButton = screen.getByLabelText(
-      'settings.membersAndInvitedUsers.members.actions.add',
+      'settings.membersAndInvitedUsers.members.actions.add.title',
     ) as HTMLInputElement;
 
     expect(addButton.disabled).toBeTruthy();
@@ -298,27 +299,27 @@ describe('Members', () => {
       render(<Members project={mockProjectWithMembers} />, { wrapper });
     });
     const addButton = screen.getByLabelText(
-      'settings.membersAndInvitedUsers.members.actions.add',
+      'settings.membersAndInvitedUsers.members.actions.add.title',
     ) as HTMLInputElement;
 
     await waitFor(() => expect(addButton.disabled).toBeFalsy());
     fireEvent.click(addButton);
 
-    // With UserMultiSelect, users are displayed as checkboxes
-    // Display names are "lastName, firstName" format
-    const user2Checkbox = await screen.findByRole('checkbox', {
-      name: 'Two, User',
-    });
-    fireEvent.click(user2Checkbox);
+    const clickUserRow = async (displayName: string) => {
+      const modal = screen.getByRole('dialog', {
+        name: 'settings.membersAndInvitedUsers.members.actions.add.modal.title',
+      });
+      const target = within(modal)
+        .getAllByText(displayName)
+        .find((element) => element.closest('.max-h-64'));
+      await act(async () => {
+        fireEvent.click(target!.closest('div[class*="cursor-pointer"]')!);
+      });
+    };
 
-    const user3Checkbox = screen.getByRole('checkbox', { name: 'Three, User' });
-    fireEvent.click(user3Checkbox);
-
-    // Invited users without names show email as display name
-    const invUser3Checkbox = screen.getByRole('checkbox', {
-      name: 'invUser3@company.com',
-    });
-    fireEvent.click(invUser3Checkbox);
+    await clickUserRow('Two, User');
+    await clickUserRow('Three, User');
+    await clickUserRow('invUser3@company.com');
 
     const confirmButton = screen.getByText(
       'settings.membersAndInvitedUsers.members.actions.add.modal.confirm',
@@ -721,16 +722,15 @@ describe('Members', () => {
       });
 
       const addButton = screen.getByLabelText(
-        'settings.membersAndInvitedUsers.members.actions.add',
+        'settings.membersAndInvitedUsers.members.actions.add.title',
       );
       await waitFor(() => expect(addButton).not.toBeDisabled());
       fireEvent.click(addButton);
 
-      // With UserMultiSelect, click checkbox to select user (display name: "User, Test")
-      const testUserCheckbox = await screen.findByRole('checkbox', {
-        name: 'User, Test',
-      });
-      fireEvent.click(testUserCheckbox);
+      const row = (await screen.findByText('User, Test')).closest(
+        'div[class*="flex items-center"]',
+      );
+      fireEvent.click(row!);
 
       const confirmButton = screen.getByText(
         'settings.membersAndInvitedUsers.members.actions.add.modal.confirm',
@@ -774,16 +774,15 @@ describe('Members', () => {
       });
 
       const addButton = screen.getByLabelText(
-        'settings.membersAndInvitedUsers.members.actions.add',
+        'settings.membersAndInvitedUsers.members.actions.add.title',
       );
       await waitFor(() => expect(addButton).not.toBeDisabled());
       fireEvent.click(addButton);
 
-      // With UserMultiSelect, click checkbox to select user2 (display name: "Two, User")
-      const user2Checkbox = await screen.findByRole('checkbox', {
-        name: 'Two, User',
-      });
-      fireEvent.click(user2Checkbox);
+      const row = (await screen.findByText('Two, User')).closest(
+        'div[class*="flex items-center"]',
+      );
+      fireEvent.click(row!);
 
       const confirmButton = screen.getByText(
         'settings.membersAndInvitedUsers.members.actions.add.modal.confirm',
@@ -867,16 +866,15 @@ describe('Members', () => {
       });
 
       const addButton = screen.getByLabelText(
-        'settings.membersAndInvitedUsers.members.actions.add',
+        'settings.membersAndInvitedUsers.members.actions.add.title',
       );
       await waitFor(() => expect(addButton).not.toBeDisabled());
       fireEvent.click(addButton);
 
-      // With UserMultiSelect, click checkbox to select user2 (display name: "Two, User")
-      const user2Checkbox = await screen.findByRole('checkbox', {
-        name: 'Two, User',
-      });
-      fireEvent.click(user2Checkbox);
+      const row = (await screen.findByText('Two, User')).closest(
+        'div[class*="flex items-center"]',
+      );
+      fireEvent.click(row!);
 
       const confirmButton = screen.getByText(
         'settings.membersAndInvitedUsers.members.actions.add.modal.confirm',
@@ -977,16 +975,15 @@ describe('Members', () => {
       });
 
       const addButton = screen.getByLabelText(
-        'settings.membersAndInvitedUsers.members.actions.add',
+        'settings.membersAndInvitedUsers.members.actions.add.title',
       );
       await waitFor(() => expect(addButton).not.toBeDisabled());
       fireEvent.click(addButton);
 
-      // With UserMultiSelect, click checkbox to select user (display name: "User, Test")
-      const testUserCheckbox = await screen.findByRole('checkbox', {
-        name: 'User, Test',
-      });
-      fireEvent.click(testUserCheckbox);
+      const row = (await screen.findByText('User, Test')).closest(
+        'div[class*="flex items-center"]',
+      );
+      fireEvent.click(row!);
 
       const confirmButton = screen.getByText(
         'settings.membersAndInvitedUsers.members.actions.add.modal.confirm',

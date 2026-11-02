@@ -52,7 +52,7 @@ Storage row should not exist
 
 Get storage row cell text
     [Documentation]    Returns the text content of a specific gridcell in a storage row.
-    ...                Gridcell indices (excluding rowheader): 0=Type, 1=Status, 2=Scope, 3=Assigned To.
+    ...                Gridcell indices (excluding rowheader): 0=Type, 1=Status, 2=Scope, 3=Assigned to.
     [Arguments]    ${storage_name}    ${column_index}
 
     ${text}=    Evaluate JavaScript    ${None}

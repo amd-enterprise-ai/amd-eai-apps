@@ -130,7 +130,7 @@ export const InvitedUsers: React.FC<Props> = ({ project }) => {
                 secondary
                 aria-label={
                   t(
-                    'settings.membersAndInvitedUsers.invitedUsers.actions.add',
+                    'settings.membersAndInvitedUsers.invitedUsers.actions.add.title',
                   ) || ''
                 }
                 onPress={onInviteUserOpen}

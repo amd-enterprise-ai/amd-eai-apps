@@ -31,7 +31,7 @@ export const ManagedFormBestPractices: Story = () => {
   return (
     <div className="max-w-2xl">
       {jsDoc && (
-        <div className="prose prose-sm dark:prose-invert max-w-none text-default-500">
+        <div className="prose prose-sm dark:prose-invert max-w-none text-muted">
           <ReactMarkdown>{jsDoc}</ReactMarkdown>
         </div>
       )}

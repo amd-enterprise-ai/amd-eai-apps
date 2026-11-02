@@ -5,7 +5,7 @@
 *** Settings ***
 Documentation    AIRM-specific resource cleanup keywords.
 ...    Provides cleanup for AIRM domain resources (projects, workloads, secrets, storage).
-...    Uses generic tracking from testing/resources/resource_tracking.resource.
+...    Uses the shared resource tracking keywords.
 Library          Collections
 Library          String
 Resource         ../api/projects.resource

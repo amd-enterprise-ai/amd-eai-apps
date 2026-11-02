@@ -134,11 +134,15 @@ describe('AssignSecret', () => {
       ),
     );
 
-    await fireEvent.click(
-      screen.getByText('form.assign.field.projectIds.placeholder'),
-    );
-    const options = await screen.findAllByText('project-1');
-    await fireEvent.click(options[1]);
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /form.assign.field.projectIds.label/,
+        }),
+      );
+    });
+    const option = await screen.findByRole('option', { name: 'project-1' });
+    await fireEvent.click(option);
 
     await fireEvent.click(screen.getByText('form.assign.action.save'));
 
@@ -170,11 +174,17 @@ describe('AssignSecret', () => {
       ),
     );
 
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /form.assign.field.projectIds.label/,
+        }),
+      );
+    });
     await fireEvent.click(
-      screen.getByText('form.assign.field.projectIds.placeholder'),
+      await screen.findByRole('option', { name: 'project-1' }),
     );
-    await fireEvent.click(screen.getAllByText('project-1')[1]);
-    await fireEvent.click(screen.getAllByText('project-3')[1]);
+    await fireEvent.click(screen.getByRole('option', { name: 'project-3' }));
 
     await fireEvent.click(screen.getByText('form.assign.action.save'));
 
@@ -206,9 +216,17 @@ describe('AssignSecret', () => {
       ),
     );
 
-    await fireEvent.click(screen.getByText('project-1, project-2'));
-    await fireEvent.click(screen.getAllByText('project-1')[1]);
-    await fireEvent.click(screen.getAllByText('project-2')[1]);
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /form.assign.field.projectIds.label/,
+        }),
+      );
+    });
+    await fireEvent.click(
+      await screen.findByRole('option', { name: 'project-1' }),
+    );
+    await fireEvent.click(screen.getByRole('option', { name: 'project-2' }));
 
     await fireEvent.click(screen.getByText('form.assign.action.save'));
 
@@ -240,11 +258,15 @@ describe('AssignSecret', () => {
       ),
     );
 
-    await fireEvent.click(
-      screen.getByText('form.assign.field.projectIds.placeholder'),
-    );
-    const options = await screen.findAllByText('project-1');
-    await fireEvent.click(options[1]);
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /form.assign.field.projectIds.label/,
+        }),
+      );
+    });
+    const option = await screen.findByRole('option', { name: 'project-1' });
+    await fireEvent.click(option);
 
     await fireEvent.click(screen.getByText('form.assign.action.save'));
 

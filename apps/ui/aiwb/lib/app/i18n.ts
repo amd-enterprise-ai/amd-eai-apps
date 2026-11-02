@@ -11,7 +11,7 @@
  *    or undefined when no default is given
  *
  * Usage with a default fallback:
- *   const getMetricTranslationKey = translationKeyGenerator(PERFORMANCE_METRIC_KEYS, AIMMetric.Default);
+ *   const getMetricTranslationKey = translationKeyGenerator(PERFORMANCE_METRIC_KEYS, 'default');
  *   t(getMetricTranslationKey(metric));
  *
  * Usage without a default (returns undefined for unknown values):

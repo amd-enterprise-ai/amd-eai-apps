@@ -203,11 +203,11 @@ describe('projects page', () => {
     expect(fetchProjectAverageGPUIdleTime as Mock).toBeCalledTimes(1);
 
     await waitFor(() => {
-      expect(screen.getByText('data.refresh')).toBeInTheDocument();
+      expect(screen.getByText('actions.refresh.title')).toBeInTheDocument();
     });
 
     await act(() => {
-      fireEvent.click(screen.getByText('data.refresh'));
+      fireEvent.click(screen.getByText('actions.refresh.title'));
     });
 
     expect(fetchProjectGPUMemoryUtilization as Mock).toBeCalledTimes(2);
@@ -242,7 +242,7 @@ describe('projects page', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('data.refresh')).toBeInTheDocument();
+      expect(screen.getByText('actions.refresh.title')).toBeInTheDocument();
     });
   });
 

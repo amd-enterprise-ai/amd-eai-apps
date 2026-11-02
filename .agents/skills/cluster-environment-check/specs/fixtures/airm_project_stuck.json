@@ -1,0 +1,7 @@
+{
+  "get namespaces -l airm.silogen.ai/project-id -o json": [
+    0,
+    "{\"items\":[{\"metadata\":{\"name\":\"project-example\",\"deletionTimestamp\":\"2020-01-01T00:00:00Z\",\"finalizers\":[\"airm.silogen.ai/namespace-finalizer\"]}}]}",
+    ""
+  ]
+}

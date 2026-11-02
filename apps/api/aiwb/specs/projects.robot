@@ -73,6 +73,41 @@ Get project GPU memory utilization metric
     When AIWB project workload metric request is sent for "gpu_memory_utilization"
     Then response status should be 200
 
+Get project CPU usage metric
+    [Documentation]    Verify that the CPU usage metric can be queried for a project.
+    [Tags]    projects    metrics    smoke
+    Given a ready project with user access exists
+    When AIWB project workload metric request is sent for "cpu_usage"
+    Then response status should be 200
+
+Get project system memory usage metric
+    [Documentation]    Verify that the system memory usage metric can be queried for a project.
+    [Tags]    projects    metrics    smoke
+    Given a ready project with user access exists
+    When AIWB project workload metric request is sent for "system_memory_usage"
+    Then response status should be 200
+
+Project with an assigned GPU quota sees its allocation alongside usage
+    [Documentation]    A project with a GPU quota should see that quota reported as the
+    ...    allocation ceiling next to its GPU device usage.
+    [Tags]    projects    metrics    gpu
+    Given a ready project with user access exists
+    And project quota is set to    gpu_count=2
+    When AIWB project workload metric request is sent for "gpu_device_utilization"
+    Then response status should be 200
+    And GPU device metric should report an allocation ceiling of "2"
+
+Project without an assigned GPU quota sees cluster capacity available
+    [Documentation]    A project without a dedicated GPU quota can borrow the cluster's
+    ...    GPUs, so its GPU device usage should show the cluster capacity as available.
+    ...    Uses an isolated project rather than the shared default, since other
+    ...    suites assign a GPU quota to the shared project.
+    [Tags]    projects    metrics    gpu
+    Given a fresh project with user access exists
+    When AIWB project workload metric request is sent for "gpu_device_utilization"
+    Then response status should be 200
+    And GPU device metric should report cluster capacity as its available ceiling
+
 Project workload metric rejects start after end
     [Documentation]    Verify that the API rejects metrics requests where start is after end.
     [Tags]    projects    metrics    smoke    negative
@@ -105,7 +140,7 @@ Project listing excludes projects without user access
     And project list should not include inaccessible project
 
 Get project workload metrics exposes creation metadata for fine-tuned AIM services
-    [Documentation]    EAI-6063: createdAt and createdBy must not be null for fine-tuned AIM services
+    [Documentation]    createdAt and createdBy must not be null for fine-tuned AIM services
     ...    deployed in a project, even though they have no Postgres row.
     [Tags]    projects    metrics    finetuning    gpu
     Given a ready project with user access exists

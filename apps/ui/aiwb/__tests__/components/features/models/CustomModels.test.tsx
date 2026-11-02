@@ -12,16 +12,15 @@ import {
 import { describe, expect, it, vi, Mock } from 'vitest';
 
 import CustomModels from '@/components/features/models/CustomModels';
-import { AggregatedAIM, AIMWorkloadStatus } from '@/types/aims';
-import { OnboardPhase } from '@/types/custom-models';
+import { AggregatedAIM, AIMWorkloadStatus, OnboardPhase } from '@/types/aims';
 import wrapper from '@/__tests__/ProviderWrapper';
 
 const mockPush = vi.fn();
 vi.mock('next/router', () => ({
   useRouter: () => ({
     push: mockPush,
-    pathname: '/[project]/models/[tab]',
-    query: { project: 'test-project', tab: 'custom-models' },
+    pathname: '/[project]/models/custom-models',
+    query: { project: 'test-project' },
     asPath: '/test-project/models/custom-models',
   }),
 }));
@@ -58,18 +57,30 @@ vi.mock('@amdenterpriseai/hooks', async (importOriginal) => ({
 }));
 
 // Keep deploy drawer as a stub so this test stays focused on card-grid behavior.
+// It reports the props the grid hands over, which is what decides whether the
+// deploy offers a profile to serve with.
 vi.mock('@/components/features/models/DeployCustomAIMDrawer', () => ({
-  DeployCustomAIMDrawer: () => (
-    <div data-testid="deploy-custom-aim-drawer-stub" />
+  DeployCustomAIMDrawer: ({
+    model,
+    supportsProfileSelection,
+  }: {
+    model: { resourceName?: string };
+    supportsProfileSelection?: boolean;
+  }) => (
+    <div data-testid="deploy-custom-aim-drawer-stub">
+      {`${model?.resourceName}/${supportsProfileSelection}`}
+    </div>
   ),
 }));
 vi.mock('@/components/features/models/CustomModelCard', () => ({
   CustomModelCard: ({
     aggregatedAim,
     onDelete,
+    onDeploy,
   }: {
     aggregatedAim: AggregatedAIM;
     onDelete: (aim: AggregatedAIM) => void;
+    onDeploy: (aim: AggregatedAIM) => void;
   }) => (
     <div data-testid={`custom-model-card-${aggregatedAim.repository}`}>
       <span>{aggregatedAim.aggregated.title}</span>
@@ -77,6 +88,10 @@ vi.mock('@/components/features/models/CustomModelCard', () => ({
       <button onClick={() => onDelete(aggregatedAim)}>
         customModels.card.actions.delete.label
       </button>
+      <button
+        data-testid="custom-model-card-deploy"
+        onClick={() => onDeploy(aggregatedAim)}
+      />
     </div>
   ),
 }));
@@ -275,11 +290,19 @@ describe('CustomModels (card grid)', () => {
       expect(screen.getByText('Ready Model')).toBeInTheDocument();
     });
 
-    const statusDropdown = screen.getByText(
-      'customModels.list.filters.status.label',
-    );
-    fireEvent.click(statusDropdown);
-    fireEvent.click(screen.getByText('customModels.card.status.onboarding'));
+    const statusDropdown = screen.getByRole('button', {
+      name: /customModels\.list\.filters\.status/,
+    });
+    await act(async () => {
+      fireEvent.click(statusDropdown);
+    });
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('option', {
+          name: 'customModels.card.status.onboarding',
+        }),
+      );
+    });
 
     await waitFor(() => {
       expect(screen.getByText('Importing Model')).toBeInTheDocument();
@@ -309,11 +332,17 @@ describe('CustomModels (card grid)', () => {
       expect(screen.getByText('Ready Model')).toBeInTheDocument();
     });
 
-    const statusDropdown = screen.getByText(
-      'customModels.list.filters.status.label',
-    );
-    fireEvent.click(statusDropdown);
-    fireEvent.click(screen.getByText('customModels.card.status.ready'));
+    const statusDropdown = screen.getByRole('button', {
+      name: /customModels\.list\.filters\.status/,
+    });
+    await act(async () => {
+      fireEvent.click(statusDropdown);
+    });
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('option', { name: 'customModels.card.status.ready' }),
+      );
+    });
 
     await waitFor(() => {
       expect(screen.getByText('Ready Model')).toBeInTheDocument();
@@ -344,15 +373,45 @@ describe('CustomModels (card grid)', () => {
       expect(screen.getByText('Importing Model')).toBeInTheDocument();
     });
 
-    const statusDropdown = screen.getByText(
-      'customModels.list.filters.status.label',
-    );
-    fireEvent.click(statusDropdown);
-    fireEvent.click(screen.getByText('customModels.card.status.failed'));
+    const statusDropdown = screen.getByRole('button', {
+      name: /customModels\.list\.filters\.status/,
+    });
+    await act(async () => {
+      fireEvent.click(statusDropdown);
+    });
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('option', { name: 'customModels.card.status.failed' }),
+      );
+    });
 
     await waitFor(() => {
       expect(screen.getByText('Failed Model')).toBeInTheDocument();
       expect(screen.queryByText('Importing Model')).not.toBeInTheDocument();
+    });
+  });
+
+  it('offers a profile to serve with on a deploy started from a card', async () => {
+    (customModelsApiMocks.listCustomModels as Mock).mockResolvedValue([
+      buildAggregatedAIM({
+        repository: 'my-cr-name',
+        aggregatedOverrides: { title: 'My display' },
+      }),
+    ]);
+
+    await act(async () => {
+      render(<CustomModels />, { wrapper });
+    });
+    await waitFor(() => {
+      expect(screen.getByText('My display')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('custom-model-card-deploy'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('deploy-custom-aim-drawer-stub'),
+      ).toHaveTextContent('aim-test/true');
     });
   });
 

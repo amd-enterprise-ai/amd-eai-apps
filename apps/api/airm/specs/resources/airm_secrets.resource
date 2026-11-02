@@ -162,42 +162,21 @@ Secret "${secret_name}" is assigned to project
     Should Not Be Equal    ${secret_id}    ${None}
     ...    msg=Secret ${secret_name} not found in system
 
-    # Check if already assigned to avoid unnecessary API call
-    ${secret_details}=    Get secret    ${secret_id}    expected_status=200
-    ${secret_data}=    Set Variable    ${secret_details.json()}
-
-    # Get project_secrets from secret - it's a list of objects with project_id field
-    ${project_secrets}=    Get From Dictionary    ${secret_data}    projectSecrets    default=@{EMPTY}
-
-    # Extract project IDs from project_secrets objects
-    @{current_project_ids}=    Create List
-    FOR    ${proj_secret}    IN    @{project_secrets}
-        ${proj_id}=    Get From Dictionary    ${proj_secret}[project]    id
-        Append To List    ${current_project_ids}    ${proj_id}
-
-        # Check if already assigned
-        IF    '${proj_id}' == '${TEST_PROJECT_ID}'
-            Log    Secret ${secret_name} already assigned to project ${TEST_PROJECT_ID}    INFO
-            RETURN
-        END
+    # Use the additive project-scoped endpoint. The organization-scoped assign endpoint replaces
+    # the whole assignment set (projects omitted from the PUT lose access), so under the
+    # concurrent-run model a full-replace here would strip this shared secret from another run's
+    # project. This adds only the current project and never reads the existing assignment set.
+    ${assign_response}=    Assign secret to project
+    ...    ${TEST_PROJECT_ID}    ${secret_id}    expected_status=any
+    # Already-assigned is the endpoint's only ValidationException, returned as HTTP 400
+    # ("Secret already assigned to this Project"), so treat 400 as the idempotent no-op.
+    IF    ${assign_response.status_code} == 204
+        Log    Assigned secret ${secret_name} to project ${TEST_PROJECT_ID}    INFO
+    ELSE IF    ${assign_response.status_code} == 400
+        Log    Secret ${secret_name} already assigned to project ${TEST_PROJECT_ID}    INFO
+    ELSE
+        Fail    Assigning secret ${secret_name} to project ${TEST_PROJECT_ID} failed (HTTP ${assign_response.status_code}): ${assign_response.text}
     END
-
-    # Collect all current project IDs and add the current one
-    @{project_ids}=    Create List    @{current_project_ids}
-    Append To List    ${project_ids}    ${TEST_PROJECT_ID}
-
-    # Assign to project - accept both 200 (success) and 409 (already assigned)
-    ${assign_response}=    Assign secret to projects
-    ...    ${secret_id}
-    ...    ${project_ids}
-    ...    expected_status=any
-
-    # Verify status is either 200 or 409
-    ${status_code}=    Set Variable    ${assign_response.status_code}
-    Should Be True    ${status_code} == 200 or ${status_code} == 409
-    ...    msg=Expected status code 200 or 409, but got ${status_code}
-
-    Log    Assigned secret ${secret_name} to project ${TEST_PROJECT_ID} (status: ${status_code})    INFO
 
 Secret is assigned to second project
     [Documentation]    Assigns the current secret to the second project
@@ -1101,7 +1080,7 @@ An ExternalSecret with use-case "${use_case}" is applied via kubectl
     ...    {"apiVersion":"external-secrets.io/v1beta1","kind":"ExternalSecret",
     ...    "metadata":{"name":"${es_name}","namespace":"${namespace}",
     ...    "labels":{"airm.silogen.ai/use-case":"${use_case}"}},
-    ...    "spec":{"refreshInterval":"1h",
+    ...    "spec":{"refreshInterval":"10s",
     ...    "secretStoreRef":{"name":"openbao-secret-store","kind":"ClusterSecretStore"},
     ...    "target":{"name":"${es_name}","creationPolicy":"Owner"},
     ...    "data":[{"secretKey":"ACCESS_KEY_ID","remoteRef":{"key":"minio-api-access-key","property":"value"}},

@@ -6,14 +6,14 @@ import { useTranslation } from 'next-i18next';
 
 import { WORKLOAD_STATUS_COLOR_MAP } from '@/utils/workloads';
 
-import { ProjectStatusCount } from '@/types/metrics';
+import type { components } from '@/types/api';
 
 import { CategorySplitStatsCard } from '@amdenterpriseai/components';
 
 interface Props {
   projectName: string;
   totalWorkloads: number;
-  data: ProjectStatusCount[];
+  data: components['schemas']['WorkloadStatusCount'][];
   isLoading?: boolean;
 }
 

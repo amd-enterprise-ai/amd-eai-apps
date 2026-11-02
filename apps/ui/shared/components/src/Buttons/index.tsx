@@ -4,7 +4,6 @@
 
 export { Button, ButtonGroup } from './Button';
 export { ActionButton } from './ActionButton';
-export { CloseButton } from './CloseButton';
 
 export type { ButtonProps } from './Button';
 export type { ActionButtonProps } from './ActionButton';

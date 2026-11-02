@@ -46,9 +46,11 @@ describe('fetchClusterWorkloadsMetrics', () => {
           status: 'Running',
         },
       ],
-      total: 1,
-      page: 1,
-      pageSize: 10,
+      pagination: {
+        total: 1,
+        page: 1,
+        pageSize: 10,
+      },
     };
     mockFetch.mockResolvedValue({
       ok: true,

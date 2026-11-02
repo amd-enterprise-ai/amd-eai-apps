@@ -4,7 +4,7 @@
 
 from textwrap import dedent
 
-from fastapi import APIRouter, Body, Depends, Path, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 
 from api_common.auth.security import get_user_email, get_user_groups
 from api_common.collections import PaginationMetadata, paginate_list
@@ -13,28 +13,41 @@ from api_common.schemas import ListResponse, QueryParam
 from ..aims.crds import AIMProfileResource
 from ..aims.service import get_aim_profile, list_aim_profiles
 from ..common_responses import PROJECT_ACCESS_RESPONSES
+from ..custom_models.constants import DEFAULT_PROFILE_ALIAS
 from ..custom_models.schemas import (
+    BaseImageRuntimeProfileOptions,
     CustomModelPatchRequest,
     CustomModelPatchResponse,
     CustomModelResponse,
+    CustomProfileCreateRequest,
+    CustomProfilePatchRequest,
+    CustomProfileResponse,
     OnboardRequest,
     PreviewRequest,
     PreviewResponse,
     RuntimeProfileOptions,
 )
 from ..custom_models.service import (
+    DefaultProfileImmutableError,
     copy_custom_model,
+    create_custom_model_profile,
+    delete_custom_model_profile,
     delete_onboarded_model,
+    get_base_image_runtime_profile_options,
     get_base_runtime_profile_options,
     get_custom_model,
+    get_custom_model_profile,
+    list_custom_model_profiles,
     list_custom_models,
     onboard_custom_model_source,
     patch_onboarded_model,
     preview_model_source,
+    update_custom_model_profile,
 )
 from ..dispatch.kube_client import KubernetesClient, get_kube_client
 from ..inference.schemas import InferenceProfilesList, ListInferenceProfilesQuery
 from ..minio import MinioClient, get_minio_client
+from .schemas import ProjectResponse, RuntimeProfileOptionsByImageQuery
 from .security import ensure_access_to_project
 from .service import get_accessible_namespaces
 
@@ -43,27 +56,27 @@ router = APIRouter(tags=["Projects"])
 
 @router.get(
     "/projects",
-    response_model=ListResponse[str],
+    response_model=ListResponse[ProjectResponse],
     status_code=status.HTTP_200_OK,
     summary="List accessible projects",
-    response_description="Project identifiers usable as the {project} path segment in other endpoints.",
+    response_description="Accessible project identifiers and display names.",
     description=dedent("""
-        Return the list of project identifiers that the caller has access to,
+        Return summaries for the projects that the caller has access to,
         derived from JWT group claims in combined mode, or just the default
         project in standalone mode.
 
-        The returned strings are the same identifiers used wherever
-        `{project}` appears in other paths (e.g.
-        `/projects/{project}/inference`); they map 1:1 to the underlying
-        workbench Kubernetes namespaces.
+        Each `id` is usable wherever `{project}` appears in other paths (e.g.
+        `/projects/{project}/inference`) and maps 1:1 to the underlying
+        workbench Kubernetes namespace. The `name` is its display value.
     """),
 )
 async def list_projects(
     user_groups: list[str] = Depends(get_user_groups),
     kube_client: KubernetesClient = Depends(get_kube_client),
-) -> ListResponse[str]:
+) -> ListResponse[ProjectResponse]:
     namespaces = await get_accessible_namespaces(kube_client, user_groups)
-    return ListResponse(data=[ns.name for ns in namespaces])
+    project_names = sorted(namespace.name for namespace in namespaces)
+    return ListResponse(data=[ProjectResponse(id=name, name=name) for name in project_names])
 
 
 @router.get(
@@ -81,6 +94,12 @@ async def list_projects(
         values instead of a free-form precision (which the AIMModel CRD prunes).
         Empty lists mean the base model has not emitted profiles yet; clients
         should fall back to static defaults.
+
+        The distinct per-axis lists say which values exist but not which coexist.
+        `combinations` carries the emitted four-axis tuples (acceleratorModel,
+        acceleratorCount, precision, metric); a create/update must resolve to one
+        base profile, so clients narrow their selectors to reachable combinations
+        rather than offering a cartesian product the base never emits.
     """),
     responses=PROJECT_ACCESS_RESPONSES,
 )
@@ -89,6 +108,46 @@ async def get_runtime_profile_options_endpoint(
     kube_client: KubernetesClient = Depends(get_kube_client),
 ) -> RuntimeProfileOptions:
     return await get_base_runtime_profile_options(kube_client=kube_client, namespace=project)
+
+
+@router.get(
+    "/projects/{project}/models/runtime-profile-options/base-image",
+    response_model=BaseImageRuntimeProfileOptions,
+    status_code=status.HTTP_200_OK,
+    summary="Get runtime profile options for one base image",
+    description=dedent("""
+        Return runtime selector options discovered for one selected base image
+        (repository + tag), sourced from AIMClusterModel
+        `status.discoveredProfiles.byHardware`.
+
+        This endpoint lets clients populate accelerator type/model/count and
+        precision fields from a coherent per-image matrix instead of namespace-
+        wide unions.
+
+        The per-model lists say which values exist but not which coexist.
+        `combinations` carries the emitted four-axis tuples (acceleratorModel,
+        acceleratorCount, precision, metric) for this image, so clients narrow
+        the count/precision/metric selectors to combinations reachable from the
+        current selection instead of a cartesian product the base never emits.
+    """),
+    responses={
+        **PROJECT_ACCESS_RESPONSES,
+        404: {"description": "No AIMClusterModel found for the selected base image."},
+        422: {"description": "imageRepository and imageTag are required."},
+    },
+)
+async def get_runtime_profile_options_for_base_image_endpoint(
+    query: QueryParam[RuntimeProfileOptionsByImageQuery],
+    project: str = Depends(ensure_access_to_project),
+    kube_client: KubernetesClient = Depends(get_kube_client),
+) -> BaseImageRuntimeProfileOptions:
+    # The endpoint is project-scoped for access control and future namespace-
+    # scoped shaping, even though current discovery data is cluster-scoped.
+    return await get_base_image_runtime_profile_options(
+        kube_client=kube_client,
+        image_repository=query.image_repository,
+        image_tag=query.image_tag,
+    )
 
 
 @router.get(
@@ -217,6 +276,282 @@ async def get_custom_model_endpoint(
     return await get_custom_model(kube_client=kube_client, namespace=project, model_name=model_name)
 
 
+@router.get(
+    "/projects/{project}/models/{model}/profiles",
+    response_model=ListResponse[CustomProfileResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List profiles for a custom model",
+    description=dedent("""
+        List every profile saved against a custom model: the engine-created
+        Default plus any named profiles, each as one row.
+
+        The Default is classified by provenance on read (never stamped), so a
+        model imported before this release lists correctly on first read, with
+        the Default flagged `isDefault: true` and returned first. Its summary
+        embeds the *effective* profile — the one a deploy would actually pin —
+        so an unnarrowed Default renders as a single row rather than its derived
+        profiles. Each row reports `inUseBy` so the list screen can disable edit
+        and delete per row without a request per profile.
+    """),
+    responses={
+        **PROJECT_ACCESS_RESPONSES,
+        404: {"description": "No custom model with that name exists in the project"},
+        500: {"description": "Profile state is inconsistent because no unique Default can be identified."},
+        502: {"description": "Upstream failure from the Kubernetes API while reading profile sets."},
+    },
+)
+async def list_custom_model_profiles_endpoint(
+    model: str = Path(..., description="AIMModel CR resource name"),
+    project: str = Depends(ensure_access_to_project),
+    kube_client: KubernetesClient = Depends(get_kube_client),
+) -> ListResponse[CustomProfileResponse]:
+    profiles = await list_custom_model_profiles(kube_client=kube_client, namespace=project, model_name=model)
+    return ListResponse(data=profiles)
+
+
+@router.get(
+    "/projects/{project}/models/{model}/profiles/{profile}",
+    response_model=CustomProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get a single profile for a custom model",
+    description=dedent("""
+        Fetch one profile of a custom model by its AIMProfileSet resource name,
+        or the reserved literal `default`, which resolves to the model's
+        engine-created Default set (so clients need not carry the generated
+        hash). `resourceName` in the response always carries the real resource
+        name for deploy pins and debugging.
+
+        A profile belonging to a model in another project (or another model)
+        returns 404 rather than another project's data.
+    """),
+    responses={
+        **PROJECT_ACCESS_RESPONSES,
+        404: {"description": "No such profile exists for the custom model in the project"},
+        500: {"description": "Profile state is inconsistent because no unique Default can be identified."},
+        502: {"description": "Upstream failure from the Kubernetes API while reading the profile set."},
+    },
+)
+async def get_custom_model_profile_endpoint(
+    model: str = Path(..., description="AIMModel CR resource name"),
+    profile: str = Path(
+        ...,
+        description="AIMProfileSet resource name (metadata.name), or the reserved literal 'default'.",
+        pattern=r"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$",
+    ),
+    project: str = Depends(ensure_access_to_project),
+    kube_client: KubernetesClient = Depends(get_kube_client),
+) -> CustomProfileResponse:
+    return await get_custom_model_profile(kube_client=kube_client, namespace=project, model_name=model, profile=profile)
+
+
+@router.post(
+    "/projects/{project}/models/{model}/profiles",
+    response_model=CustomProfileResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a profile for a custom model",
+    description=dedent("""
+        Add a named profile to an already-onboarded custom model without
+        re-importing the model. The profile is written as an AIWB-authored
+        `AIMProfileSet` whose selector is narrowed by the four typed axes
+        (`acceleratorModel`, `acceleratorCount`, `precision`, `metric`) to a
+        single base profile; the server composes both the selector and the
+        overrides from those axes so the accelerator count cannot drift apart
+        from the derived profile's tensor-parallel-size.
+
+        Weights and model identity are copied from the model so the profile is
+        self-contained and deployable on its own. The parent model, its Default,
+        and any sibling profiles are left untouched. Valid axis values come from
+        `GET /projects/{project}/models/runtime-profile-options`.
+
+        The response is the same shape the read endpoints return; the new
+        profile's effective `profile` is null until aim-engine reconciles it,
+        after which it becomes selectable at deploy time.
+    """),
+    responses={
+        **PROJECT_ACCESS_RESPONSES,
+        400: {
+            "description": (
+                "The model has no derivable profiles, or the narrowing axes do not resolve to exactly one base profile"
+            )
+        },
+        404: {"description": "No custom model with that name exists in the project"},
+        409: {"description": "Another profile on this model already uses the requested display name"},
+        422: {"description": "displayName is reserved ('Default') or empty, or the image references disagree"},
+        500: {"description": "Profile state is inconsistent because no unique Default can be identified."},
+        502: {
+            "description": (
+                "Upstream failure from the Kubernetes API while reading the model/base profiles "
+                "(used to validate the narrowing axes) or while applying the AIMProfileSet"
+            )
+        },
+    },
+)
+async def create_custom_model_profile_endpoint(
+    request: CustomProfileCreateRequest,
+    model: str = Path(..., description="AIMModel CR resource name"),
+    project: str = Depends(ensure_access_to_project),
+    kube_client: KubernetesClient = Depends(get_kube_client),
+    submitter: str = Depends(get_user_email),
+) -> CustomProfileResponse:
+    return await create_custom_model_profile(
+        kube_client=kube_client,
+        namespace=project,
+        model_name=model,
+        submitter=submitter,
+        request=request,
+    )
+
+
+@router.patch(
+    "/projects/{project}/models/{model}/profiles/{profile}",
+    response_model=CustomProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update a profile for a custom model",
+    description=dedent("""
+        Update a saved profile's display name, its runtime configuration, or
+        both, so it can be corrected or tuned instead of re-created. All fields
+        are optional; supply only what changes, but at least one is required.
+
+        A rename rewrites only the display-name annotation — Kubernetes object
+        names are immutable, so `resourceName` never changes. A configuration
+        change rewrites the selector and overrides together from the four
+        narrowing axes (`acceleratorModel`, `acceleratorCount`, `precision`,
+        `metric`), so the accelerator count cannot drift apart from the derived
+        profile's tensor-parallel-size; unedited axes are carried over from the
+        current profile. Opaque `customProfile` overrides use JSON merge-patch
+        semantics: a present key is set, a key sent as `null` resets to the
+        aim-engine default, and an omitted key is left unchanged.
+
+        The edit is refused with `409` while any deployment references the
+        profile; `additionalInfo.blockingServices` names the blockers and nothing
+        is written. The engine-owned Default is not editable here — target its
+        edits through the model settings route
+        (`PATCH /projects/{project}/models/{model_name}`) instead.
+
+        The multi-doc DR manifest in S3 is refreshed after a successful cluster
+        patch (best effort: mirror write failures are logged and do not fail the
+        request; the CR remains authoritative). No database persistence is
+        performed.
+    """),
+    responses={
+        **PROJECT_ACCESS_RESPONSES,
+        400: {"description": "Empty request body, or the narrowing axes do not resolve to exactly one base profile"},
+        404: {"description": "No such profile exists for the custom model in the project"},
+        409: {
+            "description": (
+                "A deployment references this profile (`additionalInfo.blockingServices` names them), "
+                "or the new display name is already used by a sibling profile"
+            )
+        },
+        422: {
+            "description": "displayName is reserved ('Default') or blank, the image references disagree, or the Default was targeted"
+        },
+        500: {"description": "Profile state is inconsistent because no unique Default can be identified."},
+        502: {
+            "description": (
+                "Upstream failure from the Kubernetes API while reading the model/base profiles "
+                "or while patching the AIMProfileSet"
+            )
+        },
+    },
+)
+async def update_custom_model_profile_endpoint(
+    request: CustomProfilePatchRequest,
+    model: str = Path(..., description="AIMModel CR resource name"),
+    profile: str = Path(
+        ...,
+        description=(
+            "AIMProfileSet resource name (metadata.name). The reserved literal 'default' is rejected here "
+            "(422) — edit the Default through the model settings route instead."
+        ),
+        pattern=r"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$",
+    ),
+    project: str = Depends(ensure_access_to_project),
+    kube_client: KubernetesClient = Depends(get_kube_client),
+    minio_client: MinioClient = Depends(get_minio_client),
+) -> CustomProfileResponse:
+    # Pydantic's Rust regex has no negative look-ahead, so the reserved-alias
+    # rejection can't ride on the path pattern; guard it here so targeting the
+    # engine-owned Default fails at the request boundary with the contract's 422.
+    if profile == DEFAULT_PROFILE_ALIAS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "The Default profile cannot be edited here; change it through the model settings "
+                "(PATCH /projects/{project}/models/{model_name})."
+            ),
+        )
+    return await update_custom_model_profile(
+        kube_client=kube_client,
+        minio_client=minio_client,
+        namespace=project,
+        model_name=model,
+        profile=profile,
+        request=request,
+    )
+
+
+@router.delete(
+    "/projects/{project}/models/{model}/profiles/{profile}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a custom model profile",
+    description=dedent("""
+        Delete a saved profile from an onboarded custom model. The profile is
+        removed by deleting its AIWB-authored `AIMProfileSet`; aim-engine then
+        garbage-collects the `AIMProfile` derived from it via the set's owner
+        reference. Sibling profiles and the model itself are left untouched.
+
+        The Default profile cannot be deleted: it is reconciled from the model's
+        `spec.profiles`, so a delete would either be recreated or strip the model
+        of its derivation. This is refused whether the Default is addressed by the
+        literal `default` or by the engine-created set's own resource name.
+
+        Deletion is refused while a deployment pins one of the set's derived
+        profiles: the request returns `409` and the response names the blocking
+        deployments so they can be torn down first.
+
+        On success the live CR delete is authoritative; the derived profile's
+        document is then dropped from the durable S3 mirror best-effort — an S3
+        failure is logged rather than failing the request.
+    """),
+    responses={
+        **PROJECT_ACCESS_RESPONSES,
+        404: {"description": "No such custom model or profile exists in the project"},
+        409: {
+            "description": (
+                "A deployment pins one of this profile's derived profiles. "
+                "The response names the blocking deployments; delete them first."
+            )
+        },
+        422: {"description": "The profile resolves to the model's Default, which cannot be deleted"},
+        502: {"description": "Kubernetes API failure while reading or deleting the AIMProfileSet"},
+    },
+)
+async def delete_custom_model_profile_endpoint(
+    model: str = Path(..., description="AIMModel CR resource name"),
+    profile: str = Path(
+        ...,
+        description="AIMProfileSet resource name (metadata.name), or the reserved literal 'default'.",
+        pattern=r"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$",
+    ),
+    project: str = Depends(ensure_access_to_project),
+    kube_client: KubernetesClient = Depends(get_kube_client),
+    minio_client: MinioClient = Depends(get_minio_client),
+) -> None:
+    try:
+        await delete_custom_model_profile(
+            kube_client=kube_client,
+            minio_client=minio_client,
+            namespace=project,
+            model_name=model,
+            profile=profile,
+        )
+    except DefaultProfileImmutableError as exc:
+        # The Default is engine-reconciled and undeletable; surface it as an
+        # unprocessable request (422) distinct from a malformed one (400).
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.message) from exc
+
+
 @router.post(
     "/projects/{project}/models/{model_name}/copy",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -227,11 +562,18 @@ async def get_custom_model_endpoint(
 
         The copied model carries the same source identity/runtime settings and
         receives a new display name derived from the source with a `-copy`
-        suffix.
+        suffix. Copy is refused (409) when that runtime image conflicts with
+        the shared base model already provisioned for the family in this project.
     """),
     responses={
         **PROJECT_ACCESS_RESPONSES,
         404: {"description": "No custom model with that name exists in the project"},
+        409: {
+            "description": (
+                "The source model's runtime image conflicts with the shared base "
+                "model already provisioned for that family in the project."
+            )
+        },
     },
 )
 async def copy_custom_model_endpoint(
@@ -271,7 +613,12 @@ async def copy_custom_model_endpoint(
     """),
     responses={
         **PROJECT_ACCESS_RESPONSES,
-        400: {"description": "Invalid source format, or the named secret does not contain a 'token' key"},
+        400: {
+            "description": (
+                "Invalid source format; missing/invalid s3StorageName configuration for S3 preview; "
+                "or the named HF token secret does not contain a 'token' key."
+            )
+        },
         403: {
             "description": (
                 "Hub access denied. The detail message indicates the cause: "
@@ -280,13 +627,13 @@ async def copy_custom_model_endpoint(
                 "(c) the token lacks access to this gated model (accept license on huggingface.co)."
             )
         },
-        404: {"description": "Model not found on Hub, or specified secret not found"},
+        404: {"description": "Model not found on Hub, or specified HF token secret / S3 storage not found"},
         502: {
             "description": (
                 "Upstream failure: network timeout or connection error contacting "
                 "Hugging Face Hub, Hub 5xx response, Hub response that was oversized, "
                 "unparseable, or missing a SHA, or a Kubernetes API failure while "
-                "reading the token secret."
+                "reading the token secret or S3 storage configuration."
             )
         },
     },
@@ -317,8 +664,11 @@ async def preview_model_source_endpoint(
         server re-fetches Hub and rejects the request if the supplied `sha`
         no longer matches what Hub resolves `(repoId, revision)` to — so a
         stale or forged preview payload fails before any CR or S3 mirror is
-        written. The call is idempotent on `(displayName, modelId)` within
-        the project, so re-submitting the same form is safe.
+        written. Re-submitting the same form — same `(displayName, modelId)`
+        and the same runtime `image` — is idempotent and safe. A different
+        tag of a runtime family already provisioned in the project is refused
+        (409) so the shared base-model CR is not silently repointed. Change
+        only this model's container image with `PATCH /projects/{project}/models/{model_name}`.
 
         When `customProfile` is supplied it is written verbatim to
         `AIMModel.spec.profiles.overrides`; aim-engine bakes those values into
@@ -344,14 +694,16 @@ async def preview_model_source_endpoint(
         },
         404: {
             "description": (
-                "The specified HF token secret was not found in the project, or the "
+                "The specified HF token secret or S3 storage was not found in the project, or the "
                 "supplied `repoId` (or `revision`) was not found on Hugging Face Hub."
             )
         },
         409: {
             "description": (
                 "A custom model with the same display name already exists in the project "
-                "with a different source. Choose a different name to onboard a new source."
+                "with a different source, or the requested runtime image conflicts with "
+                "the shared base model already provisioned for that family. Choose a "
+                "different name, keep the existing runtime tag, or PATCH this model's image."
             )
         },
         502: {
@@ -400,6 +752,10 @@ async def onboard_custom_model_source_endpoint(
         complete desired profile — a present key is set, a key sent as `null` is
         reset to the aim-engine default. A runtime-profile edit requires the
         model to already have a derived AIMProfile (i.e. be past import). The
+        first edit that supplies runtime selector axes also narrows a legacy
+        broad Default to the single matching profile. If a deployment pins a
+        profile that narrowing would prune, the entire edit is refused with
+        `409`; `additionalInfo.blockingServices` identifies the deployments. The
         multi-doc DR manifest in S3 is refreshed after a successful cluster patch
         (best effort: mirror write failures are logged and do not fail the request;
         cluster CRs remain authoritative). No database persistence is performed.
@@ -419,7 +775,9 @@ async def onboard_custom_model_source_endpoint(
         409: {
             "description": (
                 "Another custom model in the project already uses the requested display name, or a "
-                "runtime-profile edit was requested before the model's AIMProfile is ready."
+                "runtime-profile edit was requested before the model's AIMProfile is ready, or "
+                "narrowing the Default would prune a profile pinned by a deployment "
+                "(`additionalInfo.blockingServices` identifies the blockers)."
             )
         },
         422: {"description": "Request body failed validation: empty display name, or conflicting image references."},

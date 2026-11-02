@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 import { z } from 'zod';
 
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'next-i18next';
 
 import {
@@ -17,14 +18,27 @@ import {
 import { useSystemToast } from '@amdenterpriseai/hooks';
 
 import { AutoscalingFormFields } from '@/components/features/models/AutoscalingFormFields';
+import { DeployProfileFields } from '@/components/features/models/DeployProfileFields';
 import {
   createAimScalingPolicyConfig,
   DEFAULT_AUTOSCALING,
 } from '@/lib/app/aims';
+import type { CustomProfileResponse } from '@/lib/app/custom-profiles';
 import { deployInference } from '@/lib/app/inference';
-import { CustomModelDeployPayload } from '@/types/aims';
+import type { AIMDeployPayload } from '@/types/aims';
 import { Model } from '@/types/models';
 import { APIRequestError } from '@amdenterpriseai/utils/app';
+
+type CustomModelDeployPayload = Pick<
+  AIMDeployPayload,
+  | 'model'
+  | 'displayName'
+  | 'replicas'
+  | 'minReplicas'
+  | 'maxReplicas'
+  | 'autoScaling'
+  | 'profileName'
+>;
 
 interface Props {
   model: Model;
@@ -33,6 +47,11 @@ interface Props {
   sourceUri?: string | null;
   isOpen: boolean;
   onClose: () => void;
+  /** Custom-onboarded only: fine-tuned models share this drawer and the API
+   * refuses a selection for them. */
+  supportsProfileSelection?: boolean;
+  /** Profile the deploy was started from, when it began at a specific one. */
+  initialProfile?: CustomProfileResponse;
   /**
    * Called after a successful deploy, in addition to the drawer's own
    * invalidation of the canonical aim-services list. Consumers use this to
@@ -42,20 +61,25 @@ interface Props {
   onDeployed?: () => void;
 }
 
-const formSchema = z
-  .object({
-    displayName: z
-      .union([z.literal(''), z.string().min(2).max(253)])
-      .optional(),
-    autoscalingEnabled: z.boolean(),
-    minReplicas: z.number().min(1).max(30).optional(),
-    maxReplicas: z.number().min(1).max(30).optional(),
-    metricQuery: z.string().optional(),
-    operationOverTime: z.string().optional(),
-    targetType: z.string().optional(),
-    targetValue: z.number().min(1).optional(),
-  })
-  .superRefine((data, ctx) => {
+const baseSchema = z.object({
+  displayName: z.union([z.literal(''), z.string().min(2).max(253)]).optional(),
+  /** AIMProfileSet identifier, or `default`. */
+  profileName: z.string().optional(),
+  /** Mirrored from the profile list, which is the only thing that knows it. */
+  profileReady: z.boolean().optional(),
+  autoscalingEnabled: z.boolean(),
+  minReplicas: z.number().min(1).max(30).optional(),
+  maxReplicas: z.number().min(1).max(30).optional(),
+  metricQuery: z.string().optional(),
+  operationOverTime: z.string().optional(),
+  targetType: z.string().optional(),
+  targetValue: z.number().min(1).optional(),
+});
+
+type DeployCustomFormValues = z.infer<typeof baseSchema>;
+
+const createFormSchema = (requiresProfile: boolean, t: TFunction<'models'>) =>
+  baseSchema.superRefine((data, ctx) => {
     if (
       data.autoscalingEnabled &&
       data.minReplicas &&
@@ -68,30 +92,37 @@ const formSchema = z
         path: ['maxReplicas'],
       });
     }
+    if (!requiresProfile) {
+      return;
+    }
+    if (!data.profileName) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: t('deployCustomAIMDrawer.fields.profile.errors.required'),
+        path: ['profileName'],
+      });
+    } else if (!data.profileReady) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: t('deployCustomAIMDrawer.fields.profile.errors.notReady'),
+        path: ['profileName'],
+      });
+    }
   });
-
-type DeployCustomFormValues = z.infer<typeof formSchema>;
-
-/**
- * Placeholder for the deploy drawer's future runtime-profile slot.
- *
- * Custom models resolve engine args and env from the namespace AIMProfile /
- * AIMModel state produced by onboarding and model settings — deploy does not
- * send profile overrides; change runtime via edit model settings.
- */
-const RuntimeProfileSection = () => <div data-testid="runtime-profile-slot" />;
-
-RuntimeProfileSection.displayName = 'RuntimeProfileSection';
 
 const buildDeployPayload = (
   model: string,
   data: DeployCustomFormValues,
+  withProfile: boolean,
 ): CustomModelDeployPayload => {
   const payload: CustomModelDeployPayload = {
     model,
     displayName: data.displayName || undefined,
     replicas: 1,
   };
+  if (withProfile && data.profileName) {
+    payload.profileName = data.profileName;
+  }
   if (data.autoscalingEnabled) {
     payload.minReplicas = data.minReplicas;
     payload.maxReplicas = data.maxReplicas;
@@ -112,14 +143,22 @@ export const DeployCustomAIMDrawer = ({
   isOpen,
   onClose,
   onDeployed,
+  supportsProfileSelection = false,
+  initialProfile,
 }: Props) => {
   const { t } = useTranslation('models');
   const { toast } = useSystemToast();
   const queryClient = useQueryClient();
   const modelResourceName = model.resourceName ?? model.id ?? '';
+  const formSchema = useMemo(
+    () => createFormSchema(supportsProfileSelection, t),
+    [supportsProfileSelection, t],
+  );
   const defaultValues = useMemo<DeployCustomFormValues>(
     () => ({
       displayName: '',
+      profileName: '',
+      profileReady: false,
       autoscalingEnabled: false,
       ...DEFAULT_AUTOSCALING,
     }),
@@ -128,7 +167,10 @@ export const DeployCustomAIMDrawer = ({
 
   const deployMutation = useMutation({
     mutationFn: (data: DeployCustomFormValues) =>
-      deployInference(namespace, buildDeployPayload(modelResourceName, data)),
+      deployInference(
+        namespace,
+        buildDeployPayload(modelResourceName, data, supportsProfileSelection),
+      ),
     onSuccess: () => {
       toast.success(t('deployCustomAIMDrawer.notifications.success'));
       // FineTuneModels' table reads this key; invalidate it so the deployed
@@ -175,16 +217,16 @@ export const DeployCustomAIMDrawer = ({
       renderFields={(form) => (
         <div className="flex flex-col gap-4 mt-4">
           <div className="flex flex-col gap-1">
-            <p className="text-small text-default-500">
+            <p className="text-small text-muted">
               {t('deployCustomAIMDrawer.header.deployingInto', { namespace })}
             </p>
             <div className="text-2xl font-bold">{model.name}</div>
             {model.canonicalName && (
-              <p className="text-default-500">{model.canonicalName}</p>
+              <p className="text-muted">{model.canonicalName}</p>
             )}
             {sourceUri && (
-              <p className="text-small text-default-500 wrap-break-words mt-1">
-                <span className="text-default-400">
+              <p className="text-small text-muted wrap-break-words mt-1">
+                <span className="text-muted">
                   {t('deployCustomAIMDrawer.header.sourceUri')}:
                 </span>{' '}
                 {sourceUri}
@@ -204,7 +246,18 @@ export const DeployCustomAIMDrawer = ({
             description={t('deployCustomAIMDrawer.fields.displayName.helper')}
           />
 
-          <RuntimeProfileSection />
+          {supportsProfileSelection ? (
+            <DeployProfileFields
+              form={form}
+              project={namespace}
+              modelId={modelResourceName}
+              modelName={model.name}
+              initialProfile={initialProfile}
+              isDisabled={deployMutation.isPending}
+            />
+          ) : (
+            <div data-testid="runtime-profile-slot" />
+          )}
 
           {/* ====== AUTOSCALING SECTION ====== */}
           <Divider />
@@ -214,18 +267,14 @@ export const DeployCustomAIMDrawer = ({
                 {t('deployCustomAIMDrawer.fields.autoscaling.title')}
               </h3>
             </div>
-            <div className="flex flex-col gap-0">
-              <FormSwitch
-                form={form}
-                name="autoscalingEnabled"
-                data-testid="autoscaling-toggle"
-              >
-                {t('deployCustomAIMDrawer.fields.autoscaling.enable')}
-              </FormSwitch>
-              <p role="note" className="text-small text-default-500 ml-[58px]">
-                {t('helper', { ns: 'autoscaling' })}
-              </p>
-            </div>
+            <FormSwitch
+              form={form}
+              name="autoscalingEnabled"
+              data-testid="autoscaling-toggle"
+              description={t('helper', { ns: 'autoscaling' })}
+            >
+              {t('deployCustomAIMDrawer.fields.autoscaling.enable')}
+            </FormSwitch>
             {form.watch('autoscalingEnabled') && (
               <AutoscalingFormFields
                 form={form}

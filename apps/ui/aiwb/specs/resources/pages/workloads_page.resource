@@ -27,9 +27,17 @@ ${CHAT_BUTTON_SELECTOR}           button:has-text("Chat")
 ${DELETE_BUTTON_SELECTOR}         button:has-text("Delete")
 ${CONNECT_TO_MODEL_BTN_SELECTOR}    [data-testid="connect-to-model-button"]
 ${CONNECT_MODAL_TITLE_SELECTOR}     [role="dialog"] >> text="Connect to model"
+${LORA_ADAPTERS_CARD_SELECTOR}      [data-testid="lora-adapters-card"]
+${EDIT_LORA_ADAPTERS_SELECTOR}      [data-testid="edit-lora-adapters-button"]
+${EDIT_LORA_MODAL_SELECTOR}         [data-testid="edit-lora-adapters-modal"]
+${APPLY_LORA_ADAPTERS_SELECTOR}     [data-testid="apply-lora-adapters-button"]
+${EDIT_LORA_ADAPTERS_READY_SELECTOR}
+...    [data-testid="edit-lora-adapters-modal"] [data-testid="lora-adapters-selector"][data-loading="false"]
 # Stable testid on the code-example Snippet; its <pre> holds the curl body
 # whose OpenAI `model` field is what we assert on.
 ${CONNECT_SNIPPET_SELECTOR}         [data-testid="connect-code-snippet"] >> css=pre
+${WORKLOAD_DESCRIPTION_SELECTOR}    css=h5:has-text("Description") + p
+${AIM_DETAILS_TITLE_SELECTOR}       css=h2
 
 
 *** Keywords ***
@@ -66,6 +74,15 @@ Get inference workload row text
     ${rows}=    Get Elements    ${row_selector}
     VAR    ${row}    ${rows}[0]
     ${text}=    Get Text    ${row}
+    RETURN    ${text}
+
+Get workload name cell text
+    [Documentation]    Returns a workload's display name and profile summary.
+    [Arguments]    ${workload_id}
+
+    VAR    ${selector}    css=[role="row"]\[data-key="${workload_id}"] [role="rowheader"]
+    Wait For Elements State    ${selector}    visible    timeout=30s
+    ${text}=    Get Text    ${selector}
     RETURN    ${text}
 
 Get workloads grid text
@@ -128,6 +145,20 @@ Get container version text
     ${version}=    Get Text    ${selector}
     RETURN    ${version}
 
+Get workload description text
+    [Documentation]    Returns the description shown in workload basic information.
+
+    Wait For Elements State    ${WORKLOAD_DESCRIPTION_SELECTOR}    visible    timeout=30s
+    ${description}=    Get Text    ${WORKLOAD_DESCRIPTION_SELECTOR}
+    RETURN    ${description}
+
+Get AIM details title text
+    [Documentation]    Returns the title shown in the AIM details page header.
+
+    Wait For Elements State    ${AIM_DETAILS_TITLE_SELECTOR}    visible    timeout=30s
+    ${title}=    Get Text    ${AIM_DETAILS_TITLE_SELECTOR}
+    RETURN    ${title}
+
 Get deployed workload row count
     [Documentation]    Returns the number of workload rows in the grid.
 
@@ -159,6 +190,70 @@ Is performance metric visible
     ${visible}=    Run Keyword And Return Status
     ...    Wait For Elements State    ${selector}    visible    timeout=5s
     RETURN    ${visible}
+
+Get LoRA adapters card text
+    [Documentation]    Returns the visible content of the LoRA adapters card.
+
+    VAR    ${card}    css=${LORA_ADAPTERS_CARD_SELECTOR}
+    Wait For Elements State    ${card}    visible    timeout=30s
+    ${text}=    Get Text    ${card}
+    RETURN    ${text}
+
+Open LoRA adapters editor
+    [Documentation]    Opens the adapter selection modal from the LoRA adapters card and waits for
+    ...    its adapter table to finish loading. The dialog mounts before the adapters and the
+    ...    serving profile arrive, so rows counted on mount describe a loading table rather than
+    ...    the filtered offer.
+
+    VAR    ${button}    css=${EDIT_LORA_ADAPTERS_SELECTOR}
+    Click    ${button}
+    VAR    ${modal}    css=${EDIT_LORA_MODAL_SELECTOR}
+    Wait For Elements State    ${modal}    visible    timeout=15s
+    VAR    ${table}    css=${EDIT_LORA_ADAPTERS_READY_SELECTOR}
+    Wait For Elements State    ${table}    visible    timeout=30s
+
+Get LoRA adapters editor text
+    [Documentation]    Returns the visible content of the open adapter selection modal.
+
+    VAR    ${modal}    css=${EDIT_LORA_MODAL_SELECTOR}
+    Wait For Elements State    ${modal}    visible    timeout=30s
+    ${text}=    Get Text    ${modal}
+    RETURN    ${text}
+
+LoRA adapters editor row is visible
+    [Documentation]    Reports whether the open editor lists the named adapter.
+    [Arguments]    ${display_name}
+
+    VAR    ${row}    css=${EDIT_LORA_MODAL_SELECTOR} tbody tr:has-text("${display_name}")
+    ${count}=    Get Element Count    ${row}
+    RETURN    ${{ $count > 0 }}
+
+Toggle LoRA adapter row
+    [Documentation]    Toggles the checkbox for the adapter row containing the given display name.
+    [Arguments]    ${display_name}
+
+    VAR    ${checkbox}
+    ...    css=${EDIT_LORA_MODAL_SELECTOR} tbody tr:has-text("${display_name}") [aria-label^="Select row "]
+    Wait For Elements State    ${checkbox}    visible    timeout=15s
+    Click    ${checkbox}
+
+Clear selected LoRA adapters
+    [Documentation]    Unchecks every selected adapter in the open editor.
+
+    VAR    ${selected}
+    ...    css=${EDIT_LORA_MODAL_SELECTOR} tbody [aria-label^="Select row "][aria-checked="true"]
+    ${checkboxes}=    Get Elements    ${selected}
+    FOR    ${checkbox}    IN    @{checkboxes}
+        Click    ${checkbox}
+    END
+
+Apply LoRA adapter selection
+    [Documentation]    Applies the selected adapters and waits for the editor to close.
+
+    VAR    ${button}    css=${APPLY_LORA_ADAPTERS_SELECTOR}
+    Click    ${button}
+    VAR    ${modal}    css=${EDIT_LORA_MODAL_SELECTOR}
+    Wait For Elements State    ${modal}    detached    timeout=30s
 
 Click connect to model button
     [Documentation]    Clicks the Connect to model button in the Output card header.

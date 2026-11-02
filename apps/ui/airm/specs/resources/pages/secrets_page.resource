@@ -8,8 +8,8 @@ Documentation       Page object for the AIRM UI Secrets page.
 ...                 Business logic and assertions belong in feature resources.
 ...
 ...                 The admin secrets page (/secrets) shows all secrets across the
-...                 organization in a table. Each row displays: Name, Type, Use Case,
-...                 Status, Scope, Assigned To, Updated At. The Type column uses
+...                 organization in a table. Each row displays: Name, Type, Use case,
+...                 Status, Scope, Assigned to, Updated at. The Type column uses
 ...                 data-testid attributes to identify secret types (ExternalSecret
 ...                 vs KubernetesSecret). Each row has an actions menu with
 ...                 "Edit assignment" and "Delete" options.
@@ -92,8 +92,8 @@ Secret type indicator should exist in row
 
 Get secret row cell text
     [Documentation]    Returns the text content of a specific cell in a secret row.
-    ...                Column index is 1-based (1=Name, 2=Type, 3=Use Case, 4=Status,
-    ...                5=Scope, 6=Assigned To, 7=Updated At).
+    ...                Column index is 1-based (1=Name, 2=Type, 3=Use case, 4=Status,
+    ...                5=Scope, 6=Assigned to, 7=Updated at).
     [Arguments]    ${secret_name}    ${column_index}
 
     VAR    ${cell}    css=${SECRETS_ROW_SELECTOR}:has-text("${secret_name}") td:nth-child(${column_index})
@@ -220,7 +220,7 @@ Get all visible secret names
     RETURN    ${names}
 
 Get secret assigned to text
-    [Documentation]    Returns the text content of the "Assigned To" column for a secret row.
+    [Documentation]    Returns the text content of the "Assigned to" column for a secret row.
     ...                Uses grid role-based selectors for the HeroUI table.
     [Arguments]    ${secret_name}
 

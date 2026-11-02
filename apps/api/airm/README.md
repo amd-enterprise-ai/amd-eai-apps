@@ -38,15 +38,11 @@ The APIs remain separate services with their own endpoints but integrate for uni
 
 For AIWB-specific endpoints, see the [AIWB API documentation](../aiwb/README.md). The AIRM Swagger UI is available at http://localhost:8001/docs when running locally.
 
-> **Note:** If you are new to the project or new hired, please read the [LOCAL_SETUP](https://github.com/silogen/dev_helpers/blob/main/LOCAL_SETUP.md) before you continue.
-
 ## Installation
 
 ### Development environment
 
 Dependencies are handled with `uv` which must be installed first. `uv` will create virtual environment and in order to utilize the environment, commands should be with `uv run`. There is _no_ need to manually install packages or activate environments.
-
-More details about `uv` can be read from our [dependency management guidelines](../../../docs/internal-docs/guidelines/dependency-management.md).
 
 ### Running AIRM API locally
 
@@ -113,8 +109,6 @@ The AIRM API includes built-in support for the Model Context Protocol (MCP), all
 - `GET /mcp` - Server information and capabilities
 - `POST /mcp/messages/` - Message handling for tool execution
 
-For detailed configuration examples and usage instructions, see the [MCP Integration Documentation](../../../docs/internal-docs/tutorials/mcp-integration.md).
-
 ### RabbitMQ Management UI
 
 RabbitMQ Management UI should be accessible here: http://localhost:15672.
@@ -135,8 +129,6 @@ docker run --rm -v "`pwd`/migrations:/liquibase/changelog" docker.io/liquibase/l
 ## Testing
 
 ### Unit Tests (pytest)
-
-**For detailed testing guidelines**, including FastAPI dependency override patterns and best practices, see [CLAUDE.md](./CLAUDE.md).
 
 Ensure docker is running on your machine and run the tests.
 

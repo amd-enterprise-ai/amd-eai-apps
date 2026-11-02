@@ -190,26 +190,54 @@ async def test_download_dataset_file_not_found(db_session: AsyncSession, test_na
 
 
 @pytest.mark.asyncio
-async def test_get_dataset_by_id_success(db_session: AsyncSession, test_namespace: str, test_user: str) -> None:
+async def test_get_dataset_by_id_success(
+    db_session: AsyncSession,
+    test_namespace: str,
+    test_user: str,
+    mock_minio_client: MinioClient,
+) -> None:
     """Test retrieving a dataset by ID."""
     dataset = await factory.create_dataset(
         db_session, name="Test Dataset", path="test-dataset.jsonl", namespace=test_namespace
     )
 
-    result = await get_dataset_by_id(db_session, dataset.id, test_namespace)
+    result = await get_dataset_by_id(db_session, dataset.id, test_namespace, mock_minio_client)
 
     assert result.id == dataset.id
     assert result.name == dataset.name
-    assert result.namespace == test_namespace
+    assert result.size_bytes == len(b'{"text": "test"}\n{"text": "test2"}')
 
 
 @pytest.mark.asyncio
-async def test_get_dataset_by_id_not_found(db_session: AsyncSession, test_namespace: str) -> None:
+async def test_get_dataset_by_id_not_found(
+    db_session: AsyncSession,
+    test_namespace: str,
+    mock_minio_client: MinioClient,
+) -> None:
     """Test retrieving non-existent dataset raises NotFoundException."""
     non_existent_id = uuid4()
 
     with pytest.raises(NotFoundException, match="Dataset.*not found"):
-        await get_dataset_by_id(db_session, non_existent_id, test_namespace)
+        await get_dataset_by_id(db_session, non_existent_id, test_namespace, mock_minio_client)
+
+
+@pytest.mark.asyncio
+async def test_get_dataset_by_id_returns_unknown_size_when_storage_fails(
+    db_session: AsyncSession,
+    test_namespace: str,
+    mock_minio_client: MinioClient,
+) -> None:
+    dataset = await factory.create_dataset(
+        db_session,
+        name="Test Dataset",
+        path="test-dataset.jsonl",
+        namespace=test_namespace,
+    )
+    mock_minio_client.stat_object.side_effect = RuntimeError("storage unavailable")
+
+    result = await get_dataset_by_id(db_session, dataset.id, test_namespace, mock_minio_client)
+
+    assert result.size_bytes is None
 
 
 @pytest.mark.asyncio
@@ -305,7 +333,11 @@ async def test_delete_dataset_namespace_isolation(
 
 
 @pytest.mark.asyncio
-async def test_list_paginated_datasets_empty(db_session: AsyncSession, test_namespace: str) -> None:
+async def test_list_paginated_datasets_empty(
+    db_session: AsyncSession,
+    test_namespace: str,
+    mock_minio_client: MinioClient,
+) -> None:
     """An empty namespace yields an empty page with total=0."""
     result = await list_paginated_datasets(
         session=db_session,
@@ -314,6 +346,7 @@ async def test_list_paginated_datasets_empty(db_session: AsyncSession, test_name
         name=None,
         page=1,
         page_size=10,
+        minio_client=mock_minio_client,
     )
 
     assert result.items == []
@@ -323,7 +356,11 @@ async def test_list_paginated_datasets_empty(db_session: AsyncSession, test_name
 
 
 @pytest.mark.asyncio
-async def test_list_paginated_datasets_single_page(db_session: AsyncSession, test_namespace: str) -> None:
+async def test_list_paginated_datasets_single_page(
+    db_session: AsyncSession,
+    test_namespace: str,
+    mock_minio_client: MinioClient,
+) -> None:
     """When the row count is below page_size, all rows are returned on page 1."""
     for i in range(3):
         await factory.create_dataset(db_session, name=f"Dataset {i}", path=f"ds-{i}.jsonl", namespace=test_namespace)
@@ -335,6 +372,7 @@ async def test_list_paginated_datasets_single_page(db_session: AsyncSession, tes
         name=None,
         page=1,
         page_size=10,
+        minio_client=mock_minio_client,
     )
 
     assert len(result.items) == 3
@@ -343,16 +381,32 @@ async def test_list_paginated_datasets_single_page(db_session: AsyncSession, tes
 
 
 @pytest.mark.asyncio
-async def test_list_paginated_datasets_exact_page_boundary(db_session: AsyncSession, test_namespace: str) -> None:
+async def test_list_paginated_datasets_exact_page_boundary(
+    db_session: AsyncSession,
+    test_namespace: str,
+    mock_minio_client: MinioClient,
+) -> None:
     """When the row count equals page_size, page 1 is full and page 2 is empty."""
     for i in range(5):
         await factory.create_dataset(db_session, name=f"Dataset {i}", path=f"ds-{i}.jsonl", namespace=test_namespace)
 
     first = await list_paginated_datasets(
-        session=db_session, namespace=test_namespace, type=None, name=None, page=1, page_size=5
+        session=db_session,
+        namespace=test_namespace,
+        type=None,
+        name=None,
+        page=1,
+        page_size=5,
+        minio_client=mock_minio_client,
     )
     second = await list_paginated_datasets(
-        session=db_session, namespace=test_namespace, type=None, name=None, page=2, page_size=5
+        session=db_session,
+        namespace=test_namespace,
+        type=None,
+        name=None,
+        page=2,
+        page_size=5,
+        minio_client=mock_minio_client,
     )
 
     assert len(first.items) == 5
@@ -362,19 +416,41 @@ async def test_list_paginated_datasets_exact_page_boundary(db_session: AsyncSess
 
 
 @pytest.mark.asyncio
-async def test_list_paginated_datasets_multi_page_slicing(db_session: AsyncSession, test_namespace: str) -> None:
+async def test_list_paginated_datasets_multi_page_slicing(
+    db_session: AsyncSession,
+    test_namespace: str,
+    mock_minio_client: MinioClient,
+) -> None:
     """Pages slice the filtered list; total reflects the full set on every page."""
     for i in range(12):
         await factory.create_dataset(db_session, name=f"Dataset {i}", path=f"ds-{i}.jsonl", namespace=test_namespace)
 
     page_one = await list_paginated_datasets(
-        session=db_session, namespace=test_namespace, type=None, name=None, page=1, page_size=5
+        session=db_session,
+        namespace=test_namespace,
+        type=None,
+        name=None,
+        page=1,
+        page_size=5,
+        minio_client=mock_minio_client,
     )
     page_two = await list_paginated_datasets(
-        session=db_session, namespace=test_namespace, type=None, name=None, page=2, page_size=5
+        session=db_session,
+        namespace=test_namespace,
+        type=None,
+        name=None,
+        page=2,
+        page_size=5,
+        minio_client=mock_minio_client,
     )
     page_three = await list_paginated_datasets(
-        session=db_session, namespace=test_namespace, type=None, name=None, page=3, page_size=5
+        session=db_session,
+        namespace=test_namespace,
+        type=None,
+        name=None,
+        page=3,
+        page_size=5,
+        minio_client=mock_minio_client,
     )
 
     assert len(page_one.items) == 5
@@ -385,7 +461,9 @@ async def test_list_paginated_datasets_multi_page_slicing(db_session: AsyncSessi
 
 @pytest.mark.asyncio
 async def test_list_paginated_datasets_passes_filters_to_repository(
-    db_session: AsyncSession, test_namespace: str
+    db_session: AsyncSession,
+    test_namespace: str,
+    mock_minio_client: MinioClient,
 ) -> None:
     """`name`/`type` filters are forwarded to the repository unchanged."""
     with patch("app.datasets.service.repository.list_datasets", autospec=True) as mock_repo:
@@ -398,6 +476,7 @@ async def test_list_paginated_datasets_passes_filters_to_repository(
             name="my-dataset",
             page=1,
             page_size=10,
+            minio_client=mock_minio_client,
         )
 
     mock_repo.assert_called_once_with(
@@ -406,3 +485,31 @@ async def test_list_paginated_datasets_passes_filters_to_repository(
         type=DatasetType.FINETUNING,
         name="my-dataset",
     )
+
+
+@pytest.mark.asyncio
+async def test_list_paginated_datasets_returns_unknown_sizes_when_storage_fails(
+    db_session: AsyncSession,
+    test_namespace: str,
+    mock_minio_client: MinioClient,
+) -> None:
+    await factory.create_dataset(
+        db_session,
+        name="Dataset",
+        path=f"{test_namespace}/datasets/dataset.jsonl",
+        namespace=test_namespace,
+    )
+    mock_minio_client.get_object_sizes.side_effect = RuntimeError("storage unavailable")
+
+    result = await list_paginated_datasets(
+        session=db_session,
+        namespace=test_namespace,
+        type=None,
+        name=None,
+        page=1,
+        page_size=10,
+        minio_client=mock_minio_client,
+    )
+
+    assert len(result.items) == 1
+    assert result.items[0].size_bytes is None

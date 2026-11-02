@@ -4,8 +4,8 @@
 
 import { useTranslation } from 'next-i18next';
 
-import { Workload } from '@/types/workloads';
-import type { ResourceMetrics } from '@/types/projects';
+import type { Workload } from '@/types/workloads';
+import type { EnrichedWorkloadMetrics } from '@/types/projects';
 
 import { ConfirmationModal } from '@amdenterpriseai/components';
 
@@ -13,7 +13,10 @@ interface DeleteWorkloadModalProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   onConfirmAction: (id: string) => void;
-  workload: Workload | ResourceMetrics | undefined;
+  workload:
+    | Pick<Workload, 'id' | 'displayName'>
+    | Pick<EnrichedWorkloadMetrics, 'id' | 'displayName'>
+    | undefined;
 }
 
 export default function DeleteWorkloadModal({

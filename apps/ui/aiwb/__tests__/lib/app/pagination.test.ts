@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: MIT
 
 import { fetchAllPages } from '@/lib/app/pagination';
-import { PaginatedList } from '@/types/pagination';
 
 type Item = { id: string };
 
@@ -12,7 +11,7 @@ const makePage = (
   page: number,
   pageSize: number,
   total: number,
-): PaginatedList<Item> => ({
+) => ({
   data: items,
   pagination: { page, pageSize, total },
 });

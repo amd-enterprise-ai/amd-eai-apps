@@ -23,23 +23,27 @@ export const DataRefresher: React.FC<Props> = ({
   compact = false,
   reversed = false,
 }) => {
-  const { t } = useTranslation('common');
+  const { t } = useTranslation('sharedComponents');
 
   return (
-    <div className={`flex items-center ${reversed ? 'flex-row-reverse' : ''}`}>
+    <div
+      className={`flex min-w-0 items-center ${reversed ? 'flex-row-reverse' : ''}`}
+    >
       {lastFetchedTimestamp ? (
-        <span className="text-sm text-default-500 dark:text-default-400 mx-4">
+        <span className="min-w-0 text-sm text-muted dark:text-muted mx-4">
           {t(`data.lastUpdated`, {
             timestamp: displayTimestamp(lastFetchedTimestamp),
           })}
         </span>
       ) : null}
 
-      <RefreshButton
-        compact={compact}
-        isLoading={isRefreshing}
-        onPress={onRefresh}
-      />
+      <div className="shrink-0">
+        <RefreshButton
+          compact={compact}
+          isLoading={isRefreshing}
+          onPress={onRefresh}
+        />
+      </div>
     </div>
   );
 };

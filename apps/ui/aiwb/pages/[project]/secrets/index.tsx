@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: MIT
 
 import React from 'react';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import { WorkbenchSecretsPageContent } from '@/components/features/secrets/WorkbenchSecretsPageContent';
+import { getPageTranslations } from '@/lib/server/i18n';
 import {
   DOCS_WORKBENCH_BASE,
   WithDocumentationLink,
@@ -24,11 +24,7 @@ export async function getServerSideProps(context: any) {
 
   return {
     props: {
-      ...(await serverSideTranslations(locale, [
-        'common',
-        'secrets',
-        'sharedComponents',
-      ])),
+      ...(await getPageTranslations(locale, ['secrets'])),
     },
   };
 }

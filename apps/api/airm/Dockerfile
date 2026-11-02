@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-FROM python:3.13
+FROM python:3.14
 
 WORKDIR /code
 

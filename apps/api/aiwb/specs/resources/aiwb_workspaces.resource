@@ -274,7 +274,7 @@ Workspace status should be "${expected_status}"
 Workspace transitions to "${expected_status}"
     [Documentation]    Waits for workspace to transition to expected status
     ...    Polls the workspace endpoint until status becomes expected value
-    ...    Timeout: 20 min (ComfyUI and MLflow download large models and install dependencies)
+    ...    Timeout: 20 min (MLflow downloads large models and installs dependencies)
     ${namespace}=    Get Project Namespace
     Wait For Resource Status    Get AIWB workload    ${TEST_WORKSPACE_ID}    ${expected_status}    timeout=20 min    interval=10 sec    namespace=${namespace}
 
@@ -435,7 +435,7 @@ Workspace deletion should report workspace not found
 Clean Up Workspace Test Resources
     [Documentation]    Clean up all resources created during workspace tests.
     ...    Uses the workspaces capability endpoint for cleanup (the generic /workloads
-    ...    DELETE was removed in EAI-6313), then cleans up projects.
+    ...    DELETE was removed), then cleans up projects.
     ${tracking_list}=    Get Variable Value    ${CREATED_WORKLOAD_IDS}    ${None}
     ${count}=    Evaluate    len($tracking_list) if $tracking_list is not None else 0
     IF    ${count} > 0

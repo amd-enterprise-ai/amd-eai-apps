@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..charts.models import Chart
+from ..datasets.models import Dataset
 from .enums import WorkloadStatus, WorkloadType
 from .gateway import get_workload_from_k8s
 from .models import Workload
@@ -23,6 +24,7 @@ async def create_workload(
     submitter: str,
     status: WorkloadStatus,
     dataset_id: UUID | None = None,
+    dataset_refs: list[dict[str, str]] | None = None,
 ) -> Workload:
     """
     Create a new workload in the database.
@@ -36,6 +38,7 @@ async def create_workload(
         submitter: Email of the user creating the workload
         status: Initial status of the workload
         dataset_id: Optional ID of the dataset associated with this workload
+        dataset_refs: Deletion-proof dataset identifiers and names
 
     Returns:
         Created Workload instance with auto-generated name
@@ -50,6 +53,7 @@ async def create_workload(
         created_by=submitter,
         updated_by=submitter,
         dataset_id=dataset_id,
+        dataset_refs=dataset_refs or [],
     )
     session.add(workload)
     await session.flush()
@@ -60,6 +64,25 @@ async def create_workload(
         workload.display_name = generate_display_name(workload)
 
     return workload
+
+
+async def get_workload_dataset_refs(
+    session: AsyncSession,
+    workload_id: UUID,
+) -> list[dict[str, str]]:
+    """Get the persisted dataset snapshots for a workload."""
+    return await session.scalar(select(Workload.dataset_refs).where(Workload.id == workload_id)) or []
+
+
+async def get_existing_dataset_ids(
+    session: AsyncSession,
+    dataset_ids: list[str],
+) -> set[str]:
+    """Get the IDs that still identify existing datasets."""
+    if not dataset_ids:
+        return set()
+    result = await session.scalars(select(Dataset.id).where(Dataset.id.in_(dataset_ids)))
+    return {str(dataset_id) for dataset_id in result}
 
 
 async def get_workload_by_id(
@@ -126,7 +149,7 @@ async def get_workloads(
     if chart_name:
         query = query.join(Chart).where(Chart.name == chart_name)
     # Stable order so pagination (in-memory today, SQL LIMIT/OFFSET tomorrow
-    # — see EAI-6624) is deterministic; without it the same row can appear
+    # alike) is deterministic; without it the same row can appear
     # on multiple pages or be skipped as a client navigates.
     query = query.order_by(Workload.created_at.desc(), Workload.id.desc())
 

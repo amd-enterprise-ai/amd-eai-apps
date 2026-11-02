@@ -3,32 +3,28 @@
 // SPDX-License-Identifier: MIT
 
 import { Tooltip } from '../../Tooltip';
-import { cn } from '@heroui/react';
-import { DropdownTrigger } from '../../Dropdown/DropdownPrimitive';
+import { cn, InputGroup } from '@heroui/react';
 import { IconChevronDown } from '@tabler/icons-react';
 import { ReactNode, useMemo } from 'react';
-import ClearSingleFilterButton from '../ClearSingleFilterButton';
 import { InlineBadge } from '../../InlineBadge';
-import { ActionButton } from '../../Buttons';
 
 export interface FilterButtonTriggerProps {
   label: string;
-  className?: string;
   numberOfSelectedKeys: number;
   startContent?: ReactNode;
   tooltipText?: string;
   isActive?: boolean;
-  onReset?: () => void;
+  showClearButton?: boolean;
 }
 
+/** Input-styled visual for `Popover.Trigger`; interaction is owned by the trigger. */
 export const FilterButtonTrigger: React.FC<FilterButtonTriggerProps> = ({
   label,
-  className,
   startContent,
   numberOfSelectedKeys,
   tooltipText,
   isActive = false,
-  onReset,
+  showClearButton = false,
 }) => {
   const badgeContent = useMemo(() => {
     if (!isActive) return null;
@@ -43,28 +39,32 @@ export const FilterButtonTrigger: React.FC<FilterButtonTriggerProps> = ({
     );
   }, [isActive, tooltipText, numberOfSelectedKeys]);
 
+  const prefixContent = isActive ? badgeContent : startContent;
+
   return (
-    <div className={cn('relative sm:flex', className)}>
-      <DropdownTrigger className="w-full">
-        <ActionButton
-          className="px-2"
-          aria-label={label}
-          startContent={badgeContent}
-          endContent={
-            <div className="w-6 h-6 min-w-6 flex justify-center items-center">
-              {isActive && onReset ? null : (
-                <IconChevronDown size={16} stroke={2} />
-              )}
-            </div>
-          }
-        >
-          <div className="flex grow items-center gap-2 truncate">
-            {startContent} {label}
-          </div>
-        </ActionButton>
-      </DropdownTrigger>
-      {isActive && onReset && <ClearSingleFilterButton onPress={onReset} />}
-    </div>
+    <InputGroup variant="primary" className="w-full cursor-pointer">
+      {prefixContent && (
+        <InputGroup.Prefix className="gap-1.5 shrink-0">
+          {prefixContent}
+        </InputGroup.Prefix>
+      )}
+      <InputGroup.Input
+        readOnly
+        tabIndex={-1}
+        value={label}
+        aria-hidden
+        className={cn(
+          'min-w-0 flex-1 truncate select-none pointer-events-none',
+          showClearButton && 'pr-8',
+        )}
+        onMouseDown={(e) => e.preventDefault()}
+      />
+      {!showClearButton && (
+        <InputGroup.Suffix className="shrink-0">
+          <IconChevronDown size={16} stroke={2} />
+        </InputGroup.Suffix>
+      )}
+    </InputGroup>
   );
 };
 

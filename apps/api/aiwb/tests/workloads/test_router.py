@@ -4,10 +4,12 @@
 
 """Tests for workloads router endpoints using FastAPI TestClient with dependency overrides."""
 
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import pytest
 from fastapi import HTTPException, status
 from fastapi.testclient import TestClient
 from prometheus_api_client import PrometheusConnect
@@ -29,8 +31,9 @@ from app.metrics.schemas import (
     TimeseriesRange,
 )
 from app.projects.security import ensure_access_to_project, get_project_namespace
-from app.workloads.enums import WorkloadStatus, WorkloadType
-from app.workloads.schemas import WorkloadMetricsListPaginated
+from app.workloads.constants import DESCRIPTION_ANNOTATION, TRAINING_OUTPUT_ANNOTATION
+from app.workloads.enums import TrainingOutput, WorkloadStatus, WorkloadType
+from app.workloads.schemas import WorkloadDatasetResponse, WorkloadMetricsListPaginated
 from tests import factory
 from tests.dependency_overrides import (
     PROMETHEUS_OVERRIDES,
@@ -39,6 +42,16 @@ from tests.dependency_overrides import (
     runtime_dependency_overrides,
 )
 from tests.factory import make_namespace_crd, make_workload_metrics, make_workload_stats_counts
+
+
+@pytest.fixture(autouse=True)
+def mock_finetuning_workloads_annotations() -> Iterator[AsyncMock]:
+    with patch(
+        "app.workloads.router.get_finetuning_workloads_annotations",
+        new_callable=AsyncMock,
+        return_value={},
+    ) as mock:
+        yield mock
 
 
 @override_dependencies(SESSION_OVERRIDES)
@@ -81,8 +94,12 @@ def test_list_workloads_with_filters(mock_get_workloads: AsyncMock) -> None:
 
 
 @override_dependencies(SESSION_OVERRIDES)
+@patch("app.workloads.router.resolve_workloads_datasets")
 @patch("app.workloads.router.get_workloads")
-def test_list_workloads_returns_paginated_envelope(mock_get_workloads: AsyncMock) -> None:
+def test_list_workloads_returns_paginated_envelope(
+    mock_get_workloads: AsyncMock,
+    mock_resolve_datasets: AsyncMock,
+) -> None:
     """GET /v1/projects/{project}/workloads returns the nested pagination envelope."""
     workload = factory.make_workload_mock(
         workload_id=uuid4(),
@@ -94,7 +111,11 @@ def test_list_workloads_returns_paginated_envelope(mock_get_workloads: AsyncMock
     )
     workload.chart = None
     workload.chart_name = None
+    dataset_id = uuid4()
     mock_get_workloads.return_value = [workload]
+    mock_resolve_datasets.return_value = {
+        workload.id: [WorkloadDatasetResponse(id=dataset_id, name="Training dataset", available=True)]
+    }
 
     with TestClient(app) as client:
         response = client.get("/v1/projects/test-project/workloads")
@@ -102,6 +123,7 @@ def test_list_workloads_returns_paginated_envelope(mock_get_workloads: AsyncMock
     assert response.status_code == status.HTTP_200_OK
     body = response.json()
     assert len(body["data"]) == 1
+    assert body["data"][0]["datasets"] == [{"id": str(dataset_id), "name": "Training dataset", "available": True}]
     assert body["pagination"]["page"] == 1
     assert body["pagination"]["pageSize"] == 10
     assert body["pagination"]["total"] == 1
@@ -111,6 +133,43 @@ def test_list_workloads_returns_paginated_envelope(mock_get_workloads: AsyncMock
     assert "pageSize" not in body
     assert "totalPages" not in body
     assert "totalPages" not in body["pagination"]
+
+
+@override_dependencies(SESSION_OVERRIDES)
+@patch("app.workloads.router.resolve_workloads_datasets")
+@patch("app.workloads.router.get_workloads")
+def test_list_workloads_includes_finetuning_annotations(
+    mock_get_workloads: AsyncMock,
+    mock_resolve_datasets: AsyncMock,
+    mock_finetuning_workloads_annotations: AsyncMock,
+) -> None:
+    workload = factory.make_workload_mock(
+        workload_id=uuid4(),
+        name="fine-tuning-job",
+        display_name="Fine-tuning job",
+        namespace="test-project",
+        workload_type=WorkloadType.FINE_TUNING,
+        status=WorkloadStatus.RUNNING,
+    )
+    workload.chart = None
+    workload.chart_name = None
+    mock_get_workloads.return_value = [workload]
+    mock_resolve_datasets.return_value = {workload.id: []}
+    annotations = {
+        TRAINING_OUTPUT_ANNOTATION: TrainingOutput.LORA.value,
+        "example.com/owner": "team-a",
+    }
+    mock_finetuning_workloads_annotations.return_value = {workload.id: annotations}
+
+    with TestClient(app) as client:
+        response = client.get("/v1/projects/test-project/workloads")
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["data"][0]["annotations"] == {
+        TRAINING_OUTPUT_ANNOTATION: TrainingOutput.LORA.value,
+        "example.com/owner": "team-a",
+    }
+    mock_finetuning_workloads_annotations.assert_awaited_once_with("test-namespace", [workload.id])
 
 
 def _make_workload_mock(workload_type: WorkloadType = WorkloadType.WORKSPACE) -> MagicMock:
@@ -231,7 +290,7 @@ def test_get_workload_not_found(mock_get: AsyncMock) -> None:
 
 @override_dependencies(SESSION_OVERRIDES)
 def test_chat_endpoint_returns_404() -> None:
-    """POST /workloads/{id}/chat is gone; UI calls AIM internal URL directly (EAI-6310)."""
+    """POST /workloads/{id}/chat is gone; UI calls AIM internal URL directly."""
     workload_id = uuid4()
 
     with TestClient(app) as client:
@@ -560,8 +619,9 @@ def test_get_workload_metrics_prometheus_error(mock_get_workload: AsyncMock, moc
 
 
 @override_dependencies(SESSION_OVERRIDES)
+@patch("app.workloads.router.resolve_workload_datasets")
 @patch("app.workloads.router.get_workload_by_id")
-def test_get_workload_success(mock_get: AsyncMock) -> None:
+def test_get_workload_success(mock_get: AsyncMock, mock_resolve_datasets: AsyncMock) -> None:
     """Test GET /v1/projects/{project}/workloads/{id} returns 200 with workload data."""
 
     workload_id = uuid4()
@@ -572,14 +632,19 @@ def test_get_workload_success(mock_get: AsyncMock) -> None:
         name="test-workload",
         display_name="Test Workload",
         namespace="test-project",
-        workload_type=WorkloadType.INFERENCE,
+        workload_type=WorkloadType.FINE_TUNING,
         status=WorkloadStatus.RUNNING,
     )
     # Add additional attributes not in factory defaults
     mock_workload.chart = None
     mock_workload.chart_name = None
+    mock_workload.annotations = {TRAINING_OUTPUT_ANNOTATION: TrainingOutput.MERGED.value}
 
     mock_get.return_value = mock_workload
+    dataset_id = uuid4()
+    mock_resolve_datasets.return_value = [
+        WorkloadDatasetResponse(id=dataset_id, name="Deleted dataset", available=False)
+    ]
 
     with TestClient(app) as client:
         response = client.get(f"/v1/projects/test-project/workloads/{workload_id}")
@@ -589,9 +654,68 @@ def test_get_workload_success(mock_get: AsyncMock) -> None:
     assert data["id"] == str(workload_id)
     assert data["name"] == "test-workload"
     assert data["displayName"] == "Test Workload"
-    assert data["type"] == "INFERENCE"
+    assert data["type"] == "FINE_TUNING"
     assert data["status"] == "Running"
+    assert data["annotations"] == {TRAINING_OUTPUT_ANNOTATION: TrainingOutput.MERGED.value}
+    assert data["datasets"] == [{"id": str(dataset_id), "name": "Deleted dataset", "available": False}]
     mock_get.assert_called_once()
+    mock_resolve_datasets.assert_awaited_once_with(ANY, workload_id)
+
+
+@override_dependencies(SESSION_OVERRIDES)
+@patch("app.workloads.router.resolve_workload_datasets")
+@patch("app.workloads.router.get_workload_by_id")
+def test_get_workload_surfaces_description(mock_get: AsyncMock, mock_resolve_datasets: AsyncMock) -> None:
+    """The description supplied at creation is surfaced from the workload's annotation."""
+    workload_id = uuid4()
+    mock_workload = factory.make_workload_mock(
+        workload_id=workload_id,
+        name="test-workload",
+        display_name="Test Workload",
+        namespace="test-project",
+        workload_type=WorkloadType.FINE_TUNING,
+        status=WorkloadStatus.RUNNING,
+    )
+    mock_workload.chart = None
+    mock_workload.chart_name = None
+    mock_workload.annotations = {DESCRIPTION_ANNOTATION: "A helpful description"}
+
+    mock_get.return_value = mock_workload
+    mock_resolve_datasets.return_value = []
+
+    with TestClient(app) as client:
+        response = client.get(f"/v1/projects/test-project/workloads/{workload_id}")
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["description"] == "A helpful description"
+
+
+@override_dependencies(SESSION_OVERRIDES)
+@patch("app.workloads.router.resolve_workload_datasets")
+@patch("app.workloads.router.get_workload_by_id")
+def test_get_workload_description_null_when_absent(mock_get: AsyncMock, mock_resolve_datasets: AsyncMock) -> None:
+    """With no description annotation the response reports description as null, not an empty string."""
+    workload_id = uuid4()
+    mock_workload = factory.make_workload_mock(
+        workload_id=workload_id,
+        name="test-workload",
+        display_name="Test Workload",
+        namespace="test-project",
+        workload_type=WorkloadType.FINE_TUNING,
+        status=WorkloadStatus.RUNNING,
+    )
+    mock_workload.chart = None
+    mock_workload.chart_name = None
+    mock_workload.annotations = {}
+
+    mock_get.return_value = mock_workload
+    mock_resolve_datasets.return_value = []
+
+    with TestClient(app) as client:
+        response = client.get(f"/v1/projects/test-project/workloads/{workload_id}")
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["description"] is None
 
 
 @override_dependencies(

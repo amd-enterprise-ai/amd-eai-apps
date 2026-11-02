@@ -3,11 +3,16 @@
 // SPDX-License-Identifier: MIT
 
 export { ThreeDotActionsDropdown } from './ThreeDotActionsDropdown';
+export { ActionsDropdown } from './ActionsDropdown';
 export {
-  Dropdown,
+  DropdownRoot,
+  DropdownRoot as Dropdown,
   DropdownItem,
   DropdownMenu,
   DropdownSection,
   DropdownTrigger,
+  DropdownSubmenuTrigger,
+  DropdownSubmenuIndicator,
 } from './DropdownPrimitive';
 export type { DropdownItemProps, DropdownProps } from './DropdownPrimitive';
+export type { DropdownActionItem, DropdownItemHint } from './types';

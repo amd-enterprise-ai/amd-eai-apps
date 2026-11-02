@@ -159,6 +159,20 @@ describe('ActionButton', () => {
     expect(button).toHaveTextContent('Button Text');
   });
 
+  it('renders when color="danger" without throwing', () => {
+    // Regression: ActionButton used to ignore color="danger" because the
+    // hardcoded secondary variant overrode it. Verify it renders cleanly.
+    render(
+      <ActionButton color="danger" data-testid="action-button">
+        Danger Button
+      </ActionButton>,
+    );
+
+    const button = screen.getByTestId('action-button');
+    expect(button).toBeInTheDocument();
+    expect(button).toHaveTextContent('Danger Button');
+  });
+
   it('uses provided color prop instead of variant default color', () => {
     render(
       <ActionButton primary color="danger" data-testid="action-button">

@@ -2,14 +2,16 @@
 #
 # SPDX-License-Identifier: MIT
 
+from collections.abc import Iterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from api_common.exceptions import NotFoundException, ValidationException
+from api_common.exceptions import ConflictException, NotFoundException, ValidationException
 from app.aims.crds import AIMModelResource
 from app.custom_models.constants import (
     MODEL_DISPLAY_NAME_ANNOTATION,
+    MODEL_PRECISION_ANNOTATION,
     REVISION_ANNOTATION,
     SOURCE_DESCRIPTION_ANNOTATION,
     SOURCE_SHA_ANNOTATION,
@@ -18,6 +20,18 @@ from app.custom_models.constants import (
 )
 from app.custom_models.service import copy_custom_model
 from app.workloads.constants import MODEL_SOURCE_TYPE_LABEL
+
+_SOURCE_IMAGE = "docker.io/amd/model:1.0.0"
+_SOURCE_BASE_MODEL = "model"
+
+
+@pytest.fixture(autouse=True)
+def mock_ensure_base_model() -> Iterator[AsyncMock]:
+    with patch(
+        "app.custom_models.service.ensure_namespace_aim_base_model",
+        new=AsyncMock(return_value=_SOURCE_BASE_MODEL),
+    ) as mock:
+        yield mock
 
 
 def _build_source_model(
@@ -58,7 +72,7 @@ def _build_source_model(
                     "overrides": {
                         "aimId": "org/model",
                         "modelId": "org/model",
-                        "image": "docker.io/amd/model:1.0.0",
+                        "image": _SOURCE_IMAGE,
                         "modelSources": [
                             {
                                 "modelId": "org/model",
@@ -82,6 +96,7 @@ def _build_source_model(
 async def test_copy_custom_model_creates_copied_model_and_manifest(
     mock_kube_client: AsyncMock,
     mock_minio_client: MagicMock,
+    mock_ensure_base_model: AsyncMock,
     test_namespace: str,
     test_user: str,
 ) -> None:
@@ -110,7 +125,47 @@ async def test_copy_custom_model_creates_copied_model_and_manifest(
     assert copy_name.startswith("source-model-copy-")
     assert manifest["metadata"]["annotations"][MODEL_DISPLAY_NAME_ANNOTATION] == "source-model-copy"
     assert source.metadata.annotations[MODEL_DISPLAY_NAME_ANNOTATION] == "source-model"
+    selector = manifest["spec"]["profiles"]["derivedFrom"]["selector"]
+    assert selector["modelRef"]["name"] == _SOURCE_BASE_MODEL
+    assert manifest["spec"]["profiles"]["overrides"]["image"] == _SOURCE_IMAGE
+    mock_ensure_base_model.assert_awaited_once_with(
+        mock_kube_client,
+        test_namespace,
+        image_ref=_SOURCE_IMAGE,
+    )
     mock_sync.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_copy_custom_model_preserves_precision_annotation(
+    mock_kube_client: AsyncMock,
+    mock_minio_client: MagicMock,
+    test_namespace: str,
+    test_user: str,
+) -> None:
+    """Precision is pruned from overrides, so it survives only on the annotation;
+    copy must carry it into the copied model (re-stamped by the onboard builder)."""
+    source = _build_source_model()
+    source.metadata.annotations[MODEL_PRECISION_ANNOTATION] = "fp8"
+
+    with (
+        patch("app.custom_models.service.aims_gateway.get_aim_model", new=AsyncMock(return_value=source)),
+        patch("app.custom_models.service.aims_gateway.list_aim_models", new=AsyncMock(return_value=[source])),
+        patch("app.custom_models.service.aims_gateway.create_aim_model", new=AsyncMock()) as mock_create,
+        patch("app.custom_models.service._sync_manifest_to_s3", new=AsyncMock()),
+    ):
+        await copy_custom_model(
+            kube_client=mock_kube_client,
+            minio_client=mock_minio_client,
+            namespace=test_namespace,
+            source_model_name="source-model",
+            submitter=test_user,
+        )
+
+    await_args = mock_create.await_args
+    assert await_args is not None
+    manifest = await_args.args[2]
+    assert manifest["metadata"]["annotations"][MODEL_PRECISION_ANNOTATION] == "fp8"
 
 
 @pytest.mark.asyncio
@@ -325,6 +380,38 @@ async def test_copy_custom_model_raises_validation_error_when_source_missing_req
                 minio_client=mock_minio_client,
                 namespace=test_namespace,
                 source_model_name="bare-model",
+                submitter=test_user,
+            )
+
+    mock_create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_copy_custom_model_propagates_base_image_conflict(
+    mock_kube_client: AsyncMock,
+    mock_minio_client: MagicMock,
+    mock_ensure_base_model: AsyncMock,
+    test_namespace: str,
+    test_user: str,
+) -> None:
+    source = _build_source_model()
+    mock_ensure_base_model.side_effect = ConflictException(
+        "Base model 'model' in project 'test-namespace' already uses image "
+        "'docker.io/amd/model:0.1', which conflicts with requested image "
+        "'docker.io/amd/model:1.0.0'."
+    )
+
+    with (
+        patch("app.custom_models.service.aims_gateway.get_aim_model", new=AsyncMock(return_value=source)),
+        patch("app.custom_models.service.aims_gateway.list_aim_models", new=AsyncMock(return_value=[source])),
+        patch("app.custom_models.service.aims_gateway.create_aim_model", new=AsyncMock()) as mock_create,
+    ):
+        with pytest.raises(ConflictException, match="conflicts with requested image"):
+            await copy_custom_model(
+                kube_client=mock_kube_client,
+                minio_client=mock_minio_client,
+                namespace=test_namespace,
+                source_model_name="source-model",
                 submitter=test_user,
             )
 

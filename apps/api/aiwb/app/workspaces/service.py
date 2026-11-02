@@ -141,7 +141,6 @@ async def delete_development_workspace(
         # 404 not 422 because the endpoint is type-scoped to workspaces
         raise NotFoundException(f"Workspace {workload_id} not found")
 
-    # TODO(EAI-6314): verify PVC cleanup — workspace charts may declare PVCs not in
+    # TODO: verify PVC cleanup — workspace charts may declare PVCs not in
     # WORKLOAD_RESOURCES, so label-selector deletion can leave them stranded.
-    # EAI-6314 owns the broader workload delete propagation fix.
     await delete_workload_components(namespace, workload_id, session, workload=workload)

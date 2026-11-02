@@ -45,6 +45,26 @@ vi.mock('next-i18next', () => ({
   }),
 }));
 
+// Mock shared component adapters
+vi.mock('@amdenterpriseai/components', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@amdenterpriseai/components')>();
+  return {
+    ...actual,
+    Alert: ({
+      status,
+      description,
+    }: {
+      status?: string;
+      description?: string;
+    }) => (
+      <div role="alert" data-status={status}>
+        {description}
+      </div>
+    ),
+  };
+});
+
 // Mock TableLine component
 vi.mock(
   '@/components/features/catalog/ResourceAllocationInformer/TableLine',
@@ -181,7 +201,9 @@ describe('ResourceAllocationInformer', () => {
         },
       });
 
-      expect(screen.getByRole('alert')).toBeInTheDocument();
+      const alert = screen.getByRole('alert');
+      expect(alert).toBeInTheDocument();
+      expect(alert).toHaveAttribute('data-status', 'warning');
       expect(
         screen.getByText('Resources exceed quota limits'),
       ).toBeInTheDocument();
@@ -196,7 +218,9 @@ describe('ResourceAllocationInformer', () => {
         },
       });
 
-      expect(screen.getByRole('alert')).toBeInTheDocument();
+      const alert = screen.getByRole('alert');
+      expect(alert).toBeInTheDocument();
+      expect(alert).toHaveAttribute('data-status', 'danger');
       expect(
         screen.getByText('Resources are below required minimum'),
       ).toBeInTheDocument();
@@ -470,7 +494,7 @@ describe('ResourceAllocationInformer', () => {
   });
 
   describe('Alert Icon', () => {
-    it('should render alert icon when alert is shown', () => {
+    it('should render alert when alert is shown', () => {
       renderComponent({
         currentResources: {
           gpus: 5, // Exceeds quota
@@ -481,10 +505,7 @@ describe('ResourceAllocationInformer', () => {
 
       const alert = screen.getByRole('alert');
       expect(alert).toBeInTheDocument();
-
-      // Check that the alert contains an icon (IconAlertTriangle)
-      const icon = alert.querySelector('svg');
-      expect(icon).toBeInTheDocument();
+      expect(alert).toHaveAttribute('data-status', 'warning');
     });
   });
 });

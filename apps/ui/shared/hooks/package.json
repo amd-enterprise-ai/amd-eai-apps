@@ -22,7 +22,7 @@
     "@amdenterpriseai/utils": "workspace:*"
   },
   "peerDependencies": {
-    "@heroui/react": "*",
+    "@heroui/react": "3.2.0",
     "next-i18next": "*"
   },
   "devDependencies": {
@@ -37,7 +37,6 @@
     "react": "*",
     "react-dom": "*",
     "react-hook-form": "*",
-    "react-toastify": "*",
     "vite": "*",
     "vitest": "*"
   }

@@ -2,37 +2,44 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { getErrorMessage } from '@amdenterpriseai/utils/app';
 import { APIRequestError } from '@amdenterpriseai/utils/app';
 
-export interface Chart {
-  id: string;
-  name: string;
-  description?: string;
-}
+import { apiClient, getApiClientErrorMessage } from '@/lib/api-client';
+import type { components } from '@/types/api';
 
 /**
- * Retrieves a single chart by ID.
- *
- * @param {string} id - The chart ID
- * @returns {Promise<Chart>} A promise that resolves to a Chart object.
- * @throws {APIRequestError} If the API request fails.
+ * Lists charts, optionally filtered by workload type.
  */
-export const getChart = async (id: string): Promise<Chart> => {
-  const response = await fetch(`/api/charts/${id}`, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+export const listCharts = async (
+  type?: components['schemas']['WorkloadType'],
+): Promise<components['schemas']['ChartListResponse'][]> => {
+  const { data, error, response } = await apiClient.GET('/api/charts', {
+    params: { query: type ? { type } : {} },
   });
-
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to get chart: ${errorMessage}`,
+      `Failed to list charts: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
+  return data.data;
+};
 
-  return await response.json();
+/**
+ * Retrieves a single chart by ID.
+ */
+export const getChart = async (
+  id: string,
+): Promise<components['schemas']['ChartResponse']> => {
+  const { data, error, response } = await apiClient.GET(
+    '/api/charts/{chart_id}',
+    { params: { path: { chart_id: id } } },
+  );
+  if (error || !data) {
+    throw new APIRequestError(
+      `Failed to get chart: ${getApiClientErrorMessage(error, response)}`,
+      response.status,
+    );
+  }
+  return data;
 };

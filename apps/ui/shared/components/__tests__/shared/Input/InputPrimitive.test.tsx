@@ -25,7 +25,7 @@ describe('Input adapter', () => {
     expect(handleChange).toHaveBeenCalled();
   });
   it('renders isInvalid with errorMessage', () => {
-    render(
+    const { container } = render(
       <Input
         isInvalid
         errorMessage="Required field"
@@ -34,9 +34,27 @@ describe('Input adapter', () => {
       />,
     );
     expect(screen.getByText('Required field')).toBeInTheDocument();
+    expect(container.querySelector('.input-group--secondary')).toHaveAttribute(
+      'data-invalid',
+      'true',
+    );
   });
   it('passes isDisabled', () => {
     render(<Input isDisabled data-testid="input" />);
     expect(screen.getByTestId('input')).toBeDisabled();
+  });
+  it('defaults to secondary variant on InputGroup', () => {
+    const { container } = render(<Input data-testid="input" />);
+    expect(
+      container.querySelector('.input-group--secondary'),
+    ).toBeInTheDocument();
+  });
+  it('applies primary variant when requested', () => {
+    const { container } = render(
+      <Input data-testid="input" variant="primary" />,
+    );
+    expect(
+      container.querySelector('.input-group--primary'),
+    ).toBeInTheDocument();
   });
 });

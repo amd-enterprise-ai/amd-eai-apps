@@ -61,8 +61,8 @@ const baseValidInput = {
   manifest: validExternalSecretYaml,
 };
 
-describe('createAddSecretFormSchema (SDA-3401 / SDA-3402)', () => {
-  it('reports translated keys when scope, type, or use case is cleared (SDA-3401)', () => {
+describe('createAddSecretFormSchema', () => {
+  it('reports translated keys when scope, type, or use case is cleared', () => {
     const schema = makeSchema();
     const result = schema.safeParse({
       ...baseValidInput,
@@ -142,7 +142,7 @@ describe('createAddSecretFormSchema (SDA-3401 / SDA-3402)', () => {
     );
   });
 
-  it('reports project and manifest errors together when project scope has no project and YAML is invalid (SDA-3402)', () => {
+  it('reports project and manifest errors together when project scope has no project and YAML is invalid', () => {
     const schema = makeSchema();
     const result = schema.safeParse({
       ...baseValidInput,
@@ -211,7 +211,7 @@ describe('createAddSecretFormSchema (SDA-3401 / SDA-3402)', () => {
     ).toBe(true);
   });
 
-  it('reports duplicate name when scope is cleared and duplicate is org-scoped (EAI-5597)', () => {
+  it('reports duplicate name when scope is cleared and duplicate is org-scoped', () => {
     const existing: Secret = {
       name: 'unique-secret-name',
       displayName: '',
@@ -246,7 +246,7 @@ describe('createAddSecretFormSchema (SDA-3401 / SDA-3402)', () => {
     ).toBe(true);
   });
 
-  it('reports duplicate name when scope is cleared and duplicate is project-scoped (EAI-5597)', () => {
+  it('reports duplicate name when scope is cleared and duplicate is project-scoped', () => {
     const existing = {
       name: 'unique-secret-name',
       displayName: '',

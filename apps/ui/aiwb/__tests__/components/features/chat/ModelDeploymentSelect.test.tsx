@@ -5,9 +5,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { Mock, vi } from 'vitest';
 
-import { WorkloadType } from '@amdenterpriseai/types';
-import { Workload } from '@/types/workloads';
-import { WorkloadStatus } from '@/types/enums/workloads';
+import type { Workload } from '@/types/workloads';
 
 import { mockWorkloads } from '@/__mocks__/services/app/workloads.data';
 import ProviderWrapper from '@/__tests__/ProviderWrapper';
@@ -17,7 +15,7 @@ import '@testing-library/jest-dom';
 
 describe('ModelDeploymentSelect', () => {
   const baseInference = mockWorkloads.find(
-    (workload) => workload.type === WorkloadType.INFERENCE,
+    (workload) => workload.type === 'INFERENCE',
   ) as Workload;
 
   const workloads: Workload[] = [
@@ -25,22 +23,22 @@ describe('ModelDeploymentSelect', () => {
       ...baseInference,
       id: 'inference-running',
       displayName: 'Inference Running',
-      status: WorkloadStatus.RUNNING,
-      type: WorkloadType.INFERENCE,
+      status: 'Running',
+      type: 'INFERENCE',
     },
     {
       ...baseInference,
       id: 'inference-pending',
       displayName: 'Inference Pending',
-      status: WorkloadStatus.PENDING,
-      type: WorkloadType.INFERENCE,
+      status: 'Pending',
+      type: 'INFERENCE',
     },
     {
       ...baseInference,
       id: 'workspace-running',
       displayName: 'Workspace Running',
-      status: WorkloadStatus.RUNNING,
-      type: WorkloadType.WORKSPACE,
+      status: 'Running',
+      type: 'WORKSPACE',
     },
   ];
 
@@ -56,7 +54,7 @@ describe('ModelDeploymentSelect', () => {
         </ProviderWrapper>,
       );
     });
-    const select = screen.getByTestId('model-deployment-select');
+    const select = screen.getByRole('button', { name: /Select model/ });
     await act(async () => {
       fireEvent.click(select);
     });
@@ -79,20 +77,38 @@ describe('ModelDeploymentSelect', () => {
         </ProviderWrapper>,
       );
     });
-    const select = screen.getByTestId('model-deployment-select');
+    const select = screen.getByRole('button', { name: /Select model/ });
     await act(async () => {
       fireEvent.click(select);
     });
-    const option = screen.getByRole('option', { name: 'Inference Pending' });
+    const option = screen.getByRole('option', { name: 'inference-pending' });
     await act(async () => {
       fireEvent.click(option);
     });
     expect(onModelDeploymentChange).toHaveBeenCalledWith('inference-pending');
   });
 
-  it('renders workload description for selected workload', async () => {
+  it('shows placeholder when no model is selected', async () => {
     await act(async () => {
       render(
+        <ProviderWrapper>
+          <ModelDeploymentSelect
+            workloads={workloads}
+            onModelDeploymentChange={vi.fn()}
+            label="Select model"
+          />
+        </ProviderWrapper>,
+      );
+    });
+    expect(
+      screen.getByRole('button', { name: /Select model/ }),
+    ).toHaveTextContent('Select model');
+  });
+
+  it('renders workload description for selected workload', async () => {
+    let container: HTMLElement;
+    await act(async () => {
+      ({ container } = render(
         <ProviderWrapper>
           <ModelDeploymentSelect
             workloads={workloads}
@@ -102,8 +118,9 @@ describe('ModelDeploymentSelect', () => {
             workloadDescriptions={{ 'inference-running': '1.0.0 · Throughput' }}
           />
         </ProviderWrapper>,
-      );
+      ));
     });
-    expect(screen.getByText('1.0.0 · Throughput')).toBeInTheDocument();
+    const trigger = container!.querySelector('[data-slot="select-trigger"]');
+    expect(trigger).toHaveTextContent('1.0.0 · Throughput');
   });
 });

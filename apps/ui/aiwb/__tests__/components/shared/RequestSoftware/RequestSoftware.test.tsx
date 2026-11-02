@@ -23,9 +23,9 @@ vi.mock('@amdenterpriseai/hooks', () => ({
 }));
 
 const getMailtoFromLink = (linkLabel: string) => {
-  // HeroUI Button renders as <a> but retains role="button"; query by button role
-  // and verify it's an anchor with a mailto href.
-  const link = screen.getByRole('button', { name: linkLabel });
+  // HeroUI v3 renders an href-bearing Button as a real <a>, so it exposes the
+  // implicit "link" role. Query by link role and verify the mailto href.
+  const link = screen.getByRole('link', { name: linkLabel });
   expect(link.tagName).toBe('A');
   const href = link.getAttribute('href');
   expect(href).not.toBeNull();

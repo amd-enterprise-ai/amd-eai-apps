@@ -2,7 +2,13 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 
 import { FormFieldComponent } from '@amdenterpriseai/components';
 import { ModalForm } from '@amdenterpriseai/components';
@@ -54,7 +60,7 @@ describe('ModalForm', () => {
     expect(screen.getByText('Extra Content')).toBeInTheDocument();
   });
 
-  it('validates form fields and shows error messages', () => {
+  it('validates form fields and shows error messages', async () => {
     act(() => {
       render(
         <ModalForm<SampleFormData>
@@ -88,7 +94,11 @@ describe('ModalForm', () => {
     act(() => {
       fireEvent.click(actionButton);
     });
-    expect(screen.getByPlaceholderText('Enter username')).toHaveFocus();
+    // react-hook-form focuses the first invalid field after async validation
+    // resolves; react-aria's focus management applies it on a later tick.
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText('Enter username')).toHaveFocus(),
+    );
   });
 
   it('calls onFormSuccess with form data when form is valid', async () => {

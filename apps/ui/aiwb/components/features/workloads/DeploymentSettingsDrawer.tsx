@@ -89,7 +89,7 @@ export const DeploymentSettingsDrawer = ({
   const renderFormFields = (form: UseFormReturn<AutoscalingFieldValues>) => {
     return (
       <div className="flex flex-col gap-5">
-        <p className="text-small text-default-500">{t('description')}</p>
+        <p className="text-sm text-muted">{t('description')}</p>
         <AutoscalingFormFields form={form} className="flex flex-col gap-5" />
       </div>
     );

@@ -2,28 +2,35 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { ApiKey } from '@/types/api-keys';
+import type { components } from '@/types/api';
 
-export const generateMockApiKeys = (count: number): ApiKey[] => {
+type ApiKeyResponse = components['schemas']['ApiKeyResponse'];
+type ApiKeyWithFullKey = components['schemas']['ApiKeyWithFullKey'];
+
+export const generateMockApiKeys = (count: number): ApiKeyResponse[] => {
   return Array.from({ length: count }, (_, i) => ({
     id: `api-key-${i + 1}`,
-    projectId: 'project-1',
     displayName: `API Key ${i + 1}`,
     truncatedKey: `sk_test_••••••••••••${(i + 1).toString().padStart(4, '0')}`,
     createdAt: new Date(2024, 0, i + 1).toISOString(),
+    updatedAt: new Date(2024, 0, i + 1).toISOString(),
     createdBy: `user${i + 1}@example.com`,
-    expiresAt: i % 2 === 0 ? new Date(2025, 0, i + 1).toISOString() : undefined,
+    updatedBy: `user${i + 1}@example.com`,
+    namespace: 'project-1',
   }));
 };
 
-export const generateMockApiKey = (overrides?: Partial<ApiKey>): ApiKey => ({
+export const generateMockApiKey = (
+  overrides?: Partial<ApiKeyResponse>,
+): ApiKeyResponse => ({
   id: 'api-key-1',
-  projectId: 'project-1',
   displayName: 'Test API Key',
   truncatedKey: 'sk_test_••••••••••••1234',
   createdAt: '2024-01-01T00:00:00Z',
+  updatedAt: '2024-01-01T00:00:00Z',
   createdBy: 'test@example.com',
-  expiresAt: '2025-01-01T00:00:00Z',
+  updatedBy: 'test@example.com',
+  namespace: 'project-1',
   ...overrides,
 });
 
@@ -36,14 +43,17 @@ export const generateMockCreateApiKeyData = () => ({
 });
 
 export const generateMockFullApiKey = (
-  overrides?: Partial<ApiKey>,
-): ApiKey => ({
+  overrides?: Partial<ApiKeyWithFullKey>,
+): ApiKeyWithFullKey => ({
   id: 'api-key-new',
-  projectId: 'project-1',
   displayName: 'New API Key',
-  truncatedKey: 'sk_live_abcdef1234567890abcdef1234567890',
+  truncatedKey: 'sk_live_••••••••••••7890',
   createdAt: '2024-01-01T00:00:00Z',
+  updatedAt: '2024-01-01T00:00:00Z',
   createdBy: 'test@example.com',
-  expiresAt: undefined,
+  updatedBy: 'test@example.com',
+  namespace: 'project-1',
+  ttl: null,
+  fullKey: 'sk_live_abcdef1234567890abcdef1234567890',
   ...overrides,
 });

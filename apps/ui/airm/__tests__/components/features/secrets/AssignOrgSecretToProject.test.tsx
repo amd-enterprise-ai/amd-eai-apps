@@ -9,6 +9,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { AssignOrgSecretToProject } from '@/components/features/secrets';
 import { SecretScope } from '@/types/enums/secrets';
@@ -83,6 +84,27 @@ describe('AssignOrgSecretToProject', () => {
     );
   };
 
+  const openSecretSelect = async () => {
+    await waitFor(() => expect(fetchSecrets).toHaveBeenCalled());
+    await act(async () => {
+      await fireEvent.click(
+        screen.getByRole('button', {
+          name: /form\.assignOrgSecret\.field\.secretId/,
+        }),
+      );
+    });
+    await screen.findByRole('listbox');
+  };
+
+  const selectSecretByName = async (name: string) => {
+    await openSecretSelect();
+    const listbox = screen.getByRole('listbox');
+    const option = within(listbox).getByRole('option', { name });
+    await act(async () => {
+      await fireEvent.click(option);
+    });
+  };
+
   it('should not render when isOpen is false', () => {
     act(() => {
       renderComponent(false);
@@ -150,19 +172,15 @@ describe('AssignOrgSecretToProject', () => {
       expect(fetchSecrets).toHaveBeenCalledTimes(1);
     });
 
-    const selectSecret = screen.getByText(
-      'form.assignOrgSecret.field.secretId.placeholder',
-    );
+    await openSecretSelect();
 
-    await fireEvent.click(selectSecret);
-
-    // Wait for the options to appear
-    const aSecretOptions = await screen.findAllByText('A Secret');
-    const zSecretOptions = await screen.findAllByText('Z Secret');
-
-    // expected in sorted order - verify both secrets are in the list
-    expect(aSecretOptions.length).toBeGreaterThan(0);
-    expect(zSecretOptions.length).toBeGreaterThan(0);
+    const listbox = screen.getByRole('listbox');
+    expect(
+      within(listbox).getByRole('option', { name: 'A Secret' }),
+    ).toBeInTheDocument();
+    expect(
+      within(listbox).getByRole('option', { name: 'Z Secret' }),
+    ).toBeInTheDocument();
   });
 
   it('should filter out secrets that are not Organization scope', async () => {
@@ -192,22 +210,18 @@ describe('AssignOrgSecretToProject', () => {
       expect(fetchSecrets).toHaveBeenCalledTimes(1);
     });
 
-    const selectSecret = screen.getByText(
-      'form.assignOrgSecret.field.secretId.placeholder',
-    );
+    await openSecretSelect();
 
-    await fireEvent.click(selectSecret);
-
-    // Secret 1, 3 should be selectable (not assigned to project)
-    // Secret 2 should be filtered out (already assigned to project-1)
-    // expected in sorted order
-    const secret1Options = await screen.findAllByText('My Secret 1');
-    const secret3Options = await screen.findAllByText('My Secret 3');
-
-    expect(secret1Options.length).toBeGreaterThan(0);
-    expect(secret3Options.length).toBeGreaterThan(0);
-    // Verify Secret 2 (PROJECT scope) is not in the list
-    expect(screen.queryByText('My Secret 2')).not.toBeInTheDocument();
+    const listbox = screen.getByRole('listbox');
+    expect(
+      within(listbox).getByRole('option', { name: 'My Secret 1' }),
+    ).toBeInTheDocument();
+    expect(
+      within(listbox).getByRole('option', { name: 'My Secret 3' }),
+    ).toBeInTheDocument();
+    expect(
+      within(listbox).queryByRole('option', { name: 'My Secret 2' }),
+    ).not.toBeInTheDocument();
   });
 
   it('should filter out secrets that are already assigned to the project', async () => {
@@ -240,19 +254,15 @@ describe('AssignOrgSecretToProject', () => {
       expect(fetchSecrets).toHaveBeenCalledTimes(1);
     });
 
-    const selectSecret = screen.getByText(
-      'form.assignOrgSecret.field.secretId.placeholder',
-    );
+    await openSecretSelect();
 
-    await fireEvent.click(selectSecret);
-
-    // Secret 1, 3 should be selectable (not assigned to project)
-    // Secret 2 should be filtered out (already assigned to project-1)
-    // expected in sorted order
-    const secret3Options = await screen.findAllByText('My Secret 3');
-    expect(secret3Options.length).toBeGreaterThan(0);
-    // Verify Secret 1 (already assigned) is not in the list
-    expect(screen.queryByText('My Secret 1')).not.toBeInTheDocument();
+    const listbox = screen.getByRole('listbox');
+    expect(
+      within(listbox).getByRole('option', { name: 'My Secret 3' }),
+    ).toBeInTheDocument();
+    expect(
+      within(listbox).queryByRole('option', { name: 'My Secret 1' }),
+    ).not.toBeInTheDocument();
   });
 
   it('should render detail when secret is selected', async () => {
@@ -279,20 +289,7 @@ describe('AssignOrgSecretToProject', () => {
       expect(fetchSecrets).toHaveBeenCalledTimes(1);
     });
 
-    const selectSecret = screen.getByRole('button', {
-      name: 'form.assignOrgSecret.field.secretId.placeholder form.assignOrgSecret.field.secretId.label',
-    });
-
-    expect(selectSecret).toBeInTheDocument();
-
-    await fireEvent.click(selectSecret);
-
-    await screen.findAllByText('My Secret 1');
-    const secretSelect = screen.getByRole('combobox', {
-      name: 'form.assignOrgSecret.field.secretId.label',
-      hidden: true,
-    });
-    fireEvent.change(secretSelect, { target: { value: mockSecrets[0].id } });
+    await selectSecretByName('My Secret 1');
 
     expect(
       screen.getByText(`useCase.${mockSecrets[0].useCase}`),
@@ -330,18 +327,7 @@ describe('AssignOrgSecretToProject', () => {
       expect(fetchSecrets).toHaveBeenCalledTimes(1);
     });
 
-    const selectSecret = screen.getByRole('button', {
-      name: 'form.assignOrgSecret.field.secretId.placeholder form.assignOrgSecret.field.secretId.label',
-    });
-
-    await fireEvent.click(selectSecret);
-
-    await screen.findAllByText('My Secret 1');
-    const secretSelect = screen.getByRole('combobox', {
-      name: 'form.assignOrgSecret.field.secretId.label',
-      hidden: true,
-    });
-    fireEvent.change(secretSelect, { target: { value: mockSecrets[0].id } });
+    await selectSecretByName('My Secret 1');
 
     expect(
       screen.getByText(`useCase.${SecretUseCase.GENERIC}`),
@@ -375,18 +361,7 @@ describe('AssignOrgSecretToProject', () => {
       expect(fetchSecrets).toHaveBeenCalledTimes(1);
     });
 
-    const selectSecret = screen.getByRole('button', {
-      name: 'form.assignOrgSecret.field.secretId.placeholder form.assignOrgSecret.field.secretId.label',
-    });
-
-    await fireEvent.click(selectSecret);
-
-    await screen.findAllByText('My Secret 1');
-    const secretSelect = screen.getByRole('combobox', {
-      name: 'form.assignOrgSecret.field.secretId.label',
-      hidden: true,
-    });
-    fireEvent.change(secretSelect, { target: { value: mockSecrets[0].id } });
+    await selectSecretByName('My Secret 1');
     expect(
       screen.getByText(`secretStatus.${SecretStatus.UNASSIGNED}`),
     ).toBeInTheDocument();
@@ -426,18 +401,7 @@ describe('AssignOrgSecretToProject', () => {
       expect(fetchSecrets).toHaveBeenCalledTimes(1);
     });
 
-    const selectSecret = screen.getByRole('button', {
-      name: 'form.assignOrgSecret.field.secretId.placeholder form.assignOrgSecret.field.secretId.label',
-    });
-
-    await fireEvent.click(selectSecret);
-
-    await screen.findAllByText('My Secret 1');
-    const secretSelect = screen.getByRole('combobox', {
-      name: 'form.assignOrgSecret.field.secretId.label',
-      hidden: true,
-    });
-    fireEvent.change(secretSelect, { target: { value: mockSecrets[0].id } });
+    await selectSecretByName('My Secret 1');
 
     expect(
       screen.getByText(`secretStatus.${SecretStatus.UNASSIGNED}`),
@@ -485,18 +449,7 @@ describe('AssignOrgSecretToProject', () => {
       expect(fetchSecrets).toHaveBeenCalledTimes(1);
     });
 
-    const selectSecret = screen.getByRole('button', {
-      name: 'form.assignOrgSecret.field.secretId.placeholder form.assignOrgSecret.field.secretId.label',
-    });
-
-    await fireEvent.click(selectSecret);
-
-    await screen.findAllByText('My Secret 1');
-    const secretSelect = screen.getByRole('combobox', {
-      name: 'form.assignOrgSecret.field.secretId.label',
-      hidden: true,
-    });
-    fireEvent.change(secretSelect, { target: { value: mockSecrets[0].id } });
+    await selectSecretByName('My Secret 1');
     expect(
       screen.getByText(`secretStatus.${SecretStatus.UNASSIGNED}`),
     ).toBeInTheDocument();

@@ -2,94 +2,69 @@
 //
 // SPDX-License-Identifier: MIT
 
-import {
-  IconAlertTriangle,
-  IconCircleCaretRight,
-  IconQuestionMark,
-} from '@tabler/icons-react';
+import { IconCircleCaretRight, IconQuestionMark } from '@tabler/icons-react';
 
 import {
   AvailableChartColorsKeys,
   Intent,
   StatusBadgeVariant,
 } from '@amdenterpriseai/types';
-import { WorkloadStatus } from '@/types/enums/workloads';
+import type { ResourceStatus } from '@/types/workloads';
 
 export const WORKLOAD_STATUS_COLOR_MAP: Record<
-  WorkloadStatus,
+  ResourceStatus,
   AvailableChartColorsKeys
 > = {
-  [WorkloadStatus.FAILED]: 'red',
-  [WorkloadStatus.PENDING]: 'gray',
-  [WorkloadStatus.RUNNING]: 'blue',
-  [WorkloadStatus.COMPLETE]: 'green',
-  [WorkloadStatus.DELETE_FAILED]: 'red',
-  [WorkloadStatus.TERMINATED]: 'gray',
-  [WorkloadStatus.UNKNOWN]: 'darkgray',
-  [WorkloadStatus.DELETED]: 'emerald',
-  [WorkloadStatus.DELETING]: 'fuchsia',
-  [WorkloadStatus.ADDED]: 'emerald',
-  [WorkloadStatus.DEGRADED]: 'amber',
-  [WorkloadStatus.STARTING]: 'violet',
-  [WorkloadStatus.DOWNLOADING]: 'cyan',
+  Failed: 'red',
+  Pending: 'gray',
+  Running: 'blue',
+  Complete: 'green',
+  Unknown: 'darkgray',
+  Deleted: 'emerald',
+  Deleting: 'fuchsia',
+  Degraded: 'amber',
+  Starting: 'violet',
 };
 
 export const getWorkloadStatusVariants = (
   t: (key: string) => string,
-): Record<WorkloadStatus, StatusBadgeVariant> => ({
-  [WorkloadStatus.ADDED]: {
-    label: t(`status.${WorkloadStatus.ADDED}`),
+): Record<ResourceStatus, StatusBadgeVariant> => ({
+  Complete: {
+    label: t('status.Complete'),
     intent: Intent.SUCCESS,
   },
-  [WorkloadStatus.COMPLETE]: {
-    label: t(`status.${WorkloadStatus.COMPLETE}`),
-    intent: Intent.SUCCESS,
-  },
-  [WorkloadStatus.DEGRADED]: {
-    label: t(`status.${WorkloadStatus.DEGRADED}`),
+  Degraded: {
+    label: t('status.Degraded'),
     intent: Intent.WARNING,
   },
-  [WorkloadStatus.RUNNING]: {
-    label: t(`status.${WorkloadStatus.RUNNING}`),
+  Running: {
+    label: t('status.Running'),
     color: 'primary',
     icon: IconCircleCaretRight,
   },
-  [WorkloadStatus.DELETING]: {
-    label: t(`status.${WorkloadStatus.DELETING}`),
+  Deleting: {
+    label: t('status.Deleting'),
     intent: Intent.PENDING,
     color: 'warning',
   },
-  [WorkloadStatus.PENDING]: {
-    label: t(`status.${WorkloadStatus.PENDING}`),
+  Pending: {
+    label: t('status.Pending'),
     intent: Intent.PENDING,
   },
-  [WorkloadStatus.STARTING]: {
-    label: t(`status.${WorkloadStatus.STARTING}`),
+  Starting: {
+    label: t('status.Starting'),
     intent: Intent.PENDING,
   },
-  [WorkloadStatus.FAILED]: {
-    label: t(`status.${WorkloadStatus.FAILED}`),
+  Failed: {
+    label: t('status.Failed'),
     intent: Intent.DANGER,
   },
-  [WorkloadStatus.DELETE_FAILED]: {
-    label: t(`status.${WorkloadStatus.DELETE_FAILED}`),
-    icon: IconAlertTriangle,
+  Deleted: {
+    label: t('status.Deleted'),
     intent: Intent.DANGER,
   },
-  [WorkloadStatus.DELETED]: {
-    label: t(`status.${WorkloadStatus.DELETED}`),
-    intent: Intent.DANGER,
-  },
-  [WorkloadStatus.TERMINATED]: {
-    label: t(`status.${WorkloadStatus.TERMINATED}`),
-    intent: Intent.DANGER,
-  },
-  [WorkloadStatus.DOWNLOADING]: {
-    label: t(`status.${WorkloadStatus.DOWNLOADING}`),
-    intent: Intent.PENDING,
-  },
-  [WorkloadStatus.UNKNOWN]: {
-    label: t(`status.${WorkloadStatus.UNKNOWN}`),
+  Unknown: {
+    label: t('status.Unknown'),
     icon: IconQuestionMark,
     color: 'danger',
   },

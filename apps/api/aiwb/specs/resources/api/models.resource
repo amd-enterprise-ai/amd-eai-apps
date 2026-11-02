@@ -108,6 +108,8 @@ Get models
     ...                namespace (str): Project namespace for the request (required)
     ...                expected_status (str): Expected HTTP status code (default: any)
     ...                project_id: DEPRECATED - ignored
+    ...                page (int, optional): Page number (default 1)
+    ...                page_size (int, optional): Page size (default 10, max 100)
     ...
     ...                Returns:
     ...                response: API response containing list of AIMModelResource objects (in 'data' array)
@@ -115,6 +117,7 @@ Get models
     ...                Raises:
     ...                HTTPError: If the API request fails
     [Arguments]             ${namespace}            ${expected_status}=any    ${project_id}=${None}
+    ...                     ${page}=${None}         ${page_size}=${None}
     Create api session    aiwb
 
     # Verify that namespace is not None
@@ -123,9 +126,16 @@ Get models
     END
 
     ${endpoint}=            Service API Endpoint    aiwb    endpoint=projects/${namespace}/fine-tuning/models
+    ${params}=              Create Dictionary
+    IF    $page is not None
+        Set To Dictionary       ${params}    page=${page}
+    END
+    IF    $page_size is not None
+        Set To Dictionary       ${params}    pageSize=${page_size}
+    END
 
-    Log                     GET ${endpoint}         DEBUG
-    ${response}=            Safe Get Request        ${endpoint}             expected_status=${expected_status}
+    Log                     GET ${endpoint} with params: ${params}         DEBUG
+    ${response}=            Safe Get Request        ${endpoint}             params=${params}    expected_status=${expected_status}
     Log                     List models response: status=${response.status_code}                    DEBUG
     RETURN                  ${response}
 
@@ -232,6 +242,7 @@ List models from external endpoint
     ...    Makes an HTTP GET request to /v1/models to verify compatibility with standard LLM API format
     ...    Validates that the response contains a "data" field with the list of available models
     [Arguments]             ${external_host}        ${workload_id}=${None}    ${api_key}=${None}
+    ...                     ${timeout}=180
     ${identifier}=          Set Variable If         $workload_id is not None        ${workload_id}    temp
     ${session_name}=        Create AIM external session    ${external_host}    identifier=${identifier}
 
@@ -243,7 +254,7 @@ List models from external endpoint
     END
 
     ${response}=            Get From AIM External Endpoint    ${session_name}    /v1/models
-    ...                     headers=${headers}      expected_status=200     timeout=180
+    ...                     headers=${headers}      expected_status=200     timeout=${timeout}
 
     # Verify the response follows standard LLM API format with "data" field containing model list
     ${json}=                Set Variable            ${response.json()}
@@ -259,6 +270,7 @@ Get models response from external endpoint
     ...    WITHOUT asserting the status. Lets callers distinguish a 200 listing from an
     ...    expected auth denial (401/403/404) versus unexpected errors.
     [Arguments]             ${external_host}        ${workload_id}=${None}    ${api_key}=${None}
+    ...                     ${timeout}=180
     ${identifier}=          Set Variable If         $workload_id is not None        ${workload_id}    temp
     ${session_name}=        Create AIM external session    ${external_host}    identifier=${identifier}
     ${headers}=             Create Dictionary
@@ -266,7 +278,7 @@ Get models response from external endpoint
         Set To Dictionary   ${headers}              Authorization=Bearer ${api_key}
     END
     ${response}=            Get From AIM External Endpoint    ${session_name}    /v1/models
-    ...                     headers=${headers}      expected_status=any     timeout=180
+    ...                     headers=${headers}      expected_status=any     timeout=${timeout}
     RETURN                  ${response}
 
 Model Supports Chat

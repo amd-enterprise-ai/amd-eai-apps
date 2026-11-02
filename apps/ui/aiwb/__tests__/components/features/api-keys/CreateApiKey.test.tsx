@@ -23,13 +23,15 @@ import {
 } from '@/lib/app/inference';
 import {
   AIM_DISPLAY_NAME_ANNOTATION,
-  AIMMetric,
+  AIM_MODEL_WORKLOAD_ID_LABEL,
   AIMService,
-  AIMServiceStatus,
   FINE_TUNED_LABEL,
 } from '@/types/aims';
 
-import { generateMockApiKey } from '@/__mocks__/utils/api-keys-mock';
+import {
+  generateMockApiKey,
+  generateMockFullApiKey,
+} from '@/__mocks__/utils/api-keys-mock';
 
 import CreateApiKey from '@/components/features/api-keys/CreateApiKey';
 
@@ -41,12 +43,10 @@ const mockApiKey = generateMockApiKey();
 const mockApiKeyDetails = {
   ...mockApiKey,
   ttl: null,
-  renewable: true,
-  numUses: 0,
-  groups: ['auth-group-1', 'auth-group-2', 'auth-group-finetuned'],
+  groups: ['aim-service-1', 'aim-service-2', 'aim-service-finetuned'],
 };
 
-// Mock AIM services data matching the AIMService type
+// Mock AIM services data matching the AIMService type.
 const mockAimServices: AIMService[] = [
   {
     id: 'aim-service-1',
@@ -54,7 +54,7 @@ const mockAimServices: AIMService[] = [
       name: 'gpt-4-service',
       namespace: 'project-1',
       uid: 'uid-1',
-      labels: {},
+      labels: { [AIM_MODEL_WORKLOAD_ID_LABEL]: 'workload-id-1' },
       annotations: {},
       creationTimestamp: '2023-01-11T00:00:00Z',
       ownerReferences: [],
@@ -62,19 +62,18 @@ const mockAimServices: AIMService[] = [
     spec: {
       model: { name: mockAims[0].model },
       replicas: 1,
-      overrides: {},
-      cacheModel: false,
       routing: {
-        annotations: { clusterAuthAllowedGroup: 'auth-group-1' },
+        annotations: {},
         enabled: true,
       },
       runtimeConfigName: 'default',
     },
     status: {
-      status: AIMServiceStatus.RUNNING,
+      status: 'Running',
       resolvedModel: { name: mockAims[0].model },
+      resolvedProfile: { name: 'cluster-profile', scope: 'Cluster' },
     },
-    clusterAuthGroupId: 'auth-group-1',
+    statusValue: '',
     endpoints: {
       internal: 'https://gpt4.internal',
       external: 'https://gpt4.example.com',
@@ -86,7 +85,7 @@ const mockAimServices: AIMService[] = [
       name: 'llama-2-service',
       namespace: 'project-1',
       uid: 'uid-2',
-      labels: {},
+      labels: { [AIM_MODEL_WORKLOAD_ID_LABEL]: 'workload-id-2' },
       annotations: {},
       creationTimestamp: '2023-01-12T00:00:00Z',
       ownerReferences: [],
@@ -94,19 +93,17 @@ const mockAimServices: AIMService[] = [
     spec: {
       model: { name: mockAims[1].model },
       replicas: 1,
-      overrides: {},
-      cacheModel: false,
       routing: {
-        annotations: { clusterAuthAllowedGroup: 'auth-group-2' },
+        annotations: {},
         enabled: true,
       },
       runtimeConfigName: 'default',
     },
     status: {
-      status: AIMServiceStatus.RUNNING,
+      status: 'Running',
       resolvedModel: { name: mockAims[1].model },
     },
-    clusterAuthGroupId: 'auth-group-2',
+    statusValue: '',
     endpoints: {
       internal: 'https://llama2.internal',
       external: 'https://llama2.example.com',
@@ -118,7 +115,7 @@ const mockAimServices: AIMService[] = [
       name: 'mistral-service',
       namespace: 'project-1',
       uid: 'uid-3',
-      labels: {},
+      labels: { [AIM_MODEL_WORKLOAD_ID_LABEL]: 'workload-id-3' },
       annotations: {},
       creationTimestamp: '2023-01-13T00:00:00Z',
       ownerReferences: [],
@@ -126,19 +123,17 @@ const mockAimServices: AIMService[] = [
     spec: {
       model: { name: mockAims[2].model },
       replicas: 1,
-      overrides: {},
-      cacheModel: false,
       routing: {
-        annotations: { clusterAuthAllowedGroup: 'auth-group-3' },
+        annotations: {},
         enabled: true,
       },
       runtimeConfigName: 'default',
     },
     status: {
-      status: AIMServiceStatus.RUNNING,
+      status: 'Running',
       resolvedModel: { name: mockAims[2].model },
     },
-    clusterAuthGroupId: 'auth-group-3',
+    statusValue: '',
     endpoints: {
       internal: 'https://mistral.internal',
       external: 'https://mistral.example.com',
@@ -150,7 +145,10 @@ const mockAimServices: AIMService[] = [
       name: 'finetuned-service',
       namespace: 'project-1',
       uid: 'uid-finetuned',
-      labels: { [FINE_TUNED_LABEL]: 'true' },
+      labels: {
+        [FINE_TUNED_LABEL]: 'true',
+        [AIM_MODEL_WORKLOAD_ID_LABEL]: 'workload-id-finetuned',
+      },
       annotations: { [AIM_DISPLAY_NAME_ANNOTATION]: 'my-finetuned-model' },
       creationTimestamp: '2023-01-14T00:00:00Z',
       ownerReferences: [],
@@ -158,19 +156,17 @@ const mockAimServices: AIMService[] = [
     spec: {
       model: { name: 'aim-finetuned-model' },
       replicas: 1,
-      overrides: {},
-      cacheModel: false,
       routing: {
-        annotations: { clusterAuthAllowedGroup: 'auth-group-finetuned' },
+        annotations: {},
         enabled: true,
       },
       runtimeConfigName: 'default',
     },
     status: {
-      status: AIMServiceStatus.RUNNING,
+      status: 'Running',
       resolvedModel: { name: 'aim-finetuned-model' },
     },
-    clusterAuthGroupId: 'auth-group-finetuned',
+    statusValue: '',
     endpoints: {
       internal: 'https://finetuned.internal',
       external: 'https://finetuned.example.com',
@@ -186,6 +182,10 @@ vi.mock('@/lib/app/api-keys', () => ({
 
 vi.mock('@/lib/app/aims', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/app/aims')>()),
+  getAimClusterProfileByName: vi.fn().mockResolvedValue({
+    metadata: { name: 'cluster-profile' },
+    spec: {},
+  }),
   resolveAIMServiceDisplay: vi.fn(),
 }));
 
@@ -247,7 +247,7 @@ beforeEach(() => {
       return {
         canonicalName: 'meta-llama/Llama-3.2-3B-Instruct',
         imageVersion: '0.11.0',
-        metric: AIMMetric.Default,
+        metric: 'default',
         title: 'my-finetuned-model',
         name: aimService.metadata.name,
       };
@@ -257,7 +257,7 @@ beforeEach(() => {
     return {
       canonicalName: displayName,
       imageVersion: mockAims[0].imageVersion,
-      metric: AIMMetric.Default,
+      metric: 'default',
       title: displayName,
       name: aimService.status?.resolvedModel?.name ?? aimService.metadata.name,
     };
@@ -377,18 +377,14 @@ describe('CreateApiKey', () => {
     });
 
     it('submits form with valid data', async () => {
-      mockCreateApiKey.mockResolvedValue({
-        id: 'api-key-1',
-        name: 'Test API Key',
-        truncatedKey: 'sk_live_...1234',
-        fullKey: 'sk_live_abcdef1234567890',
-        projectId: 'project-1',
-        createdAt: '2024-01-01T00:00:00Z',
-        createdBy: 'test@example.com',
-        ttl: null,
-        renewable: false,
-        numUses: 0,
-      });
+      mockCreateApiKey.mockResolvedValue(
+        generateMockFullApiKey({
+          id: 'api-key-1',
+          displayName: 'Test API Key',
+          truncatedKey: 'sk_live_...1234',
+          fullKey: 'sk_live_abcdef1234567890',
+        }),
+      );
 
       await act(async () => {
         render(<CreateApiKey {...defaultProps} />, {
@@ -414,12 +410,11 @@ describe('CreateApiKey', () => {
         }
       });
 
-      // Since validation may prevent submission, we'll check if the component is still functional
       expect(nameInput).toHaveValue('Test API Key');
-      expect(createButton).toBeInTheDocument();
 
-      // The form might not submit due to validation, so we won't assert on API call
-      // This test verifies form rendering and interaction behavior
+      await waitFor(() => {
+        expect(screen.getByText('form.keyCreated.title')).toBeInTheDocument();
+      });
     });
 
     it('handles form cancellation', async () => {
@@ -711,7 +706,7 @@ describe('CreateApiKey', () => {
     it('updates model deployment selections in edit mode', async () => {
       mockUpdateApiKeyBindings.mockResolvedValue({
         ...mockApiKeyDetails,
-        groups: ['auth-group-3'], // Only Mistral deployment
+        groups: ['aim-service-3'], // Only Mistral deployment
       });
 
       await act(async () => {
@@ -759,6 +754,78 @@ describe('CreateApiKey', () => {
           'project-1',
           mockApiKey.id,
           expect.any(Array),
+        );
+      });
+    });
+
+    it('clears the control and saves an empty binding list when every model is deselected', async () => {
+      mockUpdateApiKeyBindings.mockResolvedValue({
+        ...mockApiKeyDetails,
+        groups: [],
+      });
+
+      await act(async () => {
+        render(<CreateApiKey {...editProps} />, {
+          wrapper,
+        });
+      });
+
+      const modelDeploymentSelect = screen.getByRole('button', {
+        name: /form.create.field.modelDeployment.label/i,
+      });
+
+      // Wait for the async fetch + form reset to finish populating the
+      // trigger with the initially-bound deployments before opening the
+      // dropdown, so the reset doesn't race the popover open below.
+      await waitFor(() => {
+        expect(modelDeploymentSelect).toHaveTextContent(/AIM GPT-4 Deployment/);
+        expect(modelDeploymentSelect).toHaveTextContent(
+          /AIM LLaMA 2 Deployment/,
+        );
+        expect(modelDeploymentSelect).toHaveTextContent(/my-finetuned-model/);
+      });
+
+      await act(async () => {
+        fireEvent.click(modelDeploymentSelect);
+      });
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole('option', { name: /AIM GPT-4 Deployment/ }),
+        ).toBeInTheDocument();
+      });
+
+      // Deselect every currently-bound model by clicking its dropdown option
+      // (not the trigger's own selected-value text, which also matches
+      // getAllByText and does nothing when clicked)
+      for (const optionName of [
+        /AIM GPT-4 Deployment/,
+        /AIM LLaMA 2 Deployment/,
+        /my-finetuned-model/,
+      ]) {
+        await act(async () => {
+          fireEvent.click(screen.getByRole('option', { name: optionName }));
+        });
+      }
+
+      // Regression guard: the control must show no selection, not revert to
+      // the originally-bound models
+      await waitFor(() => {
+        expect(modelDeploymentSelect).toHaveTextContent(
+          'form.create.field.modelDeployment.placeholder',
+        );
+      });
+
+      const saveButton = screen.getByText('form.edit.action.save');
+      await act(async () => {
+        fireEvent.click(saveButton);
+      });
+
+      await waitFor(() => {
+        expect(mockUpdateApiKeyBindings).toHaveBeenCalledWith(
+          'project-1',
+          mockApiKey.id,
+          [],
         );
       });
     });
@@ -1017,18 +1084,14 @@ describe('CreateApiKey', () => {
     });
 
     it('calls createApiKey with aim_ids in create mode', async () => {
-      mockCreateApiKey.mockResolvedValue({
-        id: 'new-key-id',
-        name: 'New API Key',
-        truncatedKey: 'sk_live_...t123',
-        fullKey: 'sk_live_secret123',
-        projectId: 'project-1',
-        createdAt: '2024-01-01T00:00:00Z',
-        createdBy: 'test@example.com',
-        ttl: null,
-        renewable: false,
-        numUses: 0,
-      });
+      mockCreateApiKey.mockResolvedValue(
+        generateMockFullApiKey({
+          id: 'new-key-id',
+          displayName: 'New API Key',
+          truncatedKey: 'sk_live_...t123',
+          fullKey: 'sk_live_secret123',
+        }),
+      );
 
       await act(async () => {
         render(<CreateApiKey {...defaultProps} />, {
@@ -1075,7 +1138,7 @@ describe('CreateApiKey', () => {
         fireEvent.click(modelDeploymentSelect);
       });
 
-      // Should only show the 3 workloads with aimId and clusterAuthGroupId
+      // Should only show the 3 workloads with id and AIM_MODEL_WORKLOAD_ID_LABEL
       await waitFor(() => {
         expect(
           screen.getAllByText(/AIM GPT-4 Deployment/).length,

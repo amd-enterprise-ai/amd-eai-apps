@@ -8,15 +8,14 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 
 import { streamChatResponse } from '@/lib/app/chat';
 
-import { WorkloadType } from '@amdenterpriseai/types';
 import { Model } from '@/types/models';
-import { WorkloadStatus } from '@/types/enums/workloads';
 import { ModelOnboardingStatus } from '@/types/models';
-import { Workload } from '@/types/workloads';
+import type { Workload } from '@/types/workloads';
 
 import { ChatView } from '@/components/features/chat/ChatView';
 import ProviderWrapper from '@/__tests__/ProviderWrapper';
@@ -27,6 +26,10 @@ import { Mock, vi } from 'vitest';
 vi.mock('@/lib/app/chat', () => ({
   streamChatResponse: vi.fn(),
 }));
+
+const getModelSelectTrigger = (
+  container: HTMLElement = screen.getByTestId('model-deployment-select'),
+) => within(container).getByRole('button');
 
 const mockToast = {
   error: vi.fn(),
@@ -112,26 +115,17 @@ describe('ChatView Component', () => {
     {
       id: '1',
       chartId: '',
-      type: WorkloadType.INFERENCE,
+      type: 'INFERENCE',
       createdBy: 'test-user',
-      updatedBy: 'test-user',
+      updatedBy: null,
+      namespace: 'test-namespace',
+      description: null,
+      endpoints: {},
       createdAt: '',
       updatedAt: '',
-      status: WorkloadStatus.RUNNING,
+      status: 'Running',
       displayName: 'Model 1',
       name: 'mw-test-workload',
-      output: {
-        internalHost: 'localhost:8080',
-      },
-      allocatedResources: {
-        gpuCount: 3,
-        vram: 8589934592.0,
-      },
-      userInputs: {
-        canonicalName: 'ModelOrg/Model-1',
-        model:
-          's3://default-bucket/demo/finetuned-models/ModelOrg/Model-1/model-finetune',
-      },
     },
   ];
 
@@ -520,7 +514,7 @@ describe('ChatView Component', () => {
       },
     ];
     const workloadDisplayInfo = {
-      '1': { imageVersion: '1.0.0', metric: 'throughput' },
+      '1': { imageVersion: '1.0.0', metric: 'throughput', tags: [] },
     };
 
     await act(async () => {
@@ -637,7 +631,7 @@ describe('ChatView Component', () => {
     });
 
     const modelSelect = screen.getByTestId('model-deployment-select');
-    expect(modelSelect).not.toHaveTextContent('Model 1');
+    expect(getModelSelectTrigger()).not.toHaveTextContent('Model 1');
     expect(screen.getByTestId('chat-input')).toBeDisabled();
   });
 
@@ -658,8 +652,8 @@ describe('ChatView Component', () => {
     });
 
     const modelSelect = screen.getByTestId('model-deployment-select');
-    expect(modelSelect).not.toHaveTextContent('Model 1');
-    expect(modelSelect).not.toHaveTextContent('Model 2');
+    expect(getModelSelectTrigger()).not.toHaveTextContent('Model 1');
+    expect(getModelSelectTrigger()).not.toHaveTextContent('Model 2');
     expect(screen.getByTestId('chat-input')).toBeDisabled();
   });
 
@@ -675,7 +669,7 @@ describe('ChatView Component', () => {
     });
 
     const modelSelect = screen.getByTestId('model-deployment-select');
-    expect(modelSelect).not.toHaveTextContent('Model 1');
+    expect(getModelSelectTrigger()).not.toHaveTextContent('Model 1');
     expect(screen.getByTestId('chat-input')).toBeDisabled();
   });
 
@@ -722,8 +716,12 @@ describe('ChatView Component', () => {
 
     const modelSelects = screen.getAllByTestId('model-deployment-select');
     expect(modelSelects).toHaveLength(2);
-    expect(modelSelects[0]).not.toHaveTextContent('Model 1');
-    expect(modelSelects[1]).not.toHaveTextContent('Model 1');
+    expect(getModelSelectTrigger(modelSelects[0])).not.toHaveTextContent(
+      'Model 1',
+    );
+    expect(getModelSelectTrigger(modelSelects[1])).not.toHaveTextContent(
+      'Model 1',
+    );
   });
 
   it('respects the workload URL parameter over auto-selection', async () => {
@@ -771,7 +769,7 @@ describe('ChatView Component', () => {
     });
 
     const modelSelect = screen.getByTestId('model-deployment-select');
-    expect(modelSelect).not.toHaveTextContent('Model 1');
+    expect(getModelSelectTrigger()).not.toHaveTextContent('Model 1');
     expect(screen.getByTestId('chat-input')).toBeDisabled();
   });
 

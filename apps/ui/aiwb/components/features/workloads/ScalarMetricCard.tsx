@@ -7,7 +7,8 @@ import { useMemo } from 'react';
 import { useTranslation } from 'next-i18next';
 
 import { StatisticsCard } from '@amdenterpriseai/components';
-import { MetricScalarResponse, TimeRange } from '@amdenterpriseai/types';
+import { TimeRange } from '@amdenterpriseai/types';
+import type { components } from '@/types/api';
 import { getScalarMetric } from '@/lib/app/metrics';
 import { useQuery } from '@tanstack/react-query';
 import { useProject } from '@/contexts/ProjectContext';
@@ -19,7 +20,7 @@ import {
 
 export interface ScalarMetricConfig {
   /** Backend metric slug (e.g. 'max_requests') */
-  metric: string;
+  metric: components['schemas']['MetricName'];
   /** Locale key under details.metrics (e.g. 'maxRequests') */
   localeKey: MetricLocaleKey;
   /** Transform raw scalar before display (default: Math.round) */
@@ -49,7 +50,7 @@ export const ScalarMetricCard: React.FC<Props> = ({
   const { activeProject } = useProject();
   const { metric, localeKey, transform = defaultTransform, formatter } = config;
 
-  const { data, isLoading } = useQuery<MetricScalarResponse>({
+  const { data, isLoading } = useQuery({
     queryKey: [
       'project',
       activeProject,

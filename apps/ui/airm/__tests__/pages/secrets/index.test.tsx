@@ -228,7 +228,7 @@ describe('secrets page', async () => {
     act(() => {
       fireEvent.click(
         screen.getByRole('button', {
-          name: 'data.refresh',
+          name: 'actions.refresh.title',
         }),
       );
     });

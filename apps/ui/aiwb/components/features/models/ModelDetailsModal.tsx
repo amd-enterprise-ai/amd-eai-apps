@@ -2,17 +2,21 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { Button, Chip, Modal } from '@amdenterpriseai/components';
+import { Chip, Modal } from '@amdenterpriseai/components';
 
 import { useTranslation } from 'next-i18next';
 
-import { AIM_MODEL_NAME_LABEL, AIMModel, AIMStatus } from '@/types/aims';
+import {
+  AIM_MODEL_NAME_LABEL,
+  AIM_MODEL_SOURCE_DESCRIPTION_ANNOTATION,
+} from '@/types/aims';
+import type { components } from '@/types/api';
 import { resolveBaseModelSource } from '@/lib/app/aims';
 
 import AIMConditionsList from '@/components/shared/AIMConditionsList';
 
 interface Props {
-  model: AIMModel | undefined;
+  model: components['schemas']['AIMModelResource'] | undefined;
   onOpenChange: (isOpen: boolean) => void;
   isOpen: boolean;
 }
@@ -27,6 +31,8 @@ const ModelDetailsModal = ({ model, isOpen, onOpenChange }: Props) => {
   const canonicalName = model
     ? resolveBaseModelSource(model)?.modelId
     : undefined;
+  const description =
+    model?.metadata.annotations?.[AIM_MODEL_SOURCE_DESCRIPTION_ANNOTATION];
   const conditions = model?.status?.conditions ?? [];
 
   return (
@@ -39,48 +45,53 @@ const ModelDetailsModal = ({ model, isOpen, onOpenChange }: Props) => {
               modelName: name ?? 'Model',
             }) as string
           }
-          size="xl"
-          footer={
-            <Button color="default" onPress={handleClose}>
-              {t('list.actions.details.modal.close')}
-            </Button>
-          }
+          size="lg"
         >
           {model ? (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <p className="font-semibold text-default-600">
+                  <p className="font-semibold text-foreground">
                     {t('list.actions.details.modal.fields.name')}
                   </p>
                   <p>{name}</p>
                 </div>
                 {canonicalName && (
                   <div>
-                    <p className="font-semibold text-default-600">
+                    <p className="font-semibold text-foreground">
                       {t('list.actions.details.modal.fields.baseModel')}
                     </p>
                     <p className="font-mono">{canonicalName}</p>
                   </div>
                 )}
+                {description && (
+                  <div className="col-span-2">
+                    <p className="font-semibold text-foreground">
+                      {t('list.actions.details.modal.fields.description')}
+                    </p>
+                    <p className="whitespace-pre-wrap break-words">
+                      {description}
+                    </p>
+                  </div>
+                )}
                 <div>
-                  <p className="font-semibold text-default-600">
+                  <p className="font-semibold text-foreground">
                     {t('list.actions.details.modal.fields.resourceName')}
                   </p>
                   <p className="font-mono text-xs">{model.metadata.name}</p>
                 </div>
                 {model.status?.status && (
                   <div>
-                    <p className="font-semibold text-default-600">
+                    <p className="font-semibold text-foreground">
                       {t('list.actions.details.modal.fields.status')}
                     </p>
                     <Chip
                       size="sm"
                       color={
-                        model.status.status === AIMStatus.READY
+                        model.status.status === 'Ready'
                           ? 'success'
-                          : model.status.status === AIMStatus.DEGRADED ||
-                              model.status.status === AIMStatus.FAILED
+                          : model.status.status === 'Degraded' ||
+                              model.status.status === 'Failed'
                             ? 'danger'
                             : 'warning'
                       }
@@ -94,7 +105,7 @@ const ModelDetailsModal = ({ model, isOpen, onOpenChange }: Props) => {
 
               {conditions.length > 0 && (
                 <div>
-                  <p className="font-semibold text-default-600 mb-2">
+                  <p className="font-semibold text-foreground mb-2">
                     {t('list.actions.details.modal.fields.conditions')}
                   </p>
                   <AIMConditionsList conditions={conditions} />
@@ -102,7 +113,7 @@ const ModelDetailsModal = ({ model, isOpen, onOpenChange }: Props) => {
               )}
             </div>
           ) : (
-            <div className="p-4 text-default-600">
+            <div className="p-4 text-foreground">
               {t('list.actions.details.modal.modelNotFound')}
             </div>
           )}

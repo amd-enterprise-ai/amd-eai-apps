@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { useState } from 'react';
 import {
   DefaultValues,
   FieldErrors,
@@ -13,8 +12,54 @@ import {
 } from 'react-hook-form';
 import { ActionButton } from '../Buttons';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { v4 as uuidv4 } from 'uuid';
 import { type ZodType, type ZodTypeDef } from 'zod';
+
+/**
+ * Shallow merge for submit/reset: parsed resolver output overwrites current values,
+ * but keys missing from the patch or explicitly `undefined` in the patch keep the
+ * current value. Zod (especially optional fields) can omit keys from `parse` output;
+ * with `shouldUnregister` + `form.reset(parsed)` that would otherwise drop live fields
+ * such as GPU preemption policy until the next full reload.
+ */
+function mergeParsedFormValues<T extends FieldValues>(
+  base: T,
+  patch: Record<string, unknown>,
+): T {
+  const out = { ...base };
+  for (const key of Object.keys(patch)) {
+    const v = patch[key];
+    if (v !== undefined) {
+      (out as Record<string, unknown>)[key] = v;
+    }
+  }
+  return out as T;
+}
+
+/** Reset form state and re-broadcast values so controlled Form* fields stay in sync. */
+export function resetFormValues<T extends FieldValues>(
+  form: UseFormReturn<T>,
+  values: DefaultValues<T> | T | undefined,
+  options?: { shouldDirty?: boolean; shouldValidate?: boolean },
+): void {
+  form.reset(values);
+  const patch = values as Record<string, unknown> | undefined;
+  if (!patch) {
+    return;
+  }
+  const shouldDirty = options?.shouldDirty ?? false;
+  const shouldValidate = options?.shouldValidate ?? false;
+  queueMicrotask(() => {
+    for (const key of Object.keys(patch)) {
+      const v = patch[key];
+      if (v !== undefined) {
+        form.setValue(key as never, v as never, {
+          shouldDirty,
+          shouldValidate,
+        });
+      }
+    }
+  });
+}
 
 interface Props<T extends FieldValues> {
   className?: string;
@@ -105,7 +150,7 @@ interface Props<T extends FieldValues> {
  *
  * **FormFieldComponent** is a generic renderer: it takes a single `FormField<T>` config (name, label,
  * placeholder, optional `component`, icon, etc.) and renders one field. It passes `register(name)`,
- * `errorMessage`, and common props (label, variant, labelPlacement) to the underlying component;
+ * `errorMessage`, and common props (label, variant) to the underlying component;
  * if no `component` is provided, it uses HeroUI `Input`. Use it when your form is **config-driven** —
  * you have an array of FormField configs and map over them instead of writing JSX per field.
  *
@@ -165,7 +210,7 @@ interface Props<T extends FieldValues> {
  *   A Form* wrapper can bridge that API to react-hook-form in one place so every form
  *   doesn't repeat the wiring.
  *
- * - You want consistent styling and default props (labelPlacement, variant, error
+ * - You want consistent styling and default props (variant, error
  *   display, startContent for icons) for that control across all forms. The Form*
  *   component is the single place to set those defaults and keep styling uniform.
  *
@@ -214,8 +259,6 @@ export const ManagedForm = <T extends Record<string, any>>({
   submitButtonText,
   formRef,
 }: Props<T>) => {
-  const [formKey, setFormKey] = useState<string>(uuidv4());
-
   const form = useForm<T>({
     mode: 'onChange',
     reValidateMode: 'onChange',
@@ -228,12 +271,12 @@ export const ManagedForm = <T extends Record<string, any>>({
   });
 
   const onSubmit = (data: Record<string, unknown>) => {
-    // call onFormSuccess with the parsed data
     if (!isActioning && onFormSuccess) {
-      onFormSuccess(data as T);
-      // Reset to submitted data so the form stays filled and conditional fields work:
-      // if the user then hides a field and submits again, remaining values are preserved.
-      form.reset(data as T);
+      const merged = mergeParsedFormValues(form.getValues() as T, data);
+      onFormSuccess(merged);
+      // Reset to merged submit snapshot so optional keys omitted by Zod do not clear
+      // fields that were present in form state (see mergeParsedFormValues).
+      resetFormValues(form, merged);
     }
   };
 
@@ -247,9 +290,13 @@ export const ManagedForm = <T extends Record<string, any>>({
   return (
     <form
       ref={formRef}
-      onSubmit={form.handleSubmit(onSubmit, onError)}
+      onSubmit={(event) => {
+        // Portalled forms stay in their parent's React tree, so their submit
+        // events must not trigger validation on an ancestor form.
+        event.stopPropagation();
+        void form.handleSubmit(onSubmit, onError)(event);
+      }}
       className={className}
-      key={formKey}
     >
       {renderFields(form)}
       {showResetButton || showSubmitButton ? (
@@ -260,10 +307,7 @@ export const ManagedForm = <T extends Record<string, any>>({
               aria-label={resetButtonText}
               isDisabled={isActioning}
               type="button"
-              onPress={() => {
-                setFormKey(uuidv4());
-                form.reset(defaultValues);
-              }}
+              onPress={() => resetFormValues(form, defaultValues)}
             >
               {resetButtonText}
             </ActionButton>

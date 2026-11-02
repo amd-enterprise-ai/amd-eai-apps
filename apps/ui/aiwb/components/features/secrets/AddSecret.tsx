@@ -10,8 +10,8 @@ import {
   DrawerFooter,
   DrawerHeader,
   ActionButton,
-  CloseButton,
   FormInput,
+  FormPasswordInput,
   FormSelect,
   FormTextarea,
   ManagedForm,
@@ -26,35 +26,37 @@ import { useTranslation } from 'next-i18next';
 
 import { useSystemToast } from '@amdenterpriseai/hooks';
 
+import { createS3SecretRequest } from '@/lib/app/s3-secret';
 import { createProjectSecret } from '@/lib/app/secrets';
 
 import { APIRequestError } from '@amdenterpriseai/utils/app';
 
 import { SecretUseCase } from '@amdenterpriseai/types';
 
-import {
-  SecretResponseData,
-  CreateSecretRequest,
-  CreateSecretForm,
-} from '@/types/secrets';
+import { SecretResponseData, CreateSecretRequest } from '@/types/secrets';
 
 import { z } from 'zod';
 
-const DRAWER_MOTION_PROPS = {
-  variants: {
-    enter: { opacity: 1, x: 0 },
-    exit: { x: 100, opacity: 0 },
-  },
-};
-const DRAWER_BACKDROP = 'blur';
-const DRAWER_CLASSES = {
-  header: 'border-b-1 border-default-200 w-full pr-[64px]',
-  body: 'py-6',
-  closeButton: 'top-2.5 right-2.5',
-};
+const secretDataEntrySchema = z.object({
+  key: z.string(),
+  value: z.string(),
+});
+
+const secretFormSchema = z.object({
+  displayName: z.string(),
+  useCase: z.nativeEnum(SecretUseCase),
+  key: z.string().optional(),
+  value: z.string().optional(),
+  s3AccessKeyId: z.string().optional(),
+  s3SecretAccessKey: z.string().optional(),
+  dataEntries: z.array(secretDataEntrySchema).optional(),
+});
+
+type CreateSecretForm = z.infer<typeof secretFormSchema>;
 
 const USE_CASE_OPTIONS = [
   SecretUseCase.HUGGING_FACE,
+  SecretUseCase.S3,
   SecretUseCase.IMAGE_PULL_SECRET,
   SecretUseCase.GENERIC,
 ];
@@ -77,22 +79,50 @@ function AddSecretKeyValueFields({
 }) {
   const useCase = form.watch('useCase') as SecretUseCase | undefined;
   const isOther = useCase === SecretUseCase.GENERIC;
+  const isS3 = useCase === SecretUseCase.S3;
 
   const { fields, append, remove } = useFieldArray({
     control: form.control,
     name: 'dataEntries',
   });
+  const previousUseCaseRef = useRef<SecretUseCase | undefined>(undefined);
 
   useEffect(() => {
+    if (!useCase) {
+      previousUseCaseRef.current = undefined;
+      return;
+    }
+
+    // Only reset sibling fields when the user actually switches use case.
+    if (previousUseCaseRef.current === useCase) {
+      return;
+    }
+    previousUseCaseRef.current = useCase;
+
     const predefined = useCase ? PREDEFINED_KEYS[useCase] : undefined;
-    form.clearErrors(['displayName', 'key', 'value', 'dataEntries']);
+    form.clearErrors([
+      'displayName',
+      'key',
+      'value',
+      'dataEntries',
+      's3AccessKeyId',
+      's3SecretAccessKey',
+    ]);
     if (isOther) {
+      form.setValue('dataEntries', [{ key: '', value: '' }]);
+      form.setValue('s3AccessKeyId', '');
+      form.setValue('s3SecretAccessKey', '');
+    } else if (isS3) {
+      form.setValue('key', '');
+      form.setValue('value', '');
       form.setValue('dataEntries', [{ key: '', value: '' }]);
     } else {
       form.setValue('value', '');
       form.setValue('key', predefined ?? '');
+      form.setValue('s3AccessKeyId', '');
+      form.setValue('s3SecretAccessKey', '');
     }
-  }, [form, useCase, isOther]);
+  }, [form, useCase, isOther, isS3]);
 
   if (isOther) {
     return (
@@ -100,7 +130,7 @@ function AddSecretKeyValueFields({
         {fields.map((field, index) => (
           <div
             key={field.id}
-            className="flex flex-col gap-2 rounded-lg border border-default-200 p-3"
+            className="flex flex-col gap-2 rounded-lg border border-default p-3"
           >
             <div className="flex items-end gap-2">
               <FormInput<CreateSecretForm>
@@ -108,7 +138,6 @@ function AddSecretKeyValueFields({
                 name={`dataEntries.${index}.key` as CreateSecretFormFieldPath}
                 label={t('form.add.field.key')}
                 placeholder={t('form.add.field.keyPlaceholder')}
-                variant="bordered"
                 className="flex-1"
               />
               {fields.length > 1 && (
@@ -130,7 +159,6 @@ function AddSecretKeyValueFields({
               label={t('form.add.field.value')}
               placeholder={t('form.add.field.valuePlaceholder')}
               minRows={3}
-              maxRows={15}
             />
           </div>
         ))}
@@ -142,6 +170,31 @@ function AddSecretKeyValueFields({
         >
           {t('form.add.field.addEntry')}
         </Button>
+      </div>
+    );
+  }
+
+  if (isS3) {
+    return (
+      <div className="flex flex-col gap-4">
+        <FormInput<CreateSecretForm>
+          form={form}
+          name="s3AccessKeyId"
+          label={t('form.add.field.s3.accessKeyIdLabel')}
+          placeholder={t('form.add.field.s3.accessKeyIdPlaceholder')}
+          isRequired
+        />
+        <FormPasswordInput<CreateSecretForm>
+          form={form}
+          name="s3SecretAccessKey"
+          label={t('form.add.field.s3.secretAccessKeyLabel')}
+          placeholder={t('form.add.field.s3.secretAccessKeyPlaceholder')}
+          isRequired
+          preventPasswordManagerPrompt
+          data-1p-ignore
+          data-lpignore="true"
+          data-bwignore
+        />
       </div>
     );
   }
@@ -160,7 +213,6 @@ function AddSecretKeyValueFields({
         name="key"
         label={t('form.add.field.key')}
         placeholder={t('form.add.field.keyPlaceholder')}
-        variant="bordered"
         isDisabled
       />
       <FormTextarea<CreateSecretForm>
@@ -169,27 +221,26 @@ function AddSecretKeyValueFields({
         label={t('form.add.field.value')}
         placeholder={valuePlaceholder}
         minRows={15}
-        maxRows={30}
       />
       {useCase === SecretUseCase.HUGGING_FACE && (
-        <p className="text-sm text-default-500">
+        <p className="text-sm text-muted">
           <a
             href="https://huggingface.co/docs/hub/security-tokens"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-primary hover:underline"
+            className="text-accent hover:underline"
           >
             {t('form.add.field.helpHuggingFace')}
           </a>
         </p>
       )}
       {useCase === SecretUseCase.IMAGE_PULL_SECRET && (
-        <p className="text-sm text-default-500">
+        <p className="text-sm text-muted">
           <a
             href="https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-primary hover:underline"
+            className="text-accent hover:underline"
           >
             {t('form.add.field.helpImagePull')}
           </a>
@@ -216,11 +267,22 @@ export const AddSecret: React.FC<Props> = ({
   const { toast } = useSystemToast();
   const queryClient = useQueryClient();
   const formRef = useRef<HTMLFormElement>(null);
+  const defaultFormValues = useMemo<Partial<CreateSecretForm>>(
+    () => ({
+      displayName: '',
+      key: '',
+      value: '',
+      s3AccessKeyId: '',
+      s3SecretAccessKey: '',
+      dataEntries: [{ key: '', value: '' }],
+    }),
+    [],
+  );
 
   const formSchema = useMemo(
     () =>
-      z
-        .object({
+      secretFormSchema
+        .extend({
           displayName: z
             .string()
             .trim()
@@ -228,8 +290,6 @@ export const AddSecret: React.FC<Props> = ({
             .min(2, { message: t('form.add.validation.nameTooShort') })
             .max(253, { message: t('form.add.validation.nameTooLong') }),
           useCase: z.nativeEnum(SecretUseCase, { required_error: '' }),
-          key: z.string().optional(),
-          value: z.string().optional(),
           dataEntries: z
             .array(
               z.object({
@@ -250,7 +310,10 @@ export const AddSecret: React.FC<Props> = ({
         )
         .refine(
           (data) => {
-            if (data.useCase !== SecretUseCase.GENERIC) {
+            if (
+              data.useCase !== SecretUseCase.GENERIC &&
+              data.useCase !== SecretUseCase.S3
+            ) {
               return (data.value ?? '').trim().length > 0;
             }
             return true;
@@ -297,6 +360,26 @@ export const AddSecret: React.FC<Props> = ({
             message: t('form.add.validation.dockerConfigJsonInvalid'),
             path: ['value'],
           },
+        )
+        .refine(
+          (data) => {
+            if (data.useCase !== SecretUseCase.S3) return true;
+            return (data.s3AccessKeyId ?? '').trim().length > 0;
+          },
+          {
+            message: t('form.add.validation.s3AccessKeyRequired'),
+            path: ['s3AccessKeyId'],
+          },
+        )
+        .refine(
+          (data) => {
+            if (data.useCase !== SecretUseCase.S3) return true;
+            return (data.s3SecretAccessKey ?? '').trim().length > 0;
+          },
+          {
+            message: t('form.add.validation.s3SecretKeyRequired'),
+            path: ['s3SecretAccessKey'],
+          },
         ),
     [t, secrets],
   );
@@ -333,6 +416,14 @@ export const AddSecret: React.FC<Props> = ({
             token: Buffer.from(values.value ?? '', 'utf-8').toString('base64'),
           };
           break;
+        case SecretUseCase.S3: {
+          secretData = createS3SecretRequest({
+            name: values.displayName,
+            accessKeyId: values.s3AccessKeyId ?? '',
+            secretAccessKey: values.s3SecretAccessKey ?? '',
+          }).data;
+          break;
+        }
         case SecretUseCase.GENERIC: {
           const entries = values.dataEntries ?? [];
           for (const entry of entries) {
@@ -371,27 +462,17 @@ export const AddSecret: React.FC<Props> = ({
       isOpen={isOpen}
       onOpenChange={onClose}
       onClose={onClose}
-      motionProps={DRAWER_MOTION_PROPS}
-      backdrop={DRAWER_BACKDROP}
-      closeButton={<CloseButton />}
-      hideCloseButton={isPending}
       isDismissable={!isPending}
-      classNames={DRAWER_CLASSES}
     >
-      <DrawerContent>
+      <DrawerContent hideCloseButton={isPending}>
         <DrawerHeader>
           {t(`form.add.title.${namespace ? 'project' : 'general'}`)}
         </DrawerHeader>
-        <DrawerBody className="w-full">
+        <DrawerBody>
           <ManagedForm<CreateSecretForm>
             formRef={formRef}
-            validationSchema={formSchema as z.ZodType<CreateSecretForm>}
-            defaultValues={{
-              displayName: '',
-              key: '',
-              value: '',
-              dataEntries: [{ key: '', value: '' }],
-            }}
+            validationSchema={formSchema}
+            defaultValues={defaultFormValues}
             onFormSuccess={handleFormSuccess}
             isActioning={isPending}
             renderFields={(form) => (
@@ -414,6 +495,7 @@ export const AddSecret: React.FC<Props> = ({
                   {USE_CASE_OPTIONS.map((secretUseCase) => (
                     <SelectItem
                       key={secretUseCase}
+                      textValue={t(`useCase.${secretUseCase}`)}
                       data-testid={`use-case-option-${secretUseCase}`}
                     >
                       {t(`useCase.${secretUseCase}`)}

@@ -2,44 +2,11 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { SecretUseCase } from '@amdenterpriseai/types';
+import type { components } from '@/types/api';
 
-export type SecretResponseData = {
-  metadata: SecretMetadata;
-  useCase: SecretUseCase;
-  displayName: string;
-};
+// Wire shapes are sourced from the generated OpenAPI schema so the FE can never
+// drift from the backend. `metadata.namespace` and `useCase` are nullable here
+// (K8s metadata / label-derived), so consumers must tolerate null/undefined.
+export type SecretResponseData = components['schemas']['SecretResponse'];
 
-type SecretMetadata = {
-  name: string;
-  namespace: string;
-  uid?: string;
-  labels?: Record<string, string>;
-  annotations?: Record<string, string>;
-  creationTimestamp: string;
-};
-
-export type CreateSecretRequest = {
-  displayName: string;
-  data: Record<string, string>;
-  useCase: SecretUseCase;
-};
-
-export type SecretDataEntry = {
-  key: string;
-  value: string;
-};
-
-export type CreateSecretForm = {
-  displayName: string;
-  useCase: SecretUseCase;
-  key?: string;
-  value?: string;
-  dataEntries?: SecretDataEntry[];
-};
-
-export type HuggingFaceTokenData = {
-  selectedToken?: string;
-  name?: string;
-  token?: string;
-};
+export type CreateSecretRequest = components['schemas']['SecretCreate'];

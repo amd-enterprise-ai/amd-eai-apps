@@ -313,10 +313,18 @@ def test_sanitize_label_value_ends_with_separator_after_truncation():
     # Create a string that ends with a separator when truncated
     value = "a" * 62 + "-b"
     result = sanitize_label_value(value, max_length=63)
-    # The function truncates to max_length, which keeps the separator
-    # This is a known limitation - the function doesn't re-strip after truncation
-    assert len(result) == 63
-    assert result == "a" * 62 + "-"
+    assert len(result) == 62
+    assert result == "a" * 62
+    assert result[-1].isalnum()
+
+
+def test_sanitize_label_value_s3_uri_truncation_keeps_valid_ending():
+    """Long S3-style source labels remain valid after truncation."""
+    value = "s3://default-bucket/qa-test/custom-models/llama-3-2-1b-instruct-clyde-import-bcfa0293/weights/"
+    result = sanitize_label_value(value, max_length=63)
+    assert len(result) <= 63
+    assert result[0].isalnum()
+    assert result[-1].isalnum()
 
 
 def test_sanitize_label_value_numeric_start_and_end():

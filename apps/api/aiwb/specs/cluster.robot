@@ -20,8 +20,10 @@ User can see aim-engine image options for runtime profiles
     And the aim-engine image catalog lists a discovered family with repository and tags
 
 User can see accelerators available on the cluster
-    [Documentation]    The workbench reports which accelerator products are present;
-    ...    an empty list is valid when no AMD GPU nodes are labeled.
+    [Documentation]    The workbench reports accelerator products in a list. The endpoint
+    ...    permits an empty list when no aim-accelerator node labels are present; the separate
+    ...    hardware/family assertion requires a non-empty list because it cannot validate an
+    ...    image family without reported hardware.
     [Tags]    cluster    smoke    list    skip-in-ci
 
     Given a ready project with user access exists
@@ -29,3 +31,14 @@ User can see accelerators available on the cluster
     Then response status should be 200
     And accelerators are returned as a list
     And each accelerator entry describes a product and capacity
+
+Base image families match the cluster accelerator hardware
+    [Documentation]    The workbench exposes every base-image family the cluster's
+    ...    accelerator hardware requires. Runs on real hardware, so expectations come
+    ...    from the cluster's reported accelerators rather than per-environment values.
+    [Tags]    cluster    smoke    list    skip-in-ci
+
+    Given a ready project with user access exists
+    And the cluster reports accelerator hardware
+    When the user requests base image families for the reported hardware
+    Then the required base image families should be available

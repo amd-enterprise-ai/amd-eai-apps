@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 import { fireEvent, render, screen } from '@testing-library/react';
+import { vi } from 'vitest';
 
 import { ProjectSelect } from '@/components/shared/ProjectSelect/ProjectSelect';
 
@@ -44,7 +45,6 @@ vi.mock('@amdenterpriseai/components', () => ({
     selectedKeys,
     isDisabled,
     disallowEmptySelection: _disallowEmptySelection,
-    size,
     startContent,
     className,
     ...props
@@ -52,7 +52,6 @@ vi.mock('@amdenterpriseai/components', () => ({
     <div
       className={className}
       data-disabled={isDisabled}
-      data-size={size}
       data-selected={selectedKeys?.[0] || ''}
       {...props}
     >
@@ -153,20 +152,6 @@ describe('ProjectSelect', () => {
 
     expect(screen.getByTestId('custom-icon')).toBeInTheDocument();
     expect(screen.queryByTestId('checkup-list-icon')).not.toBeInTheDocument();
-  });
-
-  it('should apply size prop', () => {
-    render(<ProjectSelect size="lg" />);
-
-    const select = screen.getByTestId('project-select');
-    expect(select).toHaveAttribute('data-size', 'lg');
-  });
-
-  it('should use default size of sm when not provided', () => {
-    render(<ProjectSelect />);
-
-    const select = screen.getByTestId('project-select');
-    expect(select).toHaveAttribute('data-size', 'sm');
   });
 
   it('should be disabled when disabled prop is true', () => {

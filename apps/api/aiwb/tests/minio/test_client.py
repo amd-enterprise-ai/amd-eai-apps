@@ -6,6 +6,7 @@
 Tests for the MinioClient class and related functionality.
 """
 
+import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,7 +17,7 @@ from minio.deleteobjects import DeleteError, DeleteObject
 from minio.error import S3Error
 
 from api_common.exceptions import ExternalServiceError
-from app.minio import MinioClient, get_minio_client
+from app.minio import MinioClient, get_minio_client, get_minio_external_client
 
 
 def test_init_with_custom_values():
@@ -229,13 +230,14 @@ def test_get_minio_client_returns_client():
 
 
 def test_get_minio_client_missing_client():
-    """Test that get_minio_client raises an exception when client is not initialized."""
+    """Storage that was never configured is reported as the same upstream failure as storage that
+    refuses or cannot be reached, so routes answer with their documented 502 rather than a 500."""
     mock_request = MagicMock(spec=Request)
     mock_request.app.state.minio_client = None
 
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(ExternalServiceError) as exc_info:
         get_minio_client(mock_request)
-    assert "Minio client not available" in str(exc_info.value)
+    assert "Object storage is not available" in str(exc_info.value)
 
 
 def test_get_minio_client_no_attribute():
@@ -245,9 +247,20 @@ def test_get_minio_client_no_attribute():
     if hasattr(mock_request.app.state, "minio_client"):
         delattr(mock_request.app.state, "minio_client")
 
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(ExternalServiceError) as exc_info:
         get_minio_client(mock_request)
-    assert "Minio client not available" in str(exc_info.value)
+    assert "Object storage is not available" in str(exc_info.value)
+
+
+def test_get_minio_external_client_missing_client():
+    """The presigning client reports its absence the same way, so a route resolving both fails
+    identically whichever one is missing."""
+    mock_request = MagicMock(spec=Request)
+    mock_request.app.state.minio_external_client = None
+
+    with pytest.raises(ExternalServiceError) as exc_info:
+        get_minio_external_client(mock_request)
+    assert "Object storage is not available" in str(exc_info.value)
 
 
 def test_stream_object_retries_on_transient_connection_error():
@@ -307,6 +320,56 @@ def test_stat_object():
 
     client.stat_object.assert_called_once_with("bucket", "object")
     assert result.size == 1024
+
+
+def test_get_object_sizes():
+    """Object listing exposes authoritative sizes by object name."""
+    client = MagicMock(spec=Minio)
+    first = Object("bucket", "prefix/first.jsonl", size=128)
+    second = Object("bucket", "prefix/second.jsonl", size=256)
+    client.list_objects.return_value = iter([first, second])
+    minio_client = MinioClient(host="http://localhost:9000", access_key="access_key", secret_key="secret_key")
+    minio_client.client = client
+
+    result = minio_client.get_object_sizes("bucket", "prefix/")
+
+    assert result == {
+        "prefix/first.jsonl": 128,
+        "prefix/second.jsonl": 256,
+    }
+    client.list_objects.assert_called_once_with("bucket", prefix="prefix/", recursive=True)
+
+
+def test_generate_presigned_download_url():
+    """Test generate_presigned_download_url delegates to the underlying minio client."""
+    client = MagicMock(spec=Minio)
+    minio_client = MinioClient(host="http://localhost:9000", access_key="access_key", secret_key="secret_key")
+    minio_client.client = client
+    client.presigned_get_object.return_value = "https://storage.example.com/presigned"
+
+    expires = datetime.timedelta(minutes=15)
+    result = minio_client.generate_presigned_download_url("bucket", "object", expires)
+
+    client.presigned_get_object.assert_called_once_with("bucket", "object", expires=expires, request_date=None)
+    assert result == "https://storage.example.com/presigned"
+
+
+def test_presigned_urls_carry_the_signing_instant_they_are_given():
+    """A signature's life runs from a timestamp inside it, so a caller minting a batch must be able
+    to fix that timestamp — otherwise every URL takes its own reading and the batch has no single
+    deadline. Uploads route around presigned_put_object, which exposes no such parameter."""
+    client = MagicMock(spec=Minio)
+    minio_client = MinioClient(host="http://localhost:9000", access_key="access_key", secret_key="secret_key")
+    minio_client.client = client
+
+    expires = datetime.timedelta(minutes=15)
+    signed_at = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
+
+    minio_client.generate_presigned_upload_url("bucket", "object", expires, request_date=signed_at)
+    minio_client.generate_presigned_download_url("bucket", "object", expires, request_date=signed_at)
+
+    client.get_presigned_url.assert_called_once_with("PUT", "bucket", "object", expires, request_date=signed_at)
+    client.presigned_get_object.assert_called_once_with("bucket", "object", expires=expires, request_date=signed_at)
 
 
 if __name__ == "__main__":

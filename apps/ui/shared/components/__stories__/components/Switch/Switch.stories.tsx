@@ -26,3 +26,11 @@ export const Interactive: Story = () => {
     </Switch>
   );
 };
+export const WithDescription: Story = () => (
+  <Switch
+    isSelected={false}
+    description="Allow others to see your profile information"
+  >
+    Public profile
+  </Switch>
+);

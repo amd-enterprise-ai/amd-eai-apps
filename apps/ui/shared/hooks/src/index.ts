@@ -6,6 +6,7 @@ export * from './ErrorToast';
 export * from './useBoundaryValidation';
 export * from './useChatWindowScroll';
 export * from './useDebouncedCallback';
+export * from './useElementOverflow';
 export * from './useFilterState';
 export * from './useFormFieldValue';
 export * from './useLocalStorage';

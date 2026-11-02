@@ -4,6 +4,39 @@
 
 appDomain: PUBLIC-IP
 
+# Identity the e2e runner authenticates as; defaults to devuser@<appDomain>.
+# Override when the runner uses OIDC user passthrough with a different account.
+e2eUsername: ""
+
+# Non-administrator identity the RBAC suites authenticate as. The realm ships with
+# only an administrator, so without this the suites have no second user to log in as
+# and skip. Disable on environments that provision the account themselves.
+teamMember:
+  enabled: true
+  # Run beside AIRM, where the existing Keycloak admin and devuser credential Secrets
+  # already live. Never copy the realm-admin credential into the test-runner namespace.
+  namespace: airm
+  adminClientSecret:
+    name: airm-keycloak-admin-client
+    clientIdKey: client-id
+    clientSecretKey: client-secret
+  userCredentialsSecret:
+    name: airm-user-credentials
+    passwordKey: USER_PASSWORD
+  # Keycloak users without a full profile are absent from AIRM's user list, which is
+  # where the suites look the account up to add it to a project.
+  firstName: Team
+  lastName: Member
+  image:
+    repository: python
+    tag: "3.13-alpine"
+    pullPolicy: IfNotPresent
+  # Must name pull secrets in teamMember.namespace. The workflow refreshes regcred in the
+  # default airm namespace before it creates this Job. The image is public, so this only
+  # buys headroom against registry rate limits; set to [] where no secret is provisioned.
+  imagePullSecrets:
+    - name: regcred
+
 keycloak:
   internalUrl: http://keycloak.keycloak.svc.cluster.local:8080
   realm: airm

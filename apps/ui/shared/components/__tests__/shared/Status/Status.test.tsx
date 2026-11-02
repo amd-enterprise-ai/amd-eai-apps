@@ -12,38 +12,39 @@ import { Status } from '@amdenterpriseai/components';
 // Mock HeroUI components
 vi.mock('@heroui/react', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@heroui/react')>()),
-  Chip: ({
-    children,
-    color,
-    size,
-    classNames,
-    startContent,
-    endContent,
-  }: any) => (
-    <div
-      data-testid="chip"
-      data-color={color}
-      data-size={size}
-      className={classNames?.base}
-    >
-      {startContent && (
-        <div data-testid="chip-start-content">{startContent}</div>
-      )}
-      <span className={classNames?.content}>{children}</span>
-      {endContent && <div data-testid="chip-end-content">{endContent}</div>}
-    </div>
+  // v3 Chip is compound: the wrapper composes start/label/end as children and
+  // wraps text in `Chip.Label`, so the stub renders children and exposes Label.
+  Chip: Object.assign(
+    ({ children, color, size, className }: any) => (
+      <div
+        data-testid="chip"
+        data-color={color}
+        data-size={size}
+        className={className}
+      >
+        {children}
+      </div>
+    ),
+    {
+      Label: ({ children, className }: any) => (
+        <span className={className}>{children}</span>
+      ),
+    },
   ),
 
-  Popover: ({ children, placement }: any) => (
-    <div data-testid="popover" data-placement={placement}>
-      {children}
-    </div>
-  ),
-  PopoverTrigger: ({ children }: any) => (
-    <div data-testid="popover-trigger">{children}</div>
-  ),
-  PopoverContent: ({ children }: any) => (
-    <div data-testid="popover-content">{children}</div>
+  Popover: Object.assign(
+    ({ children }: any) => <div data-testid="popover">{children}</div>,
+    {
+      Trigger: ({ children }: any) => (
+        <div data-testid="popover-trigger">{children}</div>
+      ),
+      Content: ({ children }: any) => (
+        <div data-testid="popover-content">{children}</div>
+      ),
+      Dialog: ({ children }: any) => (
+        <div data-testid="popover-dialog">{children}</div>
+      ),
+    },
   ),
   cn: (...args: any[]) => {
     return args
@@ -73,7 +74,7 @@ vi.mock('@tabler/icons-react', async (importOriginal) => {
         role={role}
         className={className}
       >
-        Success Icon
+        <title>Success Icon</title>
       </svg>
     ),
     IconAlertTriangle: ({ size, role, className }: any) => (
@@ -83,7 +84,7 @@ vi.mock('@tabler/icons-react', async (importOriginal) => {
         role={role}
         className={className}
       >
-        Warning Icon
+        <title>Warning Icon</title>
       </svg>
     ),
     IconLoaderQuarter: ({ size, role, className }: any) => (
@@ -93,7 +94,7 @@ vi.mock('@tabler/icons-react', async (importOriginal) => {
         role={role}
         className={className}
       >
-        Pending Icon
+        <title>Pending Icon</title>
       </svg>
     ),
     IconInfoCircle: ({ size, role, className }: any) => (
@@ -103,7 +104,7 @@ vi.mock('@tabler/icons-react', async (importOriginal) => {
         role={role}
         className={className}
       >
-        Info Icon
+        <title>Info Icon</title>
       </svg>
     ),
   };
@@ -133,7 +134,7 @@ const MockCustomIcon = ({ size, role, className }: any) => (
     role={role}
     className={className}
   >
-    Custom Icon
+    <title>Custom Icon</title>
   </svg>
 );
 
@@ -392,15 +393,6 @@ describe('Status', () => {
     });
   });
 
-  describe('isSubtle prop', () => {
-    it('applies subtle styling classes when isSubtle is true', () => {
-      render(<Status label="Test" color="success" isSubtle />);
-      const chip = screen.getByTestId('chip');
-      // The subtle classes should be applied to content
-      expect(chip).toBeInTheDocument();
-    });
-  });
-
   describe('Icon rendering', () => {
     it('renders custom icon when provided', () => {
       render(<Status label="Test" icon={MockCustomIcon} />);
@@ -461,7 +453,6 @@ describe('Status', () => {
           helpContent="Help text"
           isClickable
           isTextColored
-          isSubtle
           size="lg"
         />,
       );

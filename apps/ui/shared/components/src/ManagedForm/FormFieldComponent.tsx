@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 import { Input } from '../Input/InputPrimitive';
-import { Button } from '../Buttons/Button';
+import { ActionButton } from '../Buttons/ActionButton';
 import { cn } from '@heroui/react';
 import {
   FieldValues,
@@ -118,15 +118,12 @@ export const FormFieldComponent = <T extends FieldValues>({
       isDisabled={isDisabled}
       isRequired={formField.isRequired}
       label={formField.label}
-      labelPlacement="outside"
       isReadOnly={formField.isReadOnly}
       isInvalid={!!errorMessage}
       placeholder={formField.placeholder}
       errorMessage={errorMessage}
       description={formField.description}
-      variant="bordered"
       defaultValue={defaultValue}
-      classNames={formField?.classNames}
       startContent={
         formField?.icon ? (
           <formField.icon
@@ -143,14 +140,13 @@ export const FormFieldComponent = <T extends FieldValues>({
     <div className="relative">
       {formField.secondaryAction ? (
         <div className="absolute top-[-0.6rem] right-2">
-          <Button
+          <ActionButton
+            tertiary
             size="sm"
-            variant="light"
-            color="primary"
             onPress={formField.secondaryAction.callback}
           >
             {formField.secondaryAction.label}
-          </Button>
+          </ActionButton>
         </div>
       ) : null}
       {FormField}

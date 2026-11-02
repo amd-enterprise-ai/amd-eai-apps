@@ -5,22 +5,36 @@
 """Tests for metrics service functions."""
 
 from datetime import datetime
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from app.metrics.constants import (
     AIM_SERVICE_ID_METRIC_LABEL,
+    ALLOCATED_CPU_SERIES_LABEL,
+    ALLOCATED_GPUS_SERIES_LABEL,
+    ALLOCATED_SYSTEM_MEMORY_SERIES_LABEL,
     API_KEY_ID_METRIC_LABEL,
+    CPU_AVAILABLE_SERIES_LABEL,
+    CPU_USAGE_SERIES_LABEL,
     EXTPROC_REQUEST_DURATION_COUNT_METRIC,
     EXTPROC_TOKEN_USAGE_METRIC,
     GPU_POD_METRIC_LABEL,
+    NAMESPACE_METRIC_LABEL,
+    POD_CPU_USAGE_METRIC,
+    POD_MEMORY_WORKING_SET_METRIC,
+    SYSTEM_MEMORY_AVAILABLE_SERIES_LABEL,
+    SYSTEM_MEMORY_USAGE_SERIES_LABEL,
     VLLM_POD_METRIC_LABEL,
+    WORKLOAD_ID_METRIC_LABEL,
 )
 from app.metrics.service import (
     _escape_promql_label_value,
     _pod_selector,
+    get_cpu_usage_for_namespace,
+    get_cpu_usage_metric,
     get_e2e_latency_metric,
+    get_gpu_device_utilization_for_namespace,
     get_gpu_device_utilization_metric,
     get_gpu_memory_utilization_metric,
     get_input_tokens_by_api_key,
@@ -29,9 +43,13 @@ from app.metrics.service import (
     get_max_requests_metric,
     get_output_tokens_by_api_key,
     get_requests_by_api_key,
+    get_system_memory_usage_for_namespace,
+    get_system_memory_usage_metric,
     get_total_tokens_metric,
     get_ttft_latency_metric,
+    get_workload_resource_limits,
 )
+from app.projects.crds import Namespace
 
 
 @pytest.mark.asyncio
@@ -534,3 +552,249 @@ def test_escape_promql_label_value_escapes_backslashes() -> None:
 
 def test_escape_promql_label_value_escapes_backslash_before_quote() -> None:
     assert _escape_promql_label_value('key\\"') == 'key\\\\\\"'
+
+
+# =============================================================================
+# get_gpu_device_utilization_for_namespace
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_gpu_device_utilization_for_namespace_appends_allocation_series(
+    mock_prometheus_client: Mock, time_range: tuple[datetime, datetime]
+) -> None:
+    start, end = time_range
+    namespace = Namespace(name="team-a")
+    mock_prometheus_client.custom_query_range = Mock(
+        return_value=[{"metric": {}, "values": [[start.timestamp(), "2"]]}]
+    )
+
+    with patch("app.metrics.service.get_project_gpu_allocation_ceiling", AsyncMock(return_value=8)):
+        result = await get_gpu_device_utilization_for_namespace(namespace, start, end, mock_prometheus_client, Mock())
+
+    labels = [series.metadata.label for series in result.data]
+    assert ALLOCATED_GPUS_SERIES_LABEL in labels
+    allocation_series = next(series for series in result.data if series.metadata.label == ALLOCATED_GPUS_SERIES_LABEL)
+    assert all(value.value == 8 for value in allocation_series.values)
+    assert len(allocation_series.values) == len(result.range.timestamps)
+
+
+@pytest.mark.asyncio
+async def test_gpu_device_utilization_for_namespace_omits_allocation_series_when_unresolved(
+    mock_prometheus_client: Mock, time_range: tuple[datetime, datetime]
+) -> None:
+    start, end = time_range
+    namespace = Namespace(name="team-a")
+    mock_prometheus_client.custom_query_range = Mock(
+        return_value=[{"metric": {}, "values": [[start.timestamp(), "2"]]}]
+    )
+
+    with patch("app.metrics.service.get_project_gpu_allocation_ceiling", AsyncMock(return_value=None)):
+        result = await get_gpu_device_utilization_for_namespace(namespace, start, end, mock_prometheus_client, Mock())
+
+    labels = [series.metadata.label for series in result.data]
+    assert ALLOCATED_GPUS_SERIES_LABEL not in labels
+
+
+# =============================================================================
+# CPU / system-memory workload metrics
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_workload_resource_limits_sums_pod_container_limits() -> None:
+    pods: list[dict] = [
+        {"spec": {"containers": [{"resources": {"limits": {"cpu": "32", "memory": "32Gi"}}}]}},
+        {"spec": {"containers": [{"resources": {"limits": {"cpu": "500m", "memory": "512Mi"}}}]}},
+    ]
+    with patch("app.metrics.service.list_aim_service_replicas", AsyncMock(return_value=pods)):
+        cpu_cores, memory_bytes = await get_workload_resource_limits(
+            "team-a", "11111111-1111-1111-1111-111111111111", Mock()
+        )
+
+    # 32000 + 500 milli-cores -> 32.5 cores; 32Gi + 512Mi in bytes
+    assert cpu_cores == 32.5
+    assert memory_bytes == 32 * 1024**3 + 512 * 1024**2
+
+
+@pytest.mark.asyncio
+async def test_get_workload_resource_limits_scopes_to_single_pod_when_pod_name_set() -> None:
+    pods: list[dict] = [
+        {
+            "metadata": {"name": "replica-a"},
+            "spec": {"containers": [{"resources": {"limits": {"cpu": "6", "memory": "40Gi"}}}]},
+        },
+        {
+            "metadata": {"name": "replica-b"},
+            "spec": {"containers": [{"resources": {"limits": {"cpu": "6", "memory": "40Gi"}}}]},
+        },
+    ]
+    with patch("app.metrics.service.list_aim_service_replicas", AsyncMock(return_value=pods)):
+        cpu_cores, memory_bytes = await get_workload_resource_limits(
+            "team-a", "11111111-1111-1111-1111-111111111111", Mock(), pod_name="replica-b"
+        )
+
+    # Only replica-b counts, so the ceiling matches a single pod, not the summed 2x.
+    assert cpu_cores == 6.0
+    assert memory_bytes == 40 * 1024**3
+
+
+@pytest.mark.asyncio
+async def test_get_workload_resource_limits_returns_none_without_limits() -> None:
+    pods: list[dict] = [{"spec": {"containers": [{"resources": {}}]}}]
+    with patch("app.metrics.service.list_aim_service_replicas", AsyncMock(return_value=pods)):
+        cpu_cores, memory_bytes = await get_workload_resource_limits(
+            "team-a", "11111111-1111-1111-1111-111111111111", Mock()
+        )
+
+    assert cpu_cores is None
+    assert memory_bytes is None
+
+
+@pytest.mark.asyncio
+async def test_get_workload_resource_limits_returns_none_on_failure() -> None:
+    with patch("app.metrics.service.list_aim_service_replicas", AsyncMock(side_effect=RuntimeError("boom"))):
+        result = await get_workload_resource_limits("team-a", "11111111-1111-1111-1111-111111111111", Mock())
+
+    assert result == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_cpu_usage_query_sums_pod_metric_by_workload_id(
+    mock_prometheus_client: Mock, time_range: tuple[datetime, datetime]
+) -> None:
+    start, end = time_range
+    workload_id = "wl-cpu-1"
+    mock_prometheus_client.custom_query_range = Mock(
+        return_value=[{"metric": {}, "values": [[start.timestamp(), "0.5"]]}]
+    )
+
+    with patch("app.metrics.service.get_workload_resource_limits", AsyncMock(return_value=(None, None))):
+        result = await get_cpu_usage_metric(workload_id, start, end, 60.0, mock_prometheus_client, Mock(), "team-a")
+
+    query = mock_prometheus_client.custom_query_range.call_args.kwargs["query"]
+    assert POD_CPU_USAGE_METRIC in query
+    assert f'{WORKLOAD_ID_METRIC_LABEL}="{workload_id}"' in query
+    assert query.strip().startswith("sum(")
+    assert [series.metadata.label for series in result.data] == [CPU_USAGE_SERIES_LABEL]
+
+
+@pytest.mark.asyncio
+async def test_cpu_usage_appends_available_ceiling_from_limit(
+    mock_prometheus_client: Mock, time_range: tuple[datetime, datetime]
+) -> None:
+    start, end = time_range
+    mock_prometheus_client.custom_query_range = Mock(
+        return_value=[{"metric": {}, "values": [[start.timestamp(), "0.5"]]}]
+    )
+
+    with patch("app.metrics.service.get_workload_resource_limits", AsyncMock(return_value=(32.0, None))):
+        result = await get_cpu_usage_metric("wl", start, end, 60.0, mock_prometheus_client, Mock(), "team-a")
+
+    ceiling = next(s for s in result.data if s.metadata.label == CPU_AVAILABLE_SERIES_LABEL)
+    assert all(value.value == 32.0 for value in ceiling.values)
+    assert len(ceiling.values) == len(result.range.timestamps)
+
+
+@pytest.mark.asyncio
+async def test_cpu_usage_omits_ceiling_when_limit_unresolved(
+    mock_prometheus_client: Mock, time_range: tuple[datetime, datetime]
+) -> None:
+    start, end = time_range
+    mock_prometheus_client.custom_query_range = Mock(
+        return_value=[{"metric": {}, "values": [[start.timestamp(), "0.5"]]}]
+    )
+
+    with patch("app.metrics.service.get_workload_resource_limits", AsyncMock(return_value=(None, None))):
+        result = await get_cpu_usage_metric("wl", start, end, 60.0, mock_prometheus_client, Mock(), "team-a")
+
+    assert CPU_AVAILABLE_SERIES_LABEL not in [s.metadata.label for s in result.data]
+
+
+@pytest.mark.asyncio
+async def test_system_memory_usage_query_and_available_ceiling(
+    mock_prometheus_client: Mock, time_range: tuple[datetime, datetime]
+) -> None:
+    start, end = time_range
+    workload_id = "wl-mem-1"
+    memory_limit = float(32 * 1024**3)
+    mock_prometheus_client.custom_query_range = Mock(
+        return_value=[{"metric": {}, "values": [[start.timestamp(), "1048576"]]}]
+    )
+
+    with patch("app.metrics.service.get_workload_resource_limits", AsyncMock(return_value=(None, memory_limit))):
+        result = await get_system_memory_usage_metric(
+            workload_id, start, end, 60.0, mock_prometheus_client, Mock(), "team-a"
+        )
+
+    query = mock_prometheus_client.custom_query_range.call_args.kwargs["query"]
+    assert POD_MEMORY_WORKING_SET_METRIC in query
+    assert f'{WORKLOAD_ID_METRIC_LABEL}="{workload_id}"' in query
+    labels = [s.metadata.label for s in result.data]
+    assert SYSTEM_MEMORY_USAGE_SERIES_LABEL in labels
+    ceiling = next(s for s in result.data if s.metadata.label == SYSTEM_MEMORY_AVAILABLE_SERIES_LABEL)
+    assert all(value.value == memory_limit for value in ceiling.values)
+
+
+# =============================================================================
+# Namespace-level CPU / system-memory metrics
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_cpu_usage_for_namespace_sums_and_appends_ceiling(
+    mock_prometheus_client: Mock, time_range: tuple[datetime, datetime]
+) -> None:
+    start, end = time_range
+    namespace = Namespace(name="team-a")
+    mock_prometheus_client.custom_query_range = Mock(
+        return_value=[{"metric": {}, "values": [[start.timestamp(), "3.5"]]}]
+    )
+
+    with patch("app.metrics.service.get_project_cpu_allocation_ceiling", AsyncMock(return_value=112.0)):
+        result = await get_cpu_usage_for_namespace(namespace, start, end, mock_prometheus_client, Mock())
+
+    query = mock_prometheus_client.custom_query_range.call_args.kwargs["query"]
+    assert POD_CPU_USAGE_METRIC in query
+    assert f'{NAMESPACE_METRIC_LABEL}="{namespace.name}"' in query
+    ceiling = next(s for s in result.data if s.metadata.label == ALLOCATED_CPU_SERIES_LABEL)
+    assert all(value.value == 112.0 for value in ceiling.values)
+    assert len(ceiling.values) == len(result.range.timestamps)
+
+
+@pytest.mark.asyncio
+async def test_cpu_usage_for_namespace_omits_ceiling_when_unresolved(
+    mock_prometheus_client: Mock, time_range: tuple[datetime, datetime]
+) -> None:
+    start, end = time_range
+    namespace = Namespace(name="team-a")
+    mock_prometheus_client.custom_query_range = Mock(
+        return_value=[{"metric": {}, "values": [[start.timestamp(), "3.5"]]}]
+    )
+
+    with patch("app.metrics.service.get_project_cpu_allocation_ceiling", AsyncMock(return_value=None)):
+        result = await get_cpu_usage_for_namespace(namespace, start, end, mock_prometheus_client, Mock())
+
+    assert ALLOCATED_CPU_SERIES_LABEL not in [s.metadata.label for s in result.data]
+
+
+@pytest.mark.asyncio
+async def test_system_memory_usage_for_namespace_sums_and_appends_ceiling(
+    mock_prometheus_client: Mock, time_range: tuple[datetime, datetime]
+) -> None:
+    start, end = time_range
+    namespace = Namespace(name="team-a")
+    ceiling_bytes = float(256 * 1024**3)
+    mock_prometheus_client.custom_query_range = Mock(
+        return_value=[{"metric": {}, "values": [[start.timestamp(), "1048576"]]}]
+    )
+
+    with patch("app.metrics.service.get_project_memory_allocation_ceiling", AsyncMock(return_value=ceiling_bytes)):
+        result = await get_system_memory_usage_for_namespace(namespace, start, end, mock_prometheus_client, Mock())
+
+    query = mock_prometheus_client.custom_query_range.call_args.kwargs["query"]
+    assert POD_MEMORY_WORKING_SET_METRIC in query
+    assert f'{NAMESPACE_METRIC_LABEL}="{namespace.name}"' in query
+    assert SYSTEM_MEMORY_USAGE_SERIES_LABEL in [s.metadata.label for s in result.data]
+    ceiling = next(s for s in result.data if s.metadata.label == ALLOCATED_SYSTEM_MEMORY_SERIES_LABEL)
+    assert all(value.value == ceiling_bytes for value in ceiling.values)

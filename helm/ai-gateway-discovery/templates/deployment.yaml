@@ -12,7 +12,7 @@ metadata:
     app.kubernetes.io/name: {{ .Release.Name }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.controller.replicaCount }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ .Release.Name }}
@@ -43,6 +43,8 @@ spec:
               value: {{ .Values.controller.labels.managedBy.value | quote }}
             - name: MODEL_NAME_ANNOTATION
               value: {{ .Values.controller.annotations.modelName | quote }}
+            - name: WORKLOAD_ID_LABEL
+              value: {{ .Values.controller.labels.workloadId | quote }}
             - name: GATEWAY_NAME
               value: {{ .Values.controller.gateway.name | quote }}
             - name: GATEWAY_NAMESPACE
@@ -57,20 +59,28 @@ spec:
               value: {{ .Values.controller.targetNamespace | quote }}
             - name: HEALTH_PORT
               value: {{ .Values.controller.healthPort | quote }}
+            - name: AUTHZ_PORT
+              value: {{ .Values.controller.authzPort | quote }}
+            - name: WORKLOADS_AUTHZ_PORT
+              value: {{ .Values.controller.workloadsAuthzPort | quote }}
+            - name: BODY_AUTH_MAX_REQUEST_BYTES
+              value: {{ include "aigw.bodyAuthMaxRequestBytes" . | quote }}
+            # ext_authz Service the per-model catch-all SecurityPolicy references cross-namespace.
+            # Sourced from the release so the reference is correct regardless of install name/namespace.
+            - name: AUTHZ_SERVICE_NAME
+              value: {{ .Release.Name | quote }}
+            - name: AUTHZ_SERVICE_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
             - name: EPP_IMAGE
               value: "{{ .Values.controller.epp.image.repository }}:{{ .Values.controller.epp.image.tag }}"
             - name: EPP_SERVICE_PORT
               value: {{ .Values.controller.epp.port | quote }}
             - name: INFERENCE_POOL_PORT
               value: {{ .Values.controller.inferencePool.targetPort | quote }}
-            - name: ALLOWED_GROUP_ANNOTATION
-              value: {{ .Values.controller.annotations.allowedGroup | quote }}
-            - name: CLUSTER_AUTH_SERVICE
-              value: {{ .Values.controller.clusterAuth.service | quote }}
-            - name: CLUSTER_AUTH_NAMESPACE
-              value: {{ .Values.controller.clusterAuth.namespace | quote }}
-            - name: CLUSTER_AUTH_PORT
-              value: {{ .Values.controller.clusterAuth.port | quote }}
+            - name: API_KEY_AUTH_ANNOTATION
+              value: {{ .Values.controller.apiKeyAuth.annotation | quote }}
+          # The ext_authz listeners moved to the authz Deployment; the controller now serves only its
+          # health/readiness probe port.
           ports:
             - name: health
               containerPort: {{ .Values.controller.healthPort }}

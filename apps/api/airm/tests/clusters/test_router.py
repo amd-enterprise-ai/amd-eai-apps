@@ -11,6 +11,7 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
+from api_common.collections import PaginationMetadata
 from api_common.exceptions import ForbiddenException, NotFoundException
 from app import app  # type: ignore
 from app.clusters.models import Cluster, ClusterNode
@@ -1757,9 +1758,7 @@ async def test_get_cluster_workloads_metrics_success(mock_get_cluster: MagicMock
                 updated_by="tester",
             )
         ],
-        total=1,
-        page=1,
-        page_size=10,
+        pagination=PaginationMetadata(page=1, page_size=10, total=1),
     )
 
     with TestClient(app) as client:
@@ -1773,6 +1772,9 @@ async def test_get_cluster_workloads_metrics_success(mock_get_cluster: MagicMock
     assert data["data"][0]["gpuCount"] == 4
     assert data["data"][0]["vram"] == 16384
     assert data["data"][0]["runTime"] == 7200
+    assert data["pagination"]["page"] == 1
+    assert data["pagination"]["pageSize"] == 10
+    assert data["pagination"]["total"] == 1
 
 
 @pytest.mark.asyncio
@@ -2023,7 +2025,7 @@ async def test_get_node_gpu_utilization_invalid_step_param() -> None:
             f"/v1/clusters/{cluster_id}/nodes/{node_id}/metrics/gpu-utilization/core-utilization?start={start_iso}&end={end_iso}&step=0"
         )
 
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 @pytest.mark.asyncio

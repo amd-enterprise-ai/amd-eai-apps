@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: MIT
 
 import {
+  ActionButton,
   Alert,
-  Button,
+  CopySnippet,
   DrawerBody,
   DrawerContent,
   DrawerFooter,
@@ -12,12 +13,13 @@ import {
   DrawerPrimitive as Drawer,
   Input,
 } from '@amdenterpriseai/components';
-import { IconCopy } from '@tabler/icons-react';
 import { useTranslation } from 'next-i18next';
 
-import { ApiKeyWithFullKey } from '@/types/api-keys';
+import type { components } from '@/types/api';
 
 import { useSystemToast } from '@amdenterpriseai/hooks';
+
+type ApiKeyWithFullKey = components['schemas']['ApiKeyWithFullKey'];
 
 interface KeyCreatedDrawerProps {
   isOpen: boolean;
@@ -33,89 +35,51 @@ export const KeyCreatedDrawer: React.FC<KeyCreatedDrawerProps> = ({
   const { t } = useTranslation('api-keys');
   const { toast } = useSystemToast();
 
-  const handleCopy = async () => {
-    if (!apiKey) return;
-    try {
-      await navigator.clipboard.writeText(apiKey.fullKey);
-      toast.success(t('form.keyCreated.notification.copySuccess'));
-    } catch {
-      toast.error(t('form.keyCreated.notification.copyError'));
-    }
-  };
-
   if (!apiKey) return null;
 
   return (
-    <Drawer isOpen={isOpen} onClose={onClose} size="md" placement="right">
+    <Drawer isOpen={isOpen} onClose={onClose}>
       <DrawerContent>
-        <DrawerHeader className="flex flex-col gap-1">
-          <h2 className="text-xl font-semibold">
-            {t('form.keyCreated.title')}
-          </h2>
-        </DrawerHeader>
+        <DrawerHeader>{t('form.keyCreated.title')}</DrawerHeader>
 
         <DrawerBody>
           <div className="flex flex-col gap-4">
             {/* Description */}
-            <p className="text-sm text-foreground-600">
+            <p className="text-sm text-foreground">
               {t('form.keyCreated.description')}
             </p>
 
             {/* Warning Section */}
             <Alert
-              color="warning"
-              variant="solid"
-              className="text-sm"
+              status="warning"
               description={t('form.keyCreated.warning')}
             />
 
             {/* Name Field */}
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-foreground-600">
-                {t('form.keyCreated.field.name.label')}
-              </label>
-              <Input
-                value={apiKey.displayName}
-                isReadOnly
-                variant="bordered"
-                classNames={{
-                  input: 'font-mono text-sm',
-                }}
-              />
-            </div>
 
-            {/* API Key Field */}
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-foreground-600">
-                {t('form.keyCreated.field.key.label')}
-              </label>
-              <Input
-                value={apiKey.fullKey}
-                isReadOnly
-                variant="bordered"
-                classNames={{
-                  input: 'font-mono text-sm',
-                }}
-                endContent={
-                  <Button
-                    isIconOnly
-                    size="sm"
-                    variant="light"
-                    onPress={handleCopy}
-                    aria-label={t('form.keyCreated.aria.copyButton')}
-                  >
-                    <IconCopy size={16} />
-                  </Button>
-                }
-              />
-            </div>
+            <CopySnippet
+              label={t('form.keyCreated.field.name.label')}
+              value={apiKey.displayName}
+              hideCopyButton
+            />
+
+            <CopySnippet
+              label={t('form.keyCreated.field.key.label')}
+              value={apiKey.fullKey}
+              onCopySuccess={() =>
+                toast.success(t('form.keyCreated.notification.copySuccess'))
+              }
+              onCopyError={() =>
+                toast.error(t('form.keyCreated.notification.copyError'))
+              }
+            />
           </div>
         </DrawerBody>
 
-        <DrawerFooter>
-          <Button color="primary" onPress={onClose} className="w-full">
+        <DrawerFooter className="justify-end">
+          <ActionButton primary onPress={onClose}>
             {t('form.keyCreated.action.done')}
-          </Button>
+          </ActionButton>
         </DrawerFooter>
       </DrawerContent>
     </Drawer>

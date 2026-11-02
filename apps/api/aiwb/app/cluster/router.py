@@ -75,13 +75,19 @@ async def list_aim_images(
     summary="List cluster accelerators",
     response_description="Accelerator products present on ready nodes.",
     description=dedent("""
-        Returns each AMD accelerator product detected on ready cluster nodes.
+        Returns accelerator models detected on ready cluster nodes.
 
-        For every distinct GPU device type id observed on those ready nodes, the response
-        includes the product display name (from node labels), the device id, and
-        the total allocatable ``amd.com/gpu`` count summed across those nodes.
+        Detection is based on aim-engine accelerator labels
+        (``feature.node.kubernetes.io/aim-accelerator.*``). For each model, the
+        response includes accelerator type (for example CPU/GPU/APU), acceleratorVendor,
+        display name, device identifier, and aggregated allocatable count
+        across all ready nodes.
 
-        Returns an empty list when no GPU-labeled ready nodes exist — never an error.
+        When GPU ``device-id`` labels are missing, the API falls back to
+        ``acceleratorModel``. ``productName`` and ``acceleratorVendor`` are empty when
+        labels do not provide values.
+
+        Returns an empty list when no ready nodes carry accelerator model labels.
     """),
 )
 async def list_cluster_accelerators(

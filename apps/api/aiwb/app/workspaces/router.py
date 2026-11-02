@@ -89,7 +89,7 @@ async def create_workspace_endpoint(
         Delete a development workspace and tear down its Kubernetes components
         (deployment, service, ingress). PVC cleanup may be incomplete for
         workspaces whose Helm chart declares PVCs outside the standard label
-        selector — stranded PVCs are addressed in EAI-6314.
+        selector.
 
         Unsaved in-memory work is lost on deletion. Persistent data stored on
         the PVC should be exported beforehand (e.g., via the workspace's file

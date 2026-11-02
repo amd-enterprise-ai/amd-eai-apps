@@ -29,7 +29,8 @@ Resource            resources/airm_secrets.resource
 
 Library             TestPrefix
 
-Suite Teardown      Run Keywords    Clean Up Temporary Users    AND    Clean Up Workspace Test Resources
+Suite Teardown      Run Keywords    Clean Up Temporary Users    AND    Clean Up All Created AIWB Secrets
+...                 AND    Clean Up Workspace Test Resources
 Test Setup          Open test browser
 Test Teardown       Run Keywords    Close test browser    AND    Clean Up Workspaces Only
 
@@ -47,6 +48,18 @@ Workspace catalog displays available workspace templates
     And user is on workspaces page
     Then workspace catalog should display cards
     And workspace cards should show deploy button
+
+Workspace deployment begins with workspace settings
+    [Documentation]    Verify that starting a deployment presents the selected workspace
+    ...                details and image settings without an intermediate empty wizard.
+    [Tags]    ui    workspace    catalog    deploy    smoke
+
+    Given a ready project with user access exists
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    And user is on workspaces page
+    When user starts deploying a workspace "JupyterLab"
+    Then workspace deployment settings should be available
 
 Namespace-scoped workspace shows launch button when running
     [Documentation]    Verify that a logged-in user can see a Launch button for a deployed
@@ -186,6 +199,21 @@ Workspace deployed without a custom name shows its catalog name on the dashboard
     And user navigates to the workspace list
     Then workspace should be listed by its catalog name "JupyterLab"
 
+Workspace deployed with several image pull secrets uses every selected credential
+    [Documentation]    Verify that a user can choose more than one private-registry credential,
+    ...                by the name they gave it, when deploying a workspace, and that the
+    ...                workspace is given every credential they chose.
+    [Tags]    ui    workspaces    secrets    deploy    kubectl    gpu
+
+    Given a ready project with user access exists
+    And secret "minio-credentials-fetcher" is assigned to project
+    And image pull secrets "registry-a" and "registry-b" exist in the project
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    And user is on workspace catalog page
+    When user deploys a workspace "JupyterLab" with image pull secrets "registry-a" and "registry-b"
+    Then the workspace should use image pull secrets "registry-a" and "registry-b"
+
 View workspace status in UI
     [Documentation]    Verify that a deployed workspace shows its current status
     ...                in the workloads list on the dashboard.
@@ -219,8 +247,9 @@ Open workspace link from UI
     And workspace should have an access link
 
 Terminate workspace from UI
-    [Documentation]    Verify that a user can terminate a running workspace
-    ...                through the UI actions menu and it is removed from the list.
+    [Documentation]    Verify that a user can terminate a running workspace through the UI
+    ...                actions menu, that the confirmation names the workspace being removed
+    ...                so multiple workspaces aren't ambiguous, and that it is removed from the list.
     [Tags]    ui    workspaces    delete    gpu
 
     ${workspace_name}=    Test Name    jupyter
@@ -233,5 +262,7 @@ Terminate workspace from UI
     And project "${TEST_PROJECT}[name]" is selected
     And user is on dashboard page
     And workspace should appear in the workspace list
-    When user terminates the workspace
+    When user opens the undeploy confirmation for the workspace
+    Then undeploy confirmation should name the workspace
+    When user confirms the undeploy
     Then workspace should be removed from the list

@@ -8,6 +8,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
+import { cn } from '@heroui/react';
+
+import { Tooltip } from '../Tooltip/Tooltip';
 
 import { isMenuItemActive } from '@amdenterpriseai/utils/app';
 
@@ -15,21 +18,20 @@ import { buildProjectHref, stripProjectPrefix } from './project-utils';
 
 interface Props {
   text: string;
-  textColor?: string;
   href: string;
-  isSidebarMini: boolean;
+  isCollapsed: boolean;
   icon?: React.ReactNode;
-  nested?: boolean;
   projectPrefix?: string;
+  onNavigate?: () => void;
 }
 
 export const SidebarButton: FC<Props> = ({
   href,
   text,
   icon,
-  isSidebarMini,
-  nested,
+  isCollapsed,
   projectPrefix,
+  onNavigate,
 }) => {
   const { t } = useTranslation('common');
   const pathname = usePathname();
@@ -51,48 +53,46 @@ export const SidebarButton: FC<Props> = ({
     [projectPrefix, pathname, router.locale, router.defaultLocale],
   );
 
+  const label = t(text as any) as string;
   const content = (
-    <div
-      className={`flex w-full items-center tracking-tight ${
-        isSidebarMini ? 'px-0 group-hover:px-2' : 'px-2'
-      }`}
-    >
-      <span className="px-[14px]">{icon}</span>
+    <div className="flex w-full items-center tracking-tight">
+      <span className="shrink-0 px-2" aria-hidden="true">
+        {icon}
+      </span>
       <span
-        className={`${
-          isSidebarMini
-            ? 'scale-0 group-hover:scale-100'
-            : 'block text-nowrap scale-100'
-        }`}
+        className={cn({
+          'sr-only': isCollapsed,
+          'text-nowrap': !isCollapsed,
+        })}
       >
-        {t(text as any) as string}
+        {label}
       </span>
     </div>
   );
 
   const isActive = isMenuItemActive(href, pathWithoutProject);
-  let classNames =
-    'bg-transparent dark:hover:bg-default-100 hover:bg-default-200';
-  if (isActive && nested) {
-    classNames += ' font-extrabold';
-  } else if (isActive) {
-    classNames =
-      'bg-primary/15 hover:bg-primary/25 text-primary dark:text-primary-500';
-  }
+  const classNames = cn({
+    'bg-accent-soft text-accent-soft-foreground': isActive,
+    'bg-transparent hover:bg-default-hover dark:hover:bg-default': !isActive,
+  });
 
   return (
-    <div
-      className={`menu-item flex justify-center items-center max-h-12 text-sm rounded-md duration-10 w-full cursor-pointer
-        ${classNames}
-      `}
-    >
+    <Tooltip content={isCollapsed ? label : undefined} placement="right">
       <Link
-        className="w-full h-full py-3 text-nowrap outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
+        className={cn(
+          'menu-item flex h-11 items-center rounded-md py-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+          {
+            'w-12': isCollapsed,
+            'w-full': !isCollapsed,
+          },
+          classNames,
+        )}
         href={fullHref}
-        role="link"
+        aria-current={isActive ? 'page' : undefined}
+        onClick={onNavigate}
       >
         {content}
       </Link>
-    </div>
+    </Tooltip>
   );
 };

@@ -97,21 +97,19 @@ const AIMConditionsList: React.FC<Props> = ({ conditions }) => {
       {sortedConditions.map((condition) => (
         <div
           key={condition.type}
-          className="flex items-start justify-between border-b border-default-100 pb-4 last:border-b-0 last:pb-0"
+          className="flex items-start justify-between border-b border-default pb-4 last:border-b-0 last:pb-0"
         >
           <div className="flex flex-col">
             <span className="font-medium text-sm">
               {condition.type.replace(/Ready$/, '')}
             </span>
             {condition.lastTransitionTime && (
-              <span className="text-xs text-default-400">
+              <span className="text-xs text-muted">
                 {displayTimestamp(new Date(condition.lastTransitionTime))}
               </span>
             )}
             {condition.message && (
-              <p className="text-xs text-default-500 mt-1">
-                {condition.message}
-              </p>
+              <p className="text-xs text-muted mt-1">{condition.message}</p>
             )}
           </div>
           <div className="flex items-center gap-1.5 shrink-0">

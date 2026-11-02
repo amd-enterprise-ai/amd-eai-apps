@@ -80,7 +80,7 @@ describe('GpuDeviceEntry', () => {
 
     const span = screen.getByText('gpu-1');
     expect(span).toBeInTheDocument();
-    expect(span).not.toHaveClass('text-default-400');
+    expect(span).not.toHaveClass('text-muted');
   });
 
   it('renders hostname with chevron and muted text when off-node', () => {
@@ -91,7 +91,7 @@ describe('GpuDeviceEntry', () => {
       />,
     );
 
-    const wrapper = container.querySelector('span.text-default-400')!;
+    const wrapper = container.querySelector('span.text-muted')!;
     expect(wrapper).toBeInTheDocument();
     expect(wrapper).toHaveTextContent('worker-2');
     expect(wrapper).toHaveTextContent('gpu-3');
@@ -127,8 +127,8 @@ describe('GpuDevicesList', () => {
 
     const listItems = screen.getAllByRole('listitem');
     const spans = listItems.map((li) => li.querySelector('span')!);
-    expect(spans[0]).not.toHaveClass('text-default-400');
-    expect(spans[1]).toHaveClass('text-default-400');
+    expect(spans[0]).not.toHaveClass('text-muted');
+    expect(spans[1]).toHaveClass('text-muted');
   });
 
   it('sorts devices by hostname then gpuId', () => {

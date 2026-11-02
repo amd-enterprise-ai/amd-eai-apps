@@ -2,43 +2,40 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { APIRequestError, getErrorMessage } from '@amdenterpriseai/utils/app';
-import {
-  ApiKey,
-  ApiKeyDetails,
-  ApiKeyMetrics,
-  ApiKeysResponse,
-} from '@/types/api-keys';
-import { PaginatedList } from '@/types/pagination';
+import { APIRequestError } from '@amdenterpriseai/utils/app';
+import { apiClient, getApiClientErrorMessage } from '@/lib/api-client';
+import type { components } from '@/types/api';
 
 import { fetchAllPages } from './pagination';
+
+type ApiKeyResponse = components['schemas']['ApiKeyResponse'];
 
 const fetchApiKeysPage = async (
   projectId: string,
   page: number,
   pageSize: number,
-): Promise<PaginatedList<ApiKey>> => {
-  const response = await fetch(
-    `/api/projects/${projectId}/api-keys?pageSize=${pageSize}&page=${page}`,
+) => {
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/api-keys',
+    { params: { path: { project: projectId }, query: { page, pageSize } } },
   );
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to fetch API keys: ${errorMessage}`,
+      `Failed to fetch API keys: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-  return await response.json();
+  return data;
 };
 
 export const fetchProjectApiKeys = async (
   projectId: string,
-): Promise<ApiKeysResponse> => {
+): Promise<{ data: ApiKeyResponse[] }> => {
   // Walks every page via the shared fetchAllPages utility (bounded
-  // concurrency, throttled). EAI-6598 tracks migrating ApiKeysTable to
-  // ServerSideDataTable so this loader can be retired in favour of a
-  // server-side paginated table.
-  const data = await fetchAllPages<ApiKey>((page, pageSize) =>
+  // concurrency, throttled).
+  // TODO: migrate ApiKeysTable to ServerSideDataTable so this
+  // loader can be retired in favour of a server-side paginated table.
+  const data = await fetchAllPages<ApiKeyResponse>((page, pageSize) =>
     fetchApiKeysPage(projectId, page, pageSize),
   );
   return { data };
@@ -48,19 +45,13 @@ export const deleteApiKey = async (
   projectId: string,
   apiKeyId: string,
 ): Promise<void> => {
-  const response = await fetch(
-    `/api/projects/${projectId}/api-keys/${apiKeyId}`,
-    {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    },
+  const { error, response } = await apiClient.DELETE(
+    '/api/projects/{project}/api-keys/{api_key_id}',
+    { params: { path: { project: projectId, api_key_id: apiKeyId } } },
   );
   if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
     throw new APIRequestError(
-      `Failed to delete API key: ${errorMessage}`,
+      `Failed to delete API key: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
@@ -70,90 +61,89 @@ export const createApiKey = async (
   projectId: string,
   data: { displayName: string; ttl?: string; aimIds?: string[] },
 ) => {
-  const response = await fetch(`/api/projects/${projectId}/api-keys`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(data),
+  const {
+    data: created,
+    error,
+    response,
+  } = await apiClient.POST('/api/projects/{project}/api-keys', {
+    params: { path: { project: projectId } },
+    // ApiKeyCreate types ttl/renewable/numUses/explicitMaxTtl/period as
+    // required because they carry OpenAPI defaults, but the backend fills
+    // them server-side; the UI only sends the fields the user set.
+    body: data as components['schemas']['ApiKeyCreate'],
   });
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !created) {
     throw new APIRequestError(
-      `Failed to create API key: ${errorMessage}`,
+      `Failed to create API key: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-  return response.json();
+  return created;
 };
 
 export const fetchApiKeyDetails = async (
   projectId: string,
   apiKeyId: string,
-): Promise<ApiKeyDetails> => {
-  const response = await fetch(
-    `/api/projects/${projectId}/api-keys/${apiKeyId}`,
+) => {
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/api-keys/{api_key_id}',
+    { params: { path: { project: projectId, api_key_id: apiKeyId } } },
   );
 
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to fetch API key details: ${errorMessage}`,
+      `Failed to fetch API key details: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 
-  return response.json();
+  return data;
 };
 
 export const fetchApiKeyMetrics = async (
   projectId: string,
   apiKeyId: string,
-  params?: { start?: string; end?: string },
-): Promise<ApiKeyMetrics> => {
-  const searchParams = new URLSearchParams();
-  if (params?.start) searchParams.set('start', params.start);
-  if (params?.end) searchParams.set('end', params.end);
-  const query = searchParams.toString();
-
-  const response = await fetch(
-    `/api/projects/${projectId}/api-keys/${apiKeyId}/metrics${query ? `?${query}` : ''}`,
+  params: { start: string; end: string },
+) => {
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/api-keys/{api_key_id}/metrics',
+    {
+      params: {
+        path: { project: projectId, api_key_id: apiKeyId },
+        query: { start: params.start, end: params.end },
+      },
+    },
   );
 
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to fetch API key metrics: ${errorMessage}`,
+      `Failed to fetch API key metrics: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 
-  return response.json();
+  return data;
 };
 
 export const updateApiKeyBindings = async (
   projectId: string,
   apiKeyId: string,
   aimIds: string[],
-): Promise<ApiKeyDetails> => {
-  const response = await fetch(
-    `/api/projects/${projectId}/api-keys/${apiKeyId}`,
+) => {
+  const { data, error, response } = await apiClient.PATCH(
+    '/api/projects/{project}/api-keys/{api_key_id}',
     {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ aimIds }),
+      params: { path: { project: projectId, api_key_id: apiKeyId } },
+      body: { aimIds },
     },
   );
 
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to update API key bindings: ${errorMessage}`,
+      `Failed to update API key bindings: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 
-  return response.json();
+  return data;
 };

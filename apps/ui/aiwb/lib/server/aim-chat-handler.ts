@@ -11,9 +11,15 @@ import {
   RouteError,
 } from '@amdenterpriseai/utils/server';
 
+import type { components } from '@/types/api';
+import type { ChatBody } from '@/types/chat';
+
 import { getCachedAccess, setCachedAccess } from './authz-cache';
 import { transformChatStream } from './chat-stream-transform';
 import { validatePathSegments } from './proxy-handler';
+
+type InferenceDeploymentResponse =
+  components['schemas']['InferenceDeploymentResponse'];
 
 const AIM_CHAT_PATH_REGEX =
   /^\/api\/ui\/projects\/([^/]+)\/inference\/([^/]+)\/chat$/;
@@ -80,7 +86,7 @@ async function resolveInternalUrl({
     const body = await response.text();
     throw new RouteError(response.status, body);
   }
-  const payload = await response.json();
+  const payload = (await response.json()) as InferenceDeploymentResponse;
   const internalUrl: string | undefined = payload?.endpoints?.internal;
   if (!internalUrl) {
     throw new RouteError(422, 'AIM is not ready for chat');
@@ -134,12 +140,14 @@ async function getAuthorizedInternalUrl({
   return applyInternalUrlOverride(internalUrl);
 }
 
-async function aimChatHandler(req: NextRequest) {
+async function aimChatHandler(req: NextRequest): Promise<Response> {
   try {
     const { project, deploymentId } = parseAimChatPath(req);
     const { accessToken } = await authenticateRoute();
     const userId = extractUserId(accessToken as string);
-    const body = await req.json();
+    // OpenAI-compatible body: snake_case fields are preserved (the /chat path is
+    // the camelCase carve-out), so ChatBody keeps them as-is.
+    const body = (await req.json()) as ChatBody;
     const internalUrl = await getAuthorizedInternalUrl({
       project,
       deploymentId,
@@ -165,6 +173,6 @@ async function aimChatHandler(req: NextRequest) {
   }
 }
 
-export function POST(req: NextRequest) {
+export function POST(req: NextRequest): Promise<Response> {
   return aimChatHandler(req);
 }

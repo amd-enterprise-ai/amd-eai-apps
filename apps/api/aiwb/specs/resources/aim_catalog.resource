@@ -23,24 +23,34 @@ Library             RequestsLibrary
 Library             OperatingSystem
 Library             Process
 Library             TestPrefix
+Library             libraries/CatalogProjectCleanup.py
 
 
 *** Variables ***
+# Catalog configuration defaults. Defined here, not only in the importing suite, because the
+# keywords below read them: a suite that imports this resource without redeclaring every one
+# of them fails at run time with "Variable '${...}' not found". A suite may still override any
+# of these in its own Variables table, and the listener overrides MAX_GPU_COUNT per run.
+${TEST_MODE}                        full    # full, smoke, or quick
+${MAX_GPU_COUNT}                    1    # Raised by the listener to the max across discovered models
+${AIM_DEPLOY_TIMEOUT}               5400    # Seconds to reach Running; covers a first-time 671B pull
+${AIM_CATALOG_MODEL}                ${None}    # One image name to test; ${None} tests all Ready AIMs
+${SELECTED_AIM_RECORD}              ${None}    # Exact Ready AIM resolved by the listener for one-model runs
+${SELECTED_AIM_IMAGE}               ${None}    # Exact Docker reference reused through the selected lifecycle
+${SELECTED_AIM_HF}                  ${False}    # HuggingFace token requirement for the selected AIM
+
 # Track AIM state for catalog tests
 @{DEPLOYED_AIMS_LIST}               @{EMPTY}
+&{DEPLOYED_AIM_NAMES}               &{EMPTY}
 
 # Image pull secret for private ghcr.io/silogen AIM images. Two ways to provide it,
-# both work for `uv run robot` and silodev remote (silodev forwards --variable):
+# both work for `uv run robot`:
 #   1. Value from CLI (masked):  --variable "PULL_SECRET_VALUE: Secret:$REGCRED_DOCKERCONFIGJSON"
 #   2. Copy an existing secret from another namespace (default e2e-test-runner).
 # Leave ${PULL_SECRET} empty to skip pull secrets entirely (public images).
 ${PULL_SECRET}                      regcred
 ${PULL_SECRET_SOURCE}              e2e-test-runner
 ${PULL_SECRET_VALUE: Secret}       %{PULL_SECRET_VALUE=}
-
-# HuggingFace token, masked so it never lands in logs. Provide via the HF_TOKEN env var
-# (export locally; silodev --hf-token for remote) or --variable "HF_TOKEN: Secret:...".
-${HF_TOKEN: Secret}                %{HF_TOKEN=}
 
 
 *** Keywords ***
@@ -128,6 +138,13 @@ Test Template: Deploy AIM Model
         Fail    Unexpected status code ${response.status_code} when deploying AIM ${docker_image}
     END
 
+    # Preserve the K8s AIMService name in suite scope so teardown can still verify
+    # predictor deletion after the API resource has already become 404.
+    ${service}=    Get AIM Service By ID    ${service_id}    expected_status=200
+    ${service_metadata}=    Get From Dictionary    ${service.json()}    metadata
+    ${service_name}=    Get From Dictionary    ${service_metadata}    name
+    Set To Dictionary    ${DEPLOYED_AIM_NAMES}    ${service_id}=${service_name}
+
     # Set variables for subsequent tests
     Set Test Variable    ${TEST_AIM_ID}    ${service_id}
     Set Test Variable    ${TEST_AIM_NAME}    ${aim_resource_name}
@@ -190,6 +207,7 @@ Test Template: Run AIM Inference
 
     # Assign API key to this AIM for external endpoint access
     Api key is assigned to AIMS model
+    Key assignment should succeed
     Log    API key assigned for inference testing    DEBUG
 
     # Get AIM service details to get inference endpoint
@@ -213,6 +231,7 @@ Test Template: Run AIM Inference
     END
 
     # List available models from endpoint (using API key)
+    Api key binding should take effect    host=${inference_host}
     ${models}=    List models from external endpoint    ${inference_host}    ${TEST_AIM_ID}    ${TEST_API_KEY_VALUE}
     Should Be True    isinstance($models, list)    msg=Models data should be a list
     ${model_count}=    Get Length    ${models}
@@ -407,28 +426,44 @@ Find AIM by image name
     RETURN    ${aim}[metadata][name]
 
 Find AIM record by image name
-    [Documentation]    Same lookup as ``Find AIM by image name`` but returns the full AIM
-    ...                record so callers that need both ``metadata.name`` and ``spec.aimId``
-    ...                (e.g. the catalog-deploy template's profile-precondition check) do not
-    ...                have to re-list the catalog.
+    [Documentation]    Resolves an exact tag/digest-free image basename among all Ready AIMs.
+    ...                One-model runs reuse the listener's exact resolved record so tags and
+    ...                every lifecycle lookup cannot drift if the catalog changes mid-run.
     [Arguments]    ${image_name}
 
-    ${response}=    List AIMs    expected_status=200
-    VAR    ${aims_list}    ${response.json()}[data]
-
-    # Search for AIM whose spec.image contains the image_name (substring match).
-    # spec.image is the full Docker image reference, e.g.
-    # "ghcr.io/silogen/aim-openai-gpt-oss-20b:0.11.0", which always
-    # contains the short image name "aim-openai-gpt-oss-20b".
-    FOR    ${aim}    IN    @{aims_list}
-        ${current_ref}=    Set Variable    ${aim}[spec][image]
-        IF    "${image_name}" in "${current_ref}"
-            Log    Found AIM ${image_name} (image: ${current_ref}, resource: ${aim}[metadata][name])    DEBUG
-            RETURN    ${aim}
-        END
+    IF    $SELECTED_AIM_RECORD != $None
+        RETURN    ${SELECTED_AIM_RECORD}
     END
+    ${selected}=    Resolve Ready AIM    ${image_name}
+    RETURN    ${selected}[aim]
 
-    Fail    AIM with image_name '${image_name}' not found in system. Available AIMs: ${aims_list}
+A selected Ready AIM from the catalog
+    [Documentation]    Resolves the ${AIM_CATALOG_MODEL} workflow selector to one Ready AIM and
+    ...                records its image name, HuggingFace-token requirement, and GPU count as
+    ...                suite state for the lifecycle steps. Fails clearly when no selector is set,
+    ...                so the behavioral scenario is only meaningful for a single chosen model.
+    Should Not Be Equal    ${AIM_CATALOG_MODEL}    ${None}
+    ...    msg=Set AIM_CATALOG_MODEL to one Ready AIM image name to run the selected-AIM lifecycle scenario
+
+    Should Not Be Equal    ${SELECTED_AIM_RECORD}    ${None}
+    ...    msg=The AIM catalog listener did not resolve the selected Ready AIM
+    Log    Selected Ready AIM ${SELECTED_AIM_IMAGE} (hfToken=${SELECTED_AIM_HF}, gpus=${MAX_GPU_COUNT})    INFO
+
+The selected AIM is deployed
+    [Documentation]    Deploys the selected Ready AIM through the shared catalog deploy template.
+    Test Template: Deploy AIM Model    ${SELECTED_AIM_IMAGE}    ${SELECTED_AIM_HF}
+
+The selected AIM should reach Running state
+    [Documentation]    Waits for the selected AIM to report Running through the shared template.
+    Test Template: Verify AIM Running State    ${SELECTED_AIM_IMAGE}
+
+The selected AIM should serve inference
+    [Documentation]    Runs an inference request against the selected AIM's endpoint.
+    Test Template: Run AIM Inference    ${SELECTED_AIM_IMAGE}
+
+The selected AIM should be removed when undeployed
+    [Documentation]    Undeploys the selected AIM and verifies cleanup through the shared template.
+    Test Template: Undeploy AIM Model    ${SELECTED_AIM_IMAGE}
 
 Skip if no cluster profiles for AIM
     [Documentation]    Lists AIMClusterProfiles filtered by aimId and skips the current test
@@ -488,51 +523,6 @@ Run simple inference
         Log    Completion inference successful: ${response}    INFO
         RETURN    ${response}
     END
-
-HuggingFace token secret exists in namespace
-    [Documentation]    Ensures the HuggingFace token secret exists in the project namespace,
-    ...                created from the masked ${HF_TOKEN} secret variable. The value is fed to
-    ...                kubectl via stdin so it never appears in process args or logs. Retries to
-    ...                ride through intermittent OIDC token-exchange (401 "Unauthorized") failures.
-    [Arguments]    ${secret_name}=${HF_TOKEN_SECRET_NAME}    ${namespace}=${None}
-    IF    $namespace == $None
-        ${namespace}=    Get Project Namespace
-    END
-
-    # Read the value via the Secret object so it is never substituted into a log line.
-    ${has_token}=    Evaluate    bool($HF_TOKEN.value)
-    Should Be True    ${has_token}
-    ...    msg=HF_TOKEN is not set. Provide it via the HF_TOKEN env var or --variable "HF_TOKEN: Secret:...".
-
-    Wait Until Keyword Succeeds    1 min    5 sec
-    ...    Create secret from value    ${secret_name}    ${namespace}    ${HF_TOKEN}    --from-file\=token\=/dev/stdin
-
-Create secret from value
-    [Documentation]    Idempotently creates a secret in the namespace from a masked Secret value,
-    ...                fed to kubectl via stdin so it never appears in args or logs. ${create_args}
-    ...                carries the flags that differ between secret kinds — e.g.
-    ...                "--from-file=token=/dev/stdin" for an opaque token, or
-    ...                "--type=kubernetes.io/dockerconfigjson --from-file=.dockerconfigjson=/dev/stdin"
-    ...                for a pull secret. An existing secret or an AlreadyExists race counts as
-    ...                success; any other error raises so the caller can retry transient
-    ...                "Unauthorized" failures. Shared by the HF token and pull secret value paths.
-    [Arguments]    ${secret_name}    ${namespace}    ${secret_value}    @{create_args}
-
-    ${existing}=    Run Process    kubectl    get    secret    ${secret_name}    -n    ${namespace}    stderr=STDOUT
-    IF    ${existing.rc} == 0
-        Log    Secret ${secret_name} already exists in namespace ${namespace}    INFO
-        RETURN
-    END
-
-    ${result}=    Run Process    kubectl    create    secret    generic    ${secret_name}
-    ...    @{create_args}
-    ...    -n    ${namespace}
-    ...    stdin=${secret_value}    stderr=STDOUT
-    IF    $result.rc == 0 or "AlreadyExists" in $result.stdout
-        Log    Created secret ${secret_name} in namespace ${namespace}    INFO
-        RETURN
-    END
-    Fail    Failed to create secret ${secret_name}: ${result.stdout}
 
 Ensure GHCR pull secret exists in namespace
     [Documentation]    Ensures the image pull secret exists in the project namespace so kserve
@@ -625,11 +615,20 @@ Setup AIM catalog testing
 
     # Initialize tracking lists (for cleanup)
     VAR    @{DEPLOYED_AIMS_LIST}    scope=SUITE
+    VAR    &{DEPLOYED_AIM_NAMES}    scope=SUITE
     VAR    @{CREATED_PROJECT_IDS}    scope=SUITE
     VAR    @{TEST_API_KEYS}    scope=SUITE
 
     # Create the project for testing
     A ready project "${catalog_project}" with user access exists
+
+    # Snapshot the adopted project at SUITE scope for the teardown to delete. The creation
+    # keyword publishes it through Set Test Variable, which does reach a suite teardown when
+    # called from suite setup - but that is a subtle enough rule to read as a bug, and every
+    # per-test call to the same keyword rebinds the name in its own scope. Capturing it here
+    # makes the teardown's target explicit and independent of both, matching the suite-scope
+    # convention already used by "Initialize api key test environment".
+    VAR    ${CATALOG_PROJECT_ID}    ${TEST_PROJECT_ID}    scope=SUITE
 
     # AIM inference server images are private on ghcr.io/silogen — provision the pull secret in
     # the project namespace (from PULL_SECRET_VALUE if given, else copied from e2e-test-runner).
@@ -638,49 +637,193 @@ Setup AIM catalog testing
 
     Log    AIM catalog testing suite initialized    INFO
 
+Undeploy all tracked AIM catalog services
+    [Documentation]    Undeploys every AIM service tracked in ${DEPLOYED_AIMS_LIST}: waits for
+    ...    each to reach the API's Deleted state (or confirms it is already 404), then confirms
+    ...    the predictor Deployment is actually gone from Kubernetes for each one — while the
+    ...    project (and its namespace) still exists.
+    ...
+    ...    Factored out of "Cleanup AIM catalog testing" so both the suite teardown and direct
+    ...    E2E regression tests can assert Kubernetes-level predictor absence before the project
+    ...    namespace is deleted: kubectl against an already-deleted namespace fails "Verify AIM
+    ...    deployment gone"'s own rc==0 check, which would be a false test failure rather than a
+    ...    real proof of leaking cleanup.
+    ${project_id}=    Get Variable Value    ${TEST_PROJECT_ID}    ${None}
+    IF    $project_id is None    RETURN    END
+
+    ${aims_count}=    Get Length    ${DEPLOYED_AIMS_LIST}
+    Log    Found ${aims_count} deployed AIM services to clean up    DEBUG
+    IF    ${aims_count} == 0    RETURN    END
+
+    ${namespace}=    Get Project Namespace
+    FOR    ${service_id}    IN    @{DEPLOYED_AIMS_LIST}
+        ${service_name}=    Get From Dictionary    ${DEPLOYED_AIM_NAMES}    ${service_id}
+        ${service}=    Get AIM Service    ${service_id}    ${namespace}    expected_status=any
+        IF    ${service.status_code} == 404
+            Log    AIM service ${service_id} is already absent from the API    DEBUG
+        ELSE
+            Should Be Equal As Integers    ${service.status_code}    200
+            ...    msg=Unexpected status ${service.status_code} while reading AIM service ${service_id}
+
+            ${response}=    Undeploy AIM
+            ...    ${service_id}
+            ...    ${namespace}
+            ...    expected_status=any
+            Should Be True    ${response.status_code} in [204, 404, 409]
+            ...    msg=Unexpected status ${response.status_code} while undeploying AIM service ${service_id}
+
+            Wait for catalog AIM workload to reach state
+            ...    Deleted
+            ...    timeout=120
+            ...    interval=5
+            ...    workload_id=${service_id}
+        END
+        Wait Until Keyword Succeeds    2 min    5 sec
+        ...    Verify AIM deployment gone    ${service_name}    ${namespace}
+        Log    AIM service ${service_id} deletion confirmed    DEBUG
+    END
+
+    VAR    @{DEPLOYED_AIMS_LIST}    scope=SUITE
+    VAR    &{DEPLOYED_AIM_NAMES}    scope=SUITE
+
 Cleanup AIM catalog testing
     [Documentation]    Suite teardown for AIM catalog testing.
-    ...                Performs best-effort cleanup of any remaining deployments.
-    ...                Deletes all created projects (which cascades cleanup of AIM services).
+    ...                Undeploys every remaining AIM and waits for its API resource and
+    ...                Kubernetes deployment to disappear, then deletes test projects.
+    ...                Cleans up only this suite's adopted catalog project, because standalone
+    ...                execution does not run the parent directory's Suite Teardown.
 
     Log    Cleaning up AIM catalog testing suite    INFO
-
-    TRY
-        # Check if we have a project
-        ${project_id}=    Get Variable Value    ${TEST_PROJECT_ID}    ${None}
-
-        IF    $project_id is not None
-            ${aims_count}=    Get Length    ${DEPLOYED_AIMS_LIST}
-            Log    Found ${aims_count} deployed AIM services to clean up    DEBUG
-
-            IF    ${aims_count} > 0
-                ${namespace}=    Get Project Namespace
-                FOR    ${service_id}    IN    @{DEPLOYED_AIMS_LIST}
-                    TRY
-                        ${response}=    Undeploy AIM
-                        ...    ${service_id}
-                        ...    ${namespace}
-                        ...    expected_status=any
-                        Log    Undeploy request sent for AIM service ${service_id}    DEBUG
-                    EXCEPT
-                        Log    Failed to undeploy AIM service ${service_id} (may already be undeployed)    DEBUG
-                    END
-                END
-
-                Log    AIM undeploy requests completed    INFO
-
-                VAR    @{DEPLOYED_AIMS_LIST}    scope=SUITE
-            END
-        END
-    EXCEPT
-        Log    AIM cleanup completed with warnings (expected)    DEBUG
-    END
-
-    # Clean up all created projects (this will cascade delete any remaining AIM services)
-    TRY
-        Clean Up All Created Projects With Wait
-    EXCEPT    AS    ${cleanup_error}
-        Log    Project cleanup completed with warnings: ${cleanup_error}    DEBUG
-    END
-
+    Undeploy all tracked AIM catalog services
+    Clean Up All Created Projects With Wait
+    Clean Up Catalog Project
     Log    AIM catalog testing suite cleanup complete    INFO
+
+Clean Up Catalog Project
+    [Documentation]    Deletes only the catalog project this suite adopted, then drops only
+    ...                that ID from global adopted tracking. See CatalogProjectCleanup.py for
+    ...                why the list-scoping lives in Python and why the confirmation flag must
+    ...                come from the atomic Run Keyword And Return Status rather than a
+    ...                follow-up assignment.
+    ...
+    ...                Project cleanup is best-effort: an unconfirmed deletion warns and
+    ...                returns rather than failing, because a failing suite teardown is
+    ...                reported by Robot as a failure of every test in the suite. DELETE has
+    ...                already been issued by that point, so "unconfirmed" means the 404 did
+    ...                not arrive within the timeout, not that the server refused. The ID is
+    ...                kept in tracking so a directory-level run still drains it — but a
+    ...                standalone run has no directory Suite Teardown, so there the WARN is
+    ...                the only signal and a genuinely failed delete needs external cleanup.
+    ...
+    ...                This does NOT generalize — "Undeploy all tracked AIM catalog services"
+    ...                deliberately fails on incomplete deletion, since leaked GPU pods are
+    ...                expensive and silent. Match the step, not the file.
+    # Deleting here is safe even when both catalog suites run in one directory pass. They
+    # never hold the project at the same time: Setup AIM catalog testing deletes any
+    # existing project of this name and waits for that deletion BEFORE creating its own, so
+    # each suite works on a project it made. Removing it at teardown is also what lets the
+    # next suite's stale-project sweep find nothing and skip that wait.
+    #
+    # Prefer the suite-scoped snapshot, but fall back to the creation keyword's own
+    # ${TEST_PROJECT_ID}. Setup takes the snapshot on the line AFTER
+    # "A ready project ... exists" returns, so a setup failure inside that keyword - after
+    # it created and tracked the project, while waiting for readiness or granting access -
+    # leaves the snapshot unset while the project exists. Standalone runs have no directory
+    # teardown to drain the tracking list, so without this fallback that project leaks.
+    #
+    # Both names are passed ESCAPED. Get Variable Value accepts either spelling, but its
+    # documented contract is that the unescaped form works only when the variable already
+    # exists - which is precisely what these two lookups cannot assume.
+    ${catalog_project_id}=    Get Variable Value    \${CATALOG_PROJECT_ID}    ${None}
+    IF    $catalog_project_id is None
+        ${catalog_project_id}=    Get Variable Value    \${TEST_PROJECT_ID}    ${None}
+    END
+    IF    $catalog_project_id is None    RETURN    END
+
+    TRY
+        Delete project    ${catalog_project_id}    expected_status=any
+    EXCEPT    AS    ${delete_error}
+        Log    Failed to delete catalog project ${catalog_project_id}: ${delete_error}    WARN
+    END
+
+    ${deletion_confirmed}=    Run Keyword And Return Status
+    ...    Wait Until Project Deleted    ${catalog_project_id}    timeout=1 min
+    IF    not ${deletion_confirmed}
+        Log    Catalog project ${catalog_project_id} deletion not confirmed within 1 min; it stays in adopted tracking, which a directory-level run drains from its own Suite Teardown - a standalone run has none, so delete this project manually    WARN
+    END
+
+    # No early return when the list is absent: an unconfirmed deletion still has to be
+    # recorded somewhere, and setup can abort after creating the project but before
+    # anything adopted it, which is exactly when the list does not exist yet.
+    ${adopted}=    Get Variable Value    \${ADOPTED_PROJECT_IDS}    ${None}
+    IF    $adopted is None
+        @{adopted}=    Create List
+    END
+    ${remaining}=    Scoped Cleanup Result    ${adopted}    ${catalog_project_id}    ${deletion_confirmed}
+    Set Global Variable    ${ADOPTED_PROJECT_IDS}    ${remaining}
+
+# --- Business-layer keywords for aim_catalog_cleanup.robot ---
+# The regression suite drives "Undeploy all tracked AIM catalog services" directly as its
+# keyword under test; everything else it needs (deploy, predictor-exists preconditions, name
+# capture, already-404 setup, API/Kubernetes absence checks) is wrapped here so the test file
+# itself never calls a template, an API-layer keyword, or an inline dict lookup.
+
+A catalog AIM is deployed for cleanup testing
+    [Documentation]    Deploys a real AIM via the catalog deploy template, hiding the template's
+    ...    technical argument shape (image + requires_hf_token) behind a BDD-phrased Given step.
+    [Arguments]    ${docker_image}
+    Test Template: Deploy AIM Model    ${docker_image}    ${False}
+
+The catalog AIM's predictor should be running in kubernetes
+    [Documentation]    Bounded-polling precondition confirming the controller-created predictor
+    ...    Deployment actually exists in Kubernetes before any cleanup assertion runs. Deploying
+    ...    an AIMService only waits for the API's asynchronous create to be accepted — not for
+    ...    aim-engine's controller to reconcile the predictor Deployment — so a one-shot check run
+    ...    immediately afterward races that reconciliation. Without this precondition, a cleanup
+    ...    test that never observed the predictor existing cannot prove its later absence means
+    ...    anything was actually cleaned up.
+    Wait Until Keyword Succeeds    2 min    5 sec
+    ...    AIM deployment should exist in kubernetes
+
+The deployed catalog AIM's Kubernetes name is captured
+    [Documentation]    Captures the Kubernetes AIMService name tracked at deploy time
+    ...    (${DEPLOYED_AIM_NAMES}) into ${TEST_AIM_SERVICE_NAME}, so later steps can verify
+    ...    predictor absence without the test file reading the tracking dict directly.
+    ${service_name}=    Get From Dictionary    ${DEPLOYED_AIM_NAMES}    ${TEST_AIM_ID}
+    VAR    ${TEST_AIM_SERVICE_NAME}    ${service_name}    scope=TEST
+
+The predictor Deployment for the deployed catalog AIM should no longer exist in kubernetes
+    [Documentation]    Polls until the captured catalog AIM's predictor Deployment is gone from
+    ...    Kubernetes. Requires "The deployed catalog AIM's Kubernetes name is captured" to have
+    ...    run first.
+    Variable Should Exist    ${TEST_AIM_SERVICE_NAME}
+    ...    msg=TEST_AIM_SERVICE_NAME is not set - call "The deployed catalog AIM's Kubernetes name is captured" first
+    ${namespace}=    Get Project Namespace
+    Wait Until Keyword Succeeds    2 min    5 sec
+    ...    Verify AIM deployment gone    ${TEST_AIM_SERVICE_NAME}    ${namespace}
+
+Predictor absence verification should fail while the predictor exists
+    [Documentation]    Negative check proving the Kubernetes-level absence assertion has teeth:
+    ...    called while the captured catalog AIM's predictor Deployment is still genuinely
+    ...    running, it must raise the specific "still exists" error the polling wraps — not
+    ...    merely any failure — otherwise an unrelated error (auth, API outage) could satisfy
+    ...    this check without ever proving the leak-detection logic itself works. Requires "The
+    ...    deployed catalog AIM's Kubernetes name is captured" to have run first.
+    Run Keyword And Expect Error
+    ...    *The last error was: Deployment matching ${TEST_AIM_SERVICE_NAME}-*-predictor still exists in namespace *
+    ...    The predictor Deployment for the deployed catalog AIM should no longer exist in kubernetes
+
+The deployed catalog AIM should no longer exist in the API
+    [Documentation]    Confirms the catalog AIM's AIMService resource reads 404 from the API.
+    Get AIM Service By ID    ${TEST_AIM_ID}    expected_status=404
+
+The deployed catalog AIM is undeployed directly via the API
+    [Documentation]    Undeploys the catalog AIM through the API directly (bypassing the per-model
+    ...    Undeploy test template), so the AIMService is gone from the API while suite tracking
+    ...    (${DEPLOYED_AIMS_LIST}) still carries it — mirroring a model whose own Undeploy test
+    ...    failed or was excluded, which is the already-404 branch "Undeploy all tracked AIM
+    ...    catalog services" must still handle correctly.
+    ${namespace}=    Get Project Namespace
+    Undeploy AIM    ${TEST_AIM_ID}    ${namespace}    expected_status=204
+    Wait for catalog AIM workload to reach state    Deleted    timeout=60    interval=5
+    ...    workload_id=${TEST_AIM_ID}

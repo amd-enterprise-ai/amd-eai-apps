@@ -1,0 +1,7 @@
+{
+  "get clusterqueues.kueue.x-k8s.io project-queue -o json": [
+    0,
+    "{\"metadata\":{\"name\":\"project-queue\"},\"spec\":{\"resourceGroups\":[]}}",
+    ""
+  ]
+}

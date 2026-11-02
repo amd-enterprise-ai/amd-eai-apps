@@ -15,6 +15,8 @@ interface Props<T extends FieldValues>
   icon?: ComponentType<any>;
   form: UseFormReturn<T>;
   name: Path<T>;
+  /** See `PasswordInput`'s prop of the same name. */
+  preventPasswordManagerPrompt?: boolean;
 }
 
 export const FormPasswordInput = <T extends FieldValues>({

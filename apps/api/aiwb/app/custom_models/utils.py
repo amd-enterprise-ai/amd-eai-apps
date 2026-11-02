@@ -22,8 +22,10 @@ from .constants import (
     _REPO_PART_PATTERN,
     _REVISION_MARKERS,
     _WEIGHT_EXTENSIONS,
+    CANONICAL_REPO_ID_ANNOTATION,
     HF_API_BASE,
     MODEL_DISPLAY_NAME_ANNOTATION,
+    MODEL_PRECISION_ANNOTATION,
     REVISION_ANNOTATION,
     SOURCE_DESCRIPTION_ANNOTATION,
     SOURCE_SHA_ANNOTATION,
@@ -289,8 +291,9 @@ def extract_hf_token_secret_name(cr: AIMModelResource) -> str | None:
         return None
     for source in overrides.model_sources:
         for entry in source.env or []:
-            if entry.get("name") == "HF_TOKEN":
-                return entry.get("valueFrom", {}).get("secretKeyRef", {}).get("name")
+            if entry.name == "HF_TOKEN":
+                value_from = (entry.model_extra or {}).get("valueFrom", {})
+                return value_from.get("secretKeyRef", {}).get("name")
     return None
 
 
@@ -304,12 +307,17 @@ def extract_overrides_image(cr: AIMModelResource) -> str:
 
 
 def extract_onboard_repo_id(cr: AIMModelResource) -> str:
-    """Return the HF repo id the onboard AIMModel was derived from, or "".
+    """Return the repo id (or S3 URI) the onboard AIMModel was derived from, or "".
 
-    Onboard stamps the repo id as both the derived identity (``overrides.modelId``)
-    and the weights ``modelSources[0].modelId``; prefer the identity field and
-    fall back to the first source.
+    Prefer the canonical repo-id annotation, which preserves the user-entered
+    source (including full S3 URIs). Fall back to profile overrides for older
+    resources that predate the annotation.
     """
+    annotations = cr.metadata.annotations or {}
+    canonical_repo_id = annotations.get(CANONICAL_REPO_ID_ANNOTATION)
+    if canonical_repo_id:
+        return canonical_repo_id
+
     overrides = _onboard_overrides(cr)
     if overrides is None:
         return ""
@@ -447,6 +455,18 @@ def build_copy_onboard_request(source: AIMModelResource, copy_display_name: str)
             )
         )
 
+    custom_profile: dict[str, Any] | None = (
+        source.spec.profiles.overrides.model_dump(by_alias=True, exclude_none=True)
+        if source.spec.profiles and source.spec.profiles.overrides
+        else None
+    )
+    # Precision is pruned from overrides, so it survives only on the annotation.
+    # Re-inject it into the copy's customProfile so the copied model keeps the
+    # source's chosen precision (which the onboard path re-stamps as an annotation).
+    source_precision = source_annotations.get(MODEL_PRECISION_ANNOTATION)
+    if source_precision:
+        custom_profile = {**(custom_profile or {}), "precision": source_precision}
+
     return OnboardRequest(
         repo_id=source_repo_id,
         revision=source_revision,
@@ -456,9 +476,5 @@ def build_copy_onboard_request(source: AIMModelResource, copy_display_name: str)
         tags=source_tags,
         image=source_image,
         hf_token_secret_name=source_hf_secret,
-        custom_profile=(
-            source.spec.profiles.overrides.model_dump(by_alias=True, exclude_none=True)
-            if source.spec.profiles and source.spec.profiles.overrides
-            else None
-        ),
+        custom_profile=custom_profile,
     )

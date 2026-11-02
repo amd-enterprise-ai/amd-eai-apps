@@ -36,6 +36,7 @@ from .models import User as UserModel
 from .repository import create_user as create_user_in_db
 from .repository import delete_user as delete_user_from_db
 from .repository import get_users as get_users_from_db
+from .repository import get_users_by_keycloak_ids
 from .schemas import (
     InvitedUser,
     InviteUser,
@@ -178,18 +179,49 @@ async def get_users(kc_admin: KeycloakAdmin, session: AsyncSession) -> list[User
         get_users_from_db(session),
     )
 
-    keycloak_users_by_id = {user["id"]: user for user in keycloak_users}
+    db_users_by_keycloak_id = {user.keycloak_user_id: user for user in db_users}
     platform_admins = {pa["id"] for pa in platform_admin_users}
+
+    active_keycloak_users = [user for user in keycloak_users if is_keycloak_user_active(user)]
+
+    # Federated users (e.g. from OKTA) may exist only in Keycloak, so give them a local record
+    # here; otherwise they are absent from the Users tab and cannot be assigned to projects.
+    for keycloak_user in active_keycloak_users:
+        if keycloak_user["id"] not in db_users_by_keycloak_id:
+            if registered_user := await _register_federated_user(session, keycloak_user):
+                db_users_by_keycloak_id[keycloak_user["id"]] = registered_user
 
     return [
         merge_user_details(
             keycloak_user=keycloak_user,
-            user=user,
+            user=db_user,
             platform_admins=platform_admins,
         )
-        for user in db_users
-        if (keycloak_user := keycloak_users_by_id.get(user.keycloak_user_id)) and is_keycloak_user_active(keycloak_user)
+        for keycloak_user in active_keycloak_users
+        if (db_user := db_users_by_keycloak_id.get(keycloak_user["id"]))
     ]
+
+
+async def _register_federated_user(session: AsyncSession, keycloak_user: dict) -> UserModel | None:
+    """Create a local record for a Keycloak user that has no AIRM row yet.
+
+    Returns the existing record instead when a concurrent request already created it or an
+    invited user with the same email exists, and ``None`` when the Keycloak user has no email.
+    """
+    email = keycloak_user.get("email")
+    keycloak_user_id = keycloak_user["id"]
+    if not email:
+        return None
+    try:
+        # SAVEPOINT so a unique-constraint conflict does not abort the surrounding transaction.
+        async with session.begin_nested():
+            return await create_user_in_db(session, email, keycloak_user_id, "federated")
+    except ConflictException:
+        # The conflict is on either keycloak_user_id (concurrent insert) or email (an existing
+        # invited user); return whichever local record already claims this user.
+        if existing := await get_users_by_keycloak_ids(session, [keycloak_user_id]):
+            return existing[0]
+        return await get_user_by_email(session, email)
 
 
 async def get_invited_users(kc_admin: KeycloakAdmin, session: AsyncSession) -> list[InvitedUser]:

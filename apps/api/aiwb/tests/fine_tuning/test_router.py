@@ -14,12 +14,15 @@ from api_common.collections import PaginatedResult
 from api_common.exceptions import DeletionConflictException, NotFoundException
 from app import app  # type: ignore[attr-defined]
 from app.aims.crds import AIMModelResource
-from app.models.schemas import FinetunableModelResponse, FinetuneJobResponse
+from app.models.schemas import FinetunableModelResponse, FinetuneJobResponse, FinetuningHyperparameters
 from app.workloads.constants import WORKLOAD_TYPE_LABEL
 from app.workloads.enums import WorkloadType
 from tests.dependency_overrides import BASE_OVERRIDES, MINIO_OVERRIDES, SESSION_OVERRIDES, override_dependencies
 
 NAMESPACE = "test-namespace"
+
+# Every field is required, so a listing entry that advertises nothing has to spell that out.
+NO_HYPERPARAMETERS = FinetuningHyperparameters(batch_size=None, epochs=None, learning_rate=None, lora=None)
 
 
 def make_aim_model_resource(resource_name: str = "test-model-cr", fine_tuning: bool = True) -> AIMModelResource:
@@ -54,10 +57,16 @@ def make_finetune_job_response(**kwargs: object) -> FinetuneJobResponse:
 def test_list_finetunable_models(mock_get_finetunable: MagicMock) -> None:
     mock_get_finetunable.return_value = [
         FinetunableModelResponse(
-            canonical_name="meta-llama/Llama-3.1-8B", gpu_count=1, compatible_accelerators=["74a1"]
+            canonical_name="meta-llama/Llama-3.1-8B",
+            gpu_count=1,
+            compatible_accelerators=["74a1"],
+            hyperparameters=NO_HYPERPARAMETERS,
         ),
         FinetunableModelResponse(
-            canonical_name="microsoft/DialoGPT-medium", gpu_count=None, compatible_accelerators=[]
+            canonical_name="microsoft/DialoGPT-medium",
+            gpu_count=None,
+            compatible_accelerators=[],
+            hyperparameters=NO_HYPERPARAMETERS,
         ),
     ]
 
@@ -94,9 +103,17 @@ def test_list_finetunable_models_empty(mock_get_finetunable: MagicMock) -> None:
 def test_get_finetunable_model(mock_get_finetunable: MagicMock) -> None:
     canonical_name = "meta-llama/Llama-3.1-8B"
     mock_get_finetunable.return_value = [
-        FinetunableModelResponse(canonical_name=canonical_name, gpu_count=1, compatible_accelerators=["74a1"]),
         FinetunableModelResponse(
-            canonical_name="microsoft/DialoGPT-medium", gpu_count=None, compatible_accelerators=[]
+            canonical_name=canonical_name,
+            gpu_count=1,
+            compatible_accelerators=["74a1"],
+            hyperparameters=NO_HYPERPARAMETERS,
+        ),
+        FinetunableModelResponse(
+            canonical_name="microsoft/DialoGPT-medium",
+            gpu_count=None,
+            compatible_accelerators=[],
+            hyperparameters=NO_HYPERPARAMETERS,
         ),
     ]
 
@@ -111,7 +128,9 @@ def test_get_finetunable_model(mock_get_finetunable: MagicMock) -> None:
 @patch("app.fine_tuning.router.get_finetunable_models", autospec=True)
 def test_get_finetunable_model_not_found(mock_get_finetunable: MagicMock) -> None:
     mock_get_finetunable.return_value = [
-        FinetunableModelResponse(canonical_name="meta-llama/Llama-3.1-8B", gpu_count=1),
+        FinetunableModelResponse(
+            canonical_name="meta-llama/Llama-3.1-8B", gpu_count=1, hyperparameters=NO_HYPERPARAMETERS
+        ),
     ]
 
     with TestClient(app) as client:
@@ -381,6 +400,27 @@ def test_create_fine_tuning_job_with_canonical_name(mock_run: MagicMock) -> None
 
     assert response.status_code == status.HTTP_202_ACCEPTED
     assert mock_run.call_args.kwargs["model_id"] == canonical_name
+
+
+@override_dependencies(SESSION_OVERRIDES)
+@patch("app.fine_tuning.router.run_finetune_model_workload", autospec=True)
+def test_create_fine_tuning_job_with_multiple_datasets(mock_run: MagicMock) -> None:
+    dataset_ids = [uuid4(), uuid4()]
+    mock_run.return_value = make_finetune_job_response()
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/v1/projects/{NAMESPACE}/fine-tuning/jobs",
+            json={
+                "baseModel": "meta-llama/Llama-3.1-8B",
+                "displayName": "my-finetune",
+                "datasetIds": [str(dataset_id) for dataset_id in dataset_ids],
+            },
+        )
+
+    assert response.status_code == status.HTTP_202_ACCEPTED
+    request = mock_run.call_args.kwargs["finetuning_data"]
+    assert request.dataset_ids == dataset_ids
 
 
 @override_dependencies(SESSION_OVERRIDES)

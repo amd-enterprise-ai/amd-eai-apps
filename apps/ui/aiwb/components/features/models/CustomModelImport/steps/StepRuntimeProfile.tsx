@@ -8,7 +8,10 @@ import type { UseFormReturn } from 'react-hook-form';
 
 import type { RuntimeProfileCatalogState } from '@/hooks/useRuntimeProfileCatalog';
 
-import { RuntimeProfileFields } from '../../runtime-profile';
+import {
+  RuntimeProfileFields,
+  type RuntimeProfileSelectionState,
+} from '../../runtime-profile';
 import type { CustomModelImportFormValues } from '../types';
 
 interface Props {
@@ -21,6 +24,8 @@ interface Props {
    */
   isDisabled?: boolean;
   disabledNotice?: string;
+  /** Lifts the runtime-selection block so the wizard can gate its Next/submit. */
+  onSelectionStateChange?: (state: RuntimeProfileSelectionState) => void;
 }
 
 const ENGINE_ARGS_REFERENCE_URL =
@@ -43,6 +48,7 @@ export const StepRuntimeProfile = ({
   catalog,
   isDisabled = false,
   disabledNotice,
+  onSelectionStateChange,
 }: Props) => {
   const { t } = useTranslation('models', {
     keyPrefix: 'customModels.import.steps.runtime',
@@ -75,6 +81,8 @@ export const StepRuntimeProfile = ({
     catalogLoading: t('catalog.loading'),
     catalogError: t('catalog.error'),
     catalogRetry: t('catalog.retry'),
+    baseImageOptionsWarning: t('catalog.baseImageOptionsWarning'),
+    noValidCombinationsWarning: t('catalog.noValidCombinations'),
     emptyAccelerators: t('catalog.emptyAccelerators'),
   };
 
@@ -86,7 +94,7 @@ export const StepRuntimeProfile = ({
 
       {isDisabled && disabledNotice && (
         <div
-          className="rounded-medium border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-default-700"
+          className="rounded-medium border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-foreground"
           data-testid="custom-model-import-runtime-disabled-notice"
         >
           {disabledNotice}
@@ -95,20 +103,19 @@ export const StepRuntimeProfile = ({
 
       <section className="flex flex-col gap-4">
         <SectionHeader title={t('profileParameters.title')} />
-        <p className="text-sm text-default-500">
-          {t('profileParameters.subtitle')}
-        </p>
+        <p className="text-sm text-muted">{t('profileParameters.subtitle')}</p>
         <RuntimeProfileFields
           form={form}
           catalog={catalog}
           labels={fieldLabels}
           isDisabled={isDisabled}
+          onSelectionStateChange={onSelectionStateChange}
         />
       </section>
 
       <section className="flex flex-col gap-4">
         <SectionHeader title={t('engineArguments.title')} />
-        <p className="text-sm text-default-600">
+        <p className="text-sm text-foreground">
           <Trans
             i18nKey="customModels.import.steps.runtime.engineArguments.body"
             ns="models"
@@ -118,7 +125,7 @@ export const StepRuntimeProfile = ({
                   href={ENGINE_ARGS_REFERENCE_URL}
                   isExternal
                   showAnchorIcon={false}
-                  className="text-primary underline"
+                  className="text-accent underline"
                 />
               ),
               profiles: (
@@ -126,7 +133,7 @@ export const StepRuntimeProfile = ({
                   href={PUBLISHED_AIM_PROFILES_URL}
                   isExternal
                   showAnchorIcon={false}
-                  className="text-primary underline"
+                  className="text-accent underline"
                 />
               ),
             }}
@@ -145,7 +152,7 @@ export const StepRuntimeProfile = ({
 
       <section className="flex flex-col gap-4">
         <SectionHeader title={t('environmentVariables.title')} />
-        <p className="text-sm text-default-600">
+        <p className="text-sm text-foreground">
           <Trans
             i18nKey="customModels.import.steps.runtime.environmentVariables.body"
             ns="models"
@@ -155,7 +162,7 @@ export const StepRuntimeProfile = ({
                   href={ENV_VARS_REFERENCE_URL}
                   isExternal
                   showAnchorIcon={false}
-                  className="text-primary underline"
+                  className="text-accent underline"
                 />
               ),
               profiles: (
@@ -163,7 +170,7 @@ export const StepRuntimeProfile = ({
                   href={PUBLISHED_AIM_PROFILES_URL}
                   isExternal
                   showAnchorIcon={false}
-                  className="text-primary underline"
+                  className="text-accent underline"
                 />
               ),
             }}

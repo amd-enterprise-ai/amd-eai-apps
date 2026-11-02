@@ -8,7 +8,7 @@ import { IconArrowLeft } from '@tabler/icons-react';
 import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useForm, type Resolver } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 
 import { ActionButton, StepPage } from '@amdenterpriseai/components';
@@ -23,11 +23,19 @@ import {
   collectExistingDisplayNames,
   extractCustomModelCanonicalName,
   extractCustomModelDisplayMetadata,
+  extractCustomModelPrecision,
   getCustomModel,
   listCustomModels,
   patchCustomModel,
 } from '@/lib/app/custom-models';
-import { onboardModel, previewModelSource } from '@/lib/app/model-import';
+import {
+  buildOnboardSourceFields,
+  buildPreviewRequest,
+  isValidS3Uri,
+  onboardModel,
+  previewModelSource,
+} from '@/lib/app/model-import';
+import type { RuntimeSelectionBlock } from '@/lib/app/runtimeProfileCatalog';
 import {
   formValuesToProfileOverrides,
   formValuesToProfilePatch,
@@ -35,13 +43,17 @@ import {
   profileOverridesToFormValues,
   profileOverridesToOnboardBody,
 } from '@/lib/app/runtimeProfileMappers';
-import type { CustomModelPatchBody } from '@/types/custom-models';
-import type { ModelSourcePreviewResponse } from '@/types/model-import';
+import type { components } from '@/types/api';
+import {
+  MODEL_SOURCE_TYPE,
+  type ModelSourcePreviewResponse,
+} from '@/types/model-import';
 
 import StepModelInformation from './steps/StepModelInformation';
 import StepModelSource from './steps/StepModelSource';
 import StepRuntimeProfile from './steps/StepRuntimeProfile';
 import {
+  customModelImportBaseSchema,
   DEFAULT_CUSTOM_MODEL_IMPORT_VALUES,
   type CustomModelImportFormValues,
 } from './types';
@@ -88,6 +100,9 @@ export const CustomModelImportPage = ({
     keyPrefix: 'customModels.import',
   });
   const { t: tActions } = useTranslation('common', { keyPrefix: 'actions' });
+  const { t: tSharedActions } = useTranslation('sharedComponents', {
+    keyPrefix: 'actions',
+  });
   const router = useRouter();
   const { toast } = useSystemToast();
   const { activeProject, projectPath } = useProject();
@@ -112,6 +127,11 @@ export const CustomModelImportPage = ({
     ModelSourcePreviewResponse | undefined
   >(undefined);
   const [prefilled, setPrefilled] = useState(false);
+  // Set by the runtime step when no valid combination is selectable (options
+  // loading/failed, or profiles that exist but none resolvable); blocks onboard
+  // submit so the wizard cannot post a tuple the API rejects with a 400.
+  const [runtimeBlock, setRuntimeBlock] = useState<RuntimeSelectionBlock>(null);
+  const isRuntimeBlocked = runtimeBlock !== null;
 
   const modelQuery = useQuery({
     queryKey: ['project', namespace, 'custom-model', modelId],
@@ -144,13 +164,12 @@ export const CustomModelImportPage = ({
 
   const schema = useMemo(
     () =>
-      z
-        .object({
+      customModelImportBaseSchema
+        .extend({
           source: z
             .string()
             .trim()
             .min(1, { message: t('errors.sourceRequired') }),
-          hfTokenSecretName: z.string().optional().default(''),
           // Display name is a free-form, human-readable label (stored as an
           // annotation), not a K8s resource name — the backend derives the CR
           // name from the repo id. Only non-emptiness is required, matching the
@@ -159,13 +178,10 @@ export const CustomModelImportPage = ({
             .string()
             .trim()
             .min(1, { message: t('errors.displayNameRequired') }),
-          description: z.string().optional().default(''),
-          tagsInput: z.string().optional().default(''),
           containerImage: z
             .string()
             .trim()
             .min(1, { message: t('errors.containerImageRequired') }),
-          containerVersion: z.string().optional().default(''),
           acceleratorType: z
             .string()
             .trim()
@@ -182,14 +198,28 @@ export const CustomModelImportPage = ({
             .string()
             .trim()
             .min(1, { message: t('errors.modelPrecisionRequired') }),
-          engineArgsYaml: z.string().optional().default(''),
-          envVarsYaml: z.string().optional().default(''),
         })
         .superRefine((data, ctx) => {
+          if (data.sourceType === MODEL_SOURCE_TYPE.S3) {
+            if (!isValidS3Uri(data.source)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: t('errors.invalidS3Uri'),
+                path: ['source'],
+              });
+            }
+            if (!data.s3StorageName.trim()) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: t('errors.s3StorageRequired'),
+                path: ['s3StorageName'],
+              });
+            }
+          }
           const family = catalog.imageFamilies.find(
             (entry) => entry.familyId === data.containerImage,
           );
-          const hasTagOptions = (family?.tags.length ?? 0) > 0;
+          const hasTagOptions = (family?.tags?.length ?? 0) > 0;
           if (hasTagOptions && !data.containerVersion.trim()) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
@@ -218,9 +248,7 @@ export const CustomModelImportPage = ({
   const form = useForm<CustomModelImportFormValues>({
     defaultValues: DEFAULT_CUSTOM_MODEL_IMPORT_VALUES,
     mode: 'onBlur',
-    resolver: zodResolver(
-      schema,
-    ) as unknown as Resolver<CustomModelImportFormValues>,
+    resolver: zodResolver(schema),
   });
 
   const returnToList = useCallback(() => {
@@ -237,17 +265,28 @@ export const CustomModelImportPage = ({
     }
     const displayMetadata = extractCustomModelDisplayMetadata(model);
     const runtimeValues = profileOverridesToFormValues(
-      model.spec.profiles?.overrides,
+      model.spec?.profiles?.overrides,
       catalog.imageFamilies,
       catalog.accelerators,
     );
+    // Precision is pruned from overrides, so it survives only on the annotation;
+    // prefer it over the overrides fallback (which always resolves to 'bf16').
+    const persistedPrecision = extractCustomModelPrecision(model);
+    // The canonical name doubles as the source location, so its scheme is what
+    // identifies which family the model was imported from.
+    const canonicalName = extractCustomModelCanonicalName(model);
     form.reset({
-      source: extractCustomModelCanonicalName(model),
+      sourceType: canonicalName.startsWith('s3://')
+        ? MODEL_SOURCE_TYPE.S3
+        : MODEL_SOURCE_TYPE.HUGGING_FACE,
+      source: canonicalName,
       hfTokenSecretName: '',
+      s3StorageName: '',
       displayName: displayMetadata.displayName,
       description: displayMetadata.description,
       tagsInput: displayMetadata.tags.join(', '),
       ...runtimeValues,
+      ...(persistedPrecision ? { modelPrecision: persistedPrecision } : {}),
     });
     setPrefilled(true);
   }, [
@@ -265,11 +304,17 @@ export const CustomModelImportPage = ({
       if (!namespace) {
         throw new APIRequestError(t('errors.noProject'), 422);
       }
-      const { source, hfTokenSecretName } = form.getValues();
-      return previewModelSource(namespace, {
-        source: source.trim(),
-        hfTokenSecretName: hfTokenSecretName?.trim() || undefined,
-      });
+      const { sourceType, source, hfTokenSecretName, s3StorageName } =
+        form.getValues();
+      return previewModelSource(
+        namespace,
+        buildPreviewRequest({
+          sourceType,
+          source,
+          hfTokenSecretName,
+          s3StorageName,
+        }),
+      );
     },
     onSuccess: (result) => {
       setPreview(result);
@@ -305,7 +350,6 @@ export const CustomModelImportPage = ({
         throw new APIRequestError(t('errors.missingPreview'), 422);
       }
       const description = values.description.trim();
-      const hfTokenSecretName = values.hfTokenSecretName?.trim();
       const overrides = formValuesToProfileOverrides(
         values,
         catalog.imageFamilies,
@@ -313,13 +357,13 @@ export const CustomModelImportPage = ({
       const body = profileOverridesToOnboardBody(
         overrides,
         {
+          ...buildOnboardSourceFields(values),
           repoId: preview.repoId,
           revision: preview.revision,
           sha: preview.sha,
           displayName: values.displayName.trim(),
           tags: splitTags(values.tagsInput),
           ...(description ? { description } : {}),
-          ...(hfTokenSecretName ? { hfTokenSecretName } : {}),
         },
         catalog.imageFamilies,
         catalog.accelerators,
@@ -345,7 +389,7 @@ export const CustomModelImportPage = ({
         throw new APIRequestError(t('errors.noProject'), 422);
       }
       const dirty = form.formState.dirtyFields;
-      const body: CustomModelPatchBody = {};
+      const body: components['schemas']['CustomModelPatchRequest'] = {};
       if (dirty.displayName) {
         body.displayName = values.displayName.trim();
       }
@@ -408,7 +452,7 @@ export const CustomModelImportPage = ({
       goToStep(1);
       return;
     }
-    const valid = await form.trigger(['source']);
+    const valid = await form.trigger(['source', 's3StorageName']);
     if (!valid) return;
     previewMutation.mutate();
   }, [form, goToStep, isEdit, previewMutation]);
@@ -470,9 +514,22 @@ export const CustomModelImportPage = ({
     catalog.isLoading ||
     catalog.isError ||
     catalog.accelerators.length === 0 ||
+    isRuntimeBlocked ||
     onboardMutation.isPending;
 
-  const editSaveDisabled = catalog.isLoading || patchMutation.isPending;
+  // Whether the edit touches any runtime field. Read at render so the Save button
+  // reacts to edits. A metadata-only edit sends no runtime data (the PATCH gates
+  // on this), and a rename resolves no base profile, so the runtime block must not
+  // disable Save unless a runtime field actually changed.
+  const editDirtyFields = form.formState.dirtyFields;
+  const editRuntimeDirty =
+    RUNTIME_FIELD_NAMES.some((field) => editDirtyFields[field]) ||
+    Boolean(editDirtyFields.engineArgsYaml || editDirtyFields.envVarsYaml);
+
+  const editSaveDisabled =
+    catalog.isLoading ||
+    (isRuntimeBlocked && editRuntimeDirty) ||
+    patchMutation.isPending;
 
   const steps: StepPageStep[] = useMemo(
     () => [
@@ -500,7 +557,9 @@ export const CustomModelImportPage = ({
               onPress={advanceFromSource}
               data-testid="custom-model-import-next-source"
             >
-              {isEdit ? tActions('next') : t('actions.previewAndContinue')}
+              {isEdit
+                ? tSharedActions('next')
+                : t('actions.previewAndContinue')}
             </ActionButton>
           </div>
         ),
@@ -545,6 +604,7 @@ export const CustomModelImportPage = ({
                 ? t('steps.runtime.profileNotReadyNotice')
                 : undefined
             }
+            onSelectionStateChange={(state) => setRuntimeBlock(state.block)}
           />
         ),
         customActions: (
@@ -592,6 +652,7 @@ export const CustomModelImportPage = ({
       submitFromRuntime,
       t,
       tActions,
+      tSharedActions,
     ],
   );
 
@@ -618,10 +679,10 @@ export const CustomModelImportPage = ({
           <h1 className="text-2xl font-semibold">
             {isEdit ? t('editTitle') : t('title')}
           </h1>
-          <p className="text-sm text-default-500">
-            {isEdit ? t('editDescription') : t('description')}
-          </p>
         </div>
+        <p className="text-sm text-muted">
+          {isEdit ? t('editDescription') : t('description')}
+        </p>
       </header>
 
       {showEditError ? (

@@ -18,7 +18,9 @@ from pydantic import ValidationError
 from api_common.exceptions import ConflictException, ExternalServiceError, NotFoundException, ValidationException
 from app.aims.crds import AIMModelResource, AIMProfileResource
 from app.custom_models.constants import (
+    CANONICAL_REPO_ID_ANNOTATION,
     MODEL_DISPLAY_NAME_ANNOTATION,
+    MODEL_PRECISION_ANNOTATION,
     SOURCE_DESCRIPTION_ANNOTATION,
     SOURCE_TAGS_ANNOTATION,
     SOURCE_URI_ANNOTATION,
@@ -35,6 +37,7 @@ from app.dispatch.kube_client import KubernetesClient
 from app.minio import MinioClient
 from app.workloads.constants import DISPLAY_NAME_ANNOTATION, MODEL_NAME_LABEL, MODEL_SOURCE_TYPE_LABEL
 from app.workloads.enums import ModelSourceType
+from tests.factory import make_aim_profile_set
 
 
 @pytest.fixture(autouse=True)
@@ -167,11 +170,14 @@ def mock_profile_gateway() -> Any:
 
     Yields ``(find_mock, patch_mock)``; both default to a ready profile. Tests
     that exercise the not-ready path set ``find_mock.return_value = None``.
+
+    ``find_mock`` stands in for the Default set's effective-profile resolution the
+    patch fallback uses when the edit does not itself narrow the Default.
     """
     profile = _make_aim_profile()
     with (
         patch(
-            "app.custom_models.service.find_aim_profile_for_model",
+            "app.custom_models.service._default_effective_profile",
             new_callable=AsyncMock,
             return_value=profile,
         ) as find_mock,
@@ -728,6 +734,54 @@ async def test_patch_image_only_repatches_overrides_and_live_profile(
     assert profile_kwargs["custom_profile_spec"] is None
 
 
+async def test_patch_image_only_preserves_s3_identity_when_canonical_source_is_external_uri(
+    mock_kube_client: MagicMock,
+    mock_minio_client: MagicMock,
+    mock_profile_gateway: Any,
+) -> None:
+    """An S3-backed model edit must preserve existing aimId/modelId identity, not rewrite to canonical source URI."""
+    _, patch_profile_mock = mock_profile_gateway
+    model_name = "llama-3-8b-import-12345678"
+    s3_identity = f"s3/{model_name}"
+    external_source_uri = "s3://external-user-bucket/models/llama-3-8b/"
+    existing = _make_profiles_shaped_model(
+        name=model_name,
+        overrides_extra={
+            "aimId": s3_identity,
+            "modelId": s3_identity,
+            "modelSources": [{"modelId": s3_identity, "sourceUri": external_source_uri}],
+        },
+    )
+    existing.metadata.annotations = existing.metadata.annotations or {}
+    existing.metadata.annotations[CANONICAL_REPO_ID_ANNOTATION] = external_source_uri
+    mock_kube_client.custom_objects.get_namespaced_custom_object = AsyncMock(
+        return_value=existing.model_dump(by_alias=True)
+    )
+    mock_kube_client.custom_objects.patch_namespaced_custom_object = AsyncMock(
+        return_value=existing.model_dump(by_alias=True)
+    )
+
+    new_image = "docker.io/amdenterpriseai/aim:2.0.0"
+    await patch_onboarded_model(
+        kube_client=mock_kube_client,
+        minio_client=mock_minio_client,
+        namespace="test-namespace",
+        name=model_name,
+        request=CustomModelPatchRequest(image=new_image),
+    )
+
+    body = mock_kube_client.custom_objects.patch_namespaced_custom_object.call_args.kwargs["body"]
+    overrides = body["spec"]["profiles"]["overrides"]
+    assert overrides["image"] == new_image
+    assert overrides["aimId"] == s3_identity
+    assert overrides["modelId"] == s3_identity
+    assert overrides["modelSources"] == [{"modelId": s3_identity, "sourceUri": external_source_uri}]
+
+    profile_kwargs = patch_profile_mock.call_args.kwargs
+    assert profile_kwargs["image_ref"] == new_image
+    assert profile_kwargs["custom_profile_spec"] is None
+
+
 async def test_patch_image_edit_aim_profile_k8s_error_maps_to_external_service_error(
     mock_kube_client: MagicMock,
     mock_minio_client: MagicMock,
@@ -745,7 +799,7 @@ async def test_patch_image_edit_aim_profile_k8s_error_maps_to_external_service_e
         ]
     )
     with patch(
-        "app.custom_models.service.find_aim_profile_for_model",
+        "app.custom_models.service._default_effective_profile",
         new_callable=AsyncMock,
         return_value=_make_aim_profile(),
     ):
@@ -799,6 +853,62 @@ async def test_patch_custom_profile_rewrites_overrides_and_merges_profile_spec(
     assert profile_spec == custom_profile
     assert "aimId" not in profile_spec
     assert "modelSources" not in profile_spec
+
+
+async def test_patch_custom_profile_precision_stamps_durable_annotation(
+    mock_kube_client: MagicMock,
+    mock_minio_client: MagicMock,
+    mock_profile_gateway: Any,
+) -> None:
+    """Precision is pruned from overrides, so an edited precision must also land
+    on the durable annotation the edit prefill and deploy default read back."""
+    existing = _make_profiles_shaped_model()
+    mock_kube_client.custom_objects.get_namespaced_custom_object = AsyncMock(
+        return_value=existing.model_dump(by_alias=True)
+    )
+    mock_kube_client.custom_objects.patch_namespaced_custom_object = AsyncMock(
+        return_value=existing.model_dump(by_alias=True)
+    )
+
+    await patch_onboarded_model(
+        kube_client=mock_kube_client,
+        minio_client=mock_minio_client,
+        namespace="test-namespace",
+        name=existing.metadata.name,
+        request=CustomModelPatchRequest(image=_EXISTING_IMAGE, custom_profile={"precision": "fp8"}),
+    )
+
+    body = mock_kube_client.custom_objects.patch_namespaced_custom_object.call_args.kwargs["body"]
+    assert body["metadata"]["annotations"][MODEL_PRECISION_ANNOTATION] == "fp8"
+
+
+async def test_patch_custom_profile_precision_null_clears_durable_annotation(
+    mock_kube_client: MagicMock,
+    mock_minio_client: MagicMock,
+    mock_profile_gateway: Any,
+) -> None:
+    """A null precision resets to the aim-engine default (merge-patch semantics),
+    so the durable annotation must be cleared with a null value rather than left
+    stale for the edit prefill and deploy default to read."""
+    existing = _make_profiles_shaped_model()
+    mock_kube_client.custom_objects.get_namespaced_custom_object = AsyncMock(
+        return_value=existing.model_dump(by_alias=True)
+    )
+    mock_kube_client.custom_objects.patch_namespaced_custom_object = AsyncMock(
+        return_value=existing.model_dump(by_alias=True)
+    )
+
+    await patch_onboarded_model(
+        kube_client=mock_kube_client,
+        minio_client=mock_minio_client,
+        namespace="test-namespace",
+        name=existing.metadata.name,
+        request=CustomModelPatchRequest(image=_EXISTING_IMAGE, custom_profile={"precision": None}),
+    )
+
+    body = mock_kube_client.custom_objects.patch_namespaced_custom_object.call_args.kwargs["body"]
+    # Null annotation value deletes the key under merge-patch, resetting the stored precision.
+    assert body["metadata"]["annotations"][MODEL_PRECISION_ANNOTATION] is None
 
 
 async def test_patch_persists_runtime_profile_fields_from_edit_wizard(
@@ -982,6 +1092,220 @@ async def test_patch_profile_edit_without_ready_profile_returns_409(
     # No CR mutation when the readiness precondition fails.
     mock_kube_client.custom_objects.patch_namespaced_custom_object.assert_not_called()
     patch_profile_mock.assert_not_awaited()
+
+
+async def test_patch_display_name_restamps_drifted_named_profile_set(
+    mock_kube_client: MagicMock,
+    mock_minio_client: MagicMock,
+) -> None:
+    """A model PATCH restamps AIWB-authored siblings whose identity has drifted, not the Default."""
+    existing = _make_profiles_shaped_model()
+    patched = _make_profiles_shaped_model(display_name="Renamed Model")
+    mock_kube_client.custom_objects.get_namespaced_custom_object = AsyncMock(
+        return_value=existing.model_dump(by_alias=True)
+    )
+    mock_kube_client.custom_objects.patch_namespaced_custom_object = AsyncMock(
+        return_value=patched.model_dump(by_alias=True)
+    )
+    default_set = make_aim_profile_set(
+        name=f"{existing.metadata.name}-profiles-abc",
+        model_name=existing.metadata.name,
+        extra_spec={"overrides": {"aimId": "org/model-a", "modelId": "org/model-a"}},
+    )
+    drifted = make_aim_profile_set(
+        name=f"{existing.metadata.name}-low-latency-7f3b6c8e",
+        model_name=existing.metadata.name,
+        is_aiwb_authored=True,
+        extra_spec={
+            "overrides": {
+                "aimId": "org/model-a",
+                "modelId": "org/model-a",
+                "modelSources": [{"modelId": "org/model-a", "sourceUri": "hf://org/model-a"}],
+                "engineArgs": {"max-model-len": 4096},
+            }
+        },
+    )
+    restamp = AsyncMock(return_value=drifted)
+    with (
+        patch(
+            "app.custom_models.service.aims_gateway.list_aim_profile_sets_for_model",
+            AsyncMock(return_value=[default_set, drifted]),
+        ),
+        patch("app.custom_models.service.aims_gateway.patch_aim_profile_set", restamp),
+    ):
+        result = await patch_onboarded_model(
+            kube_client=mock_kube_client,
+            minio_client=mock_minio_client,
+            namespace="test-namespace",
+            name=existing.metadata.name,
+            request=CustomModelPatchRequest(display_name="Renamed Model"),
+        )
+
+    restamp.assert_awaited_once()
+    assert restamp.await_args is not None
+    _, namespace, name, body = restamp.await_args.args
+    assert namespace == "test-namespace"
+    assert name == drifted.metadata.name
+    overrides = body["spec"]["overrides"]
+    assert overrides["aimId"] == _REPO_ID
+    assert overrides["modelId"] == _REPO_ID
+    assert overrides["modelSources"][0]["modelId"] == _REPO_ID
+    assert "engineArgs" not in overrides
+    assert "image" not in overrides
+    assert result.display_name == "Renamed Model"
+
+
+async def test_patch_skips_identity_restamp_when_named_set_already_matches(
+    mock_kube_client: MagicMock,
+    mock_minio_client: MagicMock,
+) -> None:
+    existing = _make_profiles_shaped_model()
+    mock_kube_client.custom_objects.get_namespaced_custom_object = AsyncMock(
+        return_value=existing.model_dump(by_alias=True)
+    )
+    mock_kube_client.custom_objects.patch_namespaced_custom_object = AsyncMock(
+        return_value=existing.model_dump(by_alias=True)
+    )
+    profiles = existing.spec.profiles
+    assert profiles is not None
+    identity = {
+        "aimId": _REPO_ID,
+        "modelId": _REPO_ID,
+        "modelSources": [
+            source.model_dump(by_alias=True, exclude_none=True) for source in profiles.overrides.model_sources
+        ],
+    }
+    named = make_aim_profile_set(
+        name=f"{existing.metadata.name}-low-latency-7f3b6c8e",
+        model_name=existing.metadata.name,
+        is_aiwb_authored=True,
+        extra_spec={"overrides": identity},
+    )
+    restamp = AsyncMock()
+    with (
+        patch(
+            "app.custom_models.service.aims_gateway.list_aim_profile_sets_for_model",
+            AsyncMock(return_value=[named]),
+        ),
+        patch("app.custom_models.service.aims_gateway.patch_aim_profile_set", restamp),
+    ):
+        await patch_onboarded_model(
+            kube_client=mock_kube_client,
+            minio_client=mock_minio_client,
+            namespace="test-namespace",
+            name=existing.metadata.name,
+            request=CustomModelPatchRequest(tags=["llama"]),
+        )
+
+    restamp.assert_not_awaited()
+
+
+async def test_patch_succeeds_when_named_set_identity_restamp_fails(
+    mock_kube_client: MagicMock,
+    mock_minio_client: MagicMock,
+) -> None:
+    existing = _make_profiles_shaped_model()
+    patched = _make_profiles_shaped_model(display_name="Renamed Model")
+    mock_kube_client.custom_objects.get_namespaced_custom_object = AsyncMock(
+        return_value=existing.model_dump(by_alias=True)
+    )
+    mock_kube_client.custom_objects.patch_namespaced_custom_object = AsyncMock(
+        return_value=patched.model_dump(by_alias=True)
+    )
+    drifted = make_aim_profile_set(
+        name=f"{existing.metadata.name}-low-latency-7f3b6c8e",
+        model_name=existing.metadata.name,
+        is_aiwb_authored=True,
+        extra_spec={
+            "overrides": {
+                "aimId": "org/model-a",
+                "modelId": "org/model-a",
+                "modelSources": [{"modelId": "org/model-a", "sourceUri": "hf://org/model-a"}],
+            }
+        },
+    )
+    with (
+        patch(
+            "app.custom_models.service.aims_gateway.list_aim_profile_sets_for_model",
+            AsyncMock(return_value=[drifted]),
+        ),
+        patch(
+            "app.custom_models.service.aims_gateway.patch_aim_profile_set",
+            AsyncMock(side_effect=ExternalServiceError("patch failed")),
+        ),
+    ):
+        result = await patch_onboarded_model(
+            kube_client=mock_kube_client,
+            minio_client=mock_minio_client,
+            namespace="test-namespace",
+            name=existing.metadata.name,
+            request=CustomModelPatchRequest(display_name="Renamed Model"),
+        )
+
+    assert result.display_name == "Renamed Model"
+
+
+async def test_patch_succeeds_when_identity_restamp_fanout_list_fails(
+    mock_kube_client: MagicMock,
+    mock_minio_client: MagicMock,
+) -> None:
+    """A failure listing sibling sets during the restamp fan-out must not fail the model edit."""
+    existing = _make_profiles_shaped_model()
+    patched = _make_profiles_shaped_model(display_name="Renamed Model")
+    mock_kube_client.custom_objects.get_namespaced_custom_object = AsyncMock(
+        return_value=existing.model_dump(by_alias=True)
+    )
+    mock_kube_client.custom_objects.patch_namespaced_custom_object = AsyncMock(
+        return_value=patched.model_dump(by_alias=True)
+    )
+    with patch(
+        "app.custom_models.service.aims_gateway.list_aim_profile_sets_for_model",
+        AsyncMock(side_effect=ExternalServiceError("list failed")),
+    ):
+        result = await patch_onboarded_model(
+            kube_client=mock_kube_client,
+            minio_client=mock_minio_client,
+            namespace="test-namespace",
+            name=existing.metadata.name,
+            request=CustomModelPatchRequest(display_name="Renamed Model"),
+        )
+
+    assert result.display_name == "Renamed Model"
+
+
+async def test_patch_succeeds_when_service_list_raises_apiexception_during_fanout(
+    mock_kube_client: MagicMock,
+    mock_minio_client: MagicMock,
+) -> None:
+    """list_aim_services_for_model re-raises raw ApiException; the fan-out must swallow it after the commit."""
+    existing = _make_profiles_shaped_model()
+    patched = _make_profiles_shaped_model(display_name="Renamed Model")
+    mock_kube_client.custom_objects.get_namespaced_custom_object = AsyncMock(
+        return_value=existing.model_dump(by_alias=True)
+    )
+    mock_kube_client.custom_objects.patch_namespaced_custom_object = AsyncMock(
+        return_value=patched.model_dump(by_alias=True)
+    )
+    with (
+        patch(
+            "app.custom_models.service.aims_gateway.list_aim_profile_sets_for_model",
+            AsyncMock(return_value=[]),
+        ),
+        patch("app.custom_models.service.list_aim_profiles", AsyncMock(return_value=[])),
+        patch(
+            "app.custom_models.service.aims_gateway.list_aim_services_for_model",
+            AsyncMock(side_effect=ApiException(status=500, reason="unavailable")),
+        ),
+    ):
+        result = await patch_onboarded_model(
+            kube_client=mock_kube_client,
+            minio_client=mock_minio_client,
+            namespace="test-namespace",
+            name=existing.metadata.name,
+            request=CustomModelPatchRequest(display_name="Renamed Model"),
+        )
+
+    assert result.display_name == "Renamed Model"
 
 
 def test_patch_request_rejects_conflicting_image_refs() -> None:

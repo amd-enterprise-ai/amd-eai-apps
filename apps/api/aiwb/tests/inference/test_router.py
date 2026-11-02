@@ -19,16 +19,19 @@ from fastapi.testclient import TestClient
 
 from api_common.exceptions import NotFoundException
 from app import app  # type: ignore[attr-defined]
-from app.aims.enums import AcceleratorType, AIMModelStatus, AIMServiceStatus
+from app.aims.crds import AdapterRuntime
+from app.aims.enums import AcceleratorType, AdapterMode, AIMModelStatus, AIMServiceStatus
 from app.metrics.schemas import MetricsScalar
+from app.minio import MinioClient, get_minio_client_optional
 from tests.dependency_overrides import (
     BASE_OVERRIDES,
-    CLUSTER_AUTH_OVERRIDES,
     PROMETHEUS_OVERRIDES,
     SESSION_OVERRIDES,
     override_dependencies,
 )
 from tests.factory import make_aim_cluster_model, make_aim_cluster_profile, make_aim_service_k8s
+
+_STORAGE_CLIENT = MagicMock(spec=MinioClient)
 
 # ---------------------------------------------------------------------------
 # Cluster catalog endpoints
@@ -446,7 +449,7 @@ def test_get_inference_profile_by_name_404(mock_get: MagicMock) -> None:
 # ---------------------------------------------------------------------------
 
 
-@override_dependencies(CLUSTER_AUTH_OVERRIDES)
+@override_dependencies(SESSION_OVERRIDES)
 @patch("app.inference.router.deploy_aim")
 def test_deploy_inference_returns_202(mock_deploy: MagicMock) -> None:
     """POST /v1/projects/{project}/inference returns 202 with the deployment."""
@@ -461,7 +464,7 @@ def test_deploy_inference_returns_202(mock_deploy: MagicMock) -> None:
     mock_deploy.assert_called_once()
 
 
-@override_dependencies(CLUSTER_AUTH_OVERRIDES)
+@override_dependencies(SESSION_OVERRIDES)
 @patch("app.inference.router.deploy_aim")
 def test_deploy_inference_rejects_snake_case_field_names(mock_deploy: MagicMock) -> None:
     """Inference deploy must reject snake_case fields; only camelCase is accepted."""
@@ -492,7 +495,7 @@ def test_deploy_inference_rejects_snake_case_field_names(mock_deploy: MagicMock)
     assert camel_resp.status_code == status.HTTP_202_ACCEPTED
 
 
-@override_dependencies(CLUSTER_AUTH_OVERRIDES)
+@override_dependencies(SESSION_OVERRIDES)
 @patch("app.inference.router.deploy_aim")
 def test_deploy_inference_accepts_engine_env_name_value_entries(mock_deploy: MagicMock) -> None:
     """engineEnv uses name/value entries so env var names may contain underscores."""
@@ -508,6 +511,110 @@ def test_deploy_inference_accepts_engine_env_name_value_entries(mock_deploy: Mag
 
     assert response.status_code == status.HTTP_202_ACCEPTED
     mock_deploy.assert_called_once()
+
+
+@override_dependencies(SESSION_OVERRIDES)
+@patch("app.inference.router.deploy_aim", autospec=True)
+def test_deploy_inference_passes_max_lora_rank_to_the_service(mock_deploy: MagicMock) -> None:
+    mock_deploy.return_value = make_aim_service_k8s(as_response=True)
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/projects/test-ns/inference",
+            json={
+                "model": "llama3-8b",
+                "adapterMode": "dynamic",
+                "maxLoraRank": 32,
+            },
+        )
+
+    assert response.status_code == status.HTTP_202_ACCEPTED
+    assert mock_deploy.call_args.kwargs["deploy_request"].max_lora_rank == 32
+
+
+@override_dependencies(SESSION_OVERRIDES)
+@patch("app.inference.router.deploy_aim", autospec=True)
+def test_deploy_inference_rejects_max_lora_rank_as_an_engine_arg(mock_deploy: MagicMock) -> None:
+    """Callers reaching for the vLLM flag name are pointed at the supported field and its ranks."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/projects/test-ns/inference",
+            json={
+                "model": "llama3-8b",
+                "adapterMode": "dynamic",
+                "engineArgs": {"max-lora-rank": 32},
+            },
+        )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert "maxLoraRank" in response.text
+    assert "512" in response.text
+    mock_deploy.assert_not_called()
+
+
+@override_dependencies(SESSION_OVERRIDES)
+@patch("app.inference.router.deploy_aim", autospec=True)
+def test_deploy_inference_rejects_max_lora_rank_without_dynamic_adapter_mode(mock_deploy: MagicMock) -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/projects/test-ns/inference",
+            json={"model": "llama3-8b", "maxLoraRank": 32},
+        )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert "maxLoraRank" in response.text
+    assert "dynamic" in response.text
+    mock_deploy.assert_not_called()
+
+
+@override_dependencies(SESSION_OVERRIDES)
+@patch("app.inference.router.deploy_aim", autospec=True)
+def test_deploy_inference_rejects_a_fractional_max_lora_rank(mock_deploy: MagicMock) -> None:
+    """A JSON number that happens to be whole (``32.0``) is still not an integer, and would
+    otherwise be coerced onto rank 32 without the caller ever having asked for it."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/projects/test-ns/inference",
+            json={"model": "llama3-8b", "adapterMode": "dynamic", "maxLoraRank": 32.0},
+        )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert "maxLoraRank" in response.text
+    mock_deploy.assert_not_called()
+
+
+@override_dependencies(SESSION_OVERRIDES)
+@patch("app.inference.router.deploy_aim", autospec=True)
+def test_deploy_inference_rejects_unsupported_max_lora_rank(mock_deploy: MagicMock) -> None:
+    """The refusal names the field and the ranks it accepts, so the caller can correct it."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/projects/test-ns/inference",
+            json={"model": "llama3-8b", "adapterMode": "dynamic", "maxLoraRank": 33},
+        )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert "maxLoraRank" in response.text
+    assert "512" in response.text
+    mock_deploy.assert_not_called()
+
+
+@override_dependencies({**SESSION_OVERRIDES, get_minio_client_optional: lambda: _STORAGE_CLIENT})
+@patch("app.inference.router.deploy_aim")
+def test_deploy_inference_passes_adapters_and_storage_client_to_the_service(mock_deploy: MagicMock) -> None:
+    """Adapters reach the service alongside the storage client its readiness check needs; without
+    the client threaded through, that check would silently never run."""
+    mock_deploy.return_value = make_aim_service_k8s(as_response=True)
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/projects/test-ns/inference",
+            json={"model": "llama3-8b", "adapters": ["my-adapter"], "adapterMode": "dynamic"},
+        )
+
+    assert response.status_code == status.HTTP_202_ACCEPTED
+    kwargs = mock_deploy.call_args.kwargs
+    assert kwargs["deploy_request"].adapters == ["my-adapter"]
+    assert kwargs["deploy_request"].adapter_mode is AdapterMode.DYNAMIC
+    assert kwargs["minio_client"] is _STORAGE_CLIENT
 
 
 # ---------------------------------------------------------------------------
@@ -581,6 +688,32 @@ def test_list_inference_deployments_capability_chat_routes_to_chattable(
 
 
 @override_dependencies(SESSION_OVERRIDES)
+@patch("app.inference.service.aims_service.list_chattable_aim_services")
+@patch("app.inference.service.aims_service.list_transcribable_aim_services")
+@patch("app.inference.service.aims_service.list_aim_services")
+def test_list_inference_deployments_capability_transcription_routes_to_transcribable(
+    mock_list_all: MagicMock,
+    mock_list_transcribable: MagicMock,
+    mock_list_chattable: MagicMock,
+) -> None:
+    """`?capability=transcription` uses the transcription lookup, not the chat one."""
+    mock_list_transcribable.return_value = [make_aim_service_k8s(as_response=True)]
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/projects/test-namespace/inference",
+            params={"capability": "transcription"},
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    body = response.json()
+    assert len(body["data"]) == 1
+    assert body["pagination"]["total"] == 1
+    mock_list_transcribable.assert_called_once_with(ANY, "test-namespace")
+    mock_list_chattable.assert_not_called()
+    mock_list_all.assert_not_called()
+
+
+@override_dependencies(SESSION_OVERRIDES)
 def test_list_inference_deployments_rejects_unknown_capability() -> None:
     """Unknown capability values are rejected with 422."""
     with TestClient(app) as client:
@@ -606,6 +739,29 @@ def test_list_inference_deployments_chat_filter_applies_status_filter_in_python(
         response = client.get(
             "/v1/projects/test-namespace/inference",
             params={"capability": "chat", "statusFilter": "Running"},
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    body = response.json()
+    assert len(body["data"]) == 1
+    # total reflects the filtered set, not the raw K8s response (2 services).
+    assert body["pagination"]["total"] == 1
+
+
+@override_dependencies(SESSION_OVERRIDES)
+@patch("app.inference.service.aims_service.list_transcribable_aim_services")
+def test_list_inference_deployments_transcription_filter_applies_status_filter_in_python(
+    mock_list_transcribable: MagicMock,
+) -> None:
+    """Status filter still applies on top of the transcription capability."""
+    running = make_aim_service_k8s(as_response=True, status=AIMServiceStatus.RUNNING)
+    failed = make_aim_service_k8s(as_response=True, status=AIMServiceStatus.FAILED)
+    mock_list_transcribable.return_value = [running, failed]
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/projects/test-namespace/inference",
+            params={"capability": "transcription", "statusFilter": "Running"},
         )
 
     assert response.status_code == status.HTTP_200_OK
@@ -739,6 +895,42 @@ def test_list_inference_deployments_status_filter_deleted_returns_db_history(
     # DELETED is API-only, so the live K8s call is skipped entirely.
     mock_list_live.assert_not_called()
     mock_list_history.assert_called_once_with(ANY, namespace="test-namespace", status=AIMServiceStatus.DELETED)
+
+
+@override_dependencies(SESSION_OVERRIDES)
+@patch("app.inference.service.aims_repository.list_aim_services_history")
+@patch("app.inference.service.aims_service.list_chattable_aim_services")
+def test_list_inference_deployments_capability_with_deleted_only_skips_live(
+    mock_list_chattable: MagicMock, mock_list_history: MagicMock
+) -> None:
+    """`?capability=chat&statusFilter=Deleted` must not return live services.
+
+    A Deleted-only filter selects API-only history rows; the capability-specific
+    live lookup must be short-circuited so no live (chattable) services leak in.
+    """
+    deleted_id = uuid4()
+    history_row = MagicMock(
+        id=deleted_id,
+        namespace="test-namespace",
+        model="whisper",
+        status=AIMServiceStatus.DELETED.value,
+        created_at=datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC),
+        created_by=None,
+    )
+    mock_list_history.return_value = [history_row]
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/projects/test-namespace/inference",
+            params={"capability": "chat", "statusFilter": "Deleted"},
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    body = response.json()
+    assert len(body["data"]) == 1
+    assert body["data"][0]["statusValue"] == AIMServiceStatus.DELETED.value
+    # The Deleted-only guard must short-circuit before the capability lister.
+    mock_list_chattable.assert_not_called()
+    mock_list_history.assert_called_once()
 
 
 @override_dependencies(SESSION_OVERRIDES)
@@ -896,6 +1088,35 @@ def test_get_inference_deployment_returns_endpoints(mock_get: MagicMock) -> None
 
 @override_dependencies(BASE_OVERRIDES)
 @patch("app.inference.router.get_aim_service")
+def test_get_inference_deployment_echoes_engine_args_verbatim(mock_get: MagicMock) -> None:
+    """Readback is pure passthrough — engine args are echoed as stored, whatever their keys."""
+    deployment = make_aim_service_k8s(as_response=True)
+    deployment.spec.profile_overrides = {"engineArgs": {"max-lora-rank": 32}}
+    mock_get.return_value = deployment
+
+    with TestClient(app) as client:
+        response = client.get(f"/v1/projects/test-namespace/inference/{uuid4()}")
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["spec"]["profileOverrides"]["engineArgs"]["max-lora-rank"] == 32
+
+
+@override_dependencies(BASE_OVERRIDES)
+@patch("app.inference.router.get_aim_service", autospec=True)
+def test_get_inference_deployment_surfaces_adapter_runtime_max_rank(mock_get: MagicMock) -> None:
+    deployment = make_aim_service_k8s(as_response=True)
+    deployment.spec.adapter_runtime = AdapterRuntime(max_rank=32)
+    mock_get.return_value = deployment
+
+    with TestClient(app) as client:
+        response = client.get(f"/v1/projects/test-namespace/inference/{uuid4()}")
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["spec"]["adapterRuntime"]["maxRank"] == 32
+
+
+@override_dependencies(BASE_OVERRIDES)
+@patch("app.inference.router.get_aim_service")
 def test_get_inference_deployment_returns_404_when_missing(mock_get: MagicMock) -> None:
     """GET /{id} returns 404 when the deployment is not found."""
     mock_get.side_effect = NotFoundException("not found")
@@ -911,9 +1132,10 @@ def test_get_inference_deployment_returns_404_when_missing(mock_get: MagicMock) 
 
 
 @override_dependencies(BASE_OVERRIDES)
-@patch("app.inference.service.aims_service.update_aim_scaling_policy")
+@patch("app.inference.service.aims_service.update_aim_service_spec")
 def test_patch_inference_scaling_policy(mock_update: MagicMock) -> None:
-    """PATCH with full scaling policy returns 200 and forwards the values."""
+    """A scaling-only request goes down the same path as any other spec change, and leaves the
+    adapter set alone rather than being read as a request to detach everything."""
     mock_update.return_value = make_aim_service_k8s(min_replicas=2, max_replicas=10, as_response=True)
     deployment_id = uuid4()
     with TestClient(app) as client:
@@ -925,9 +1147,9 @@ def test_patch_inference_scaling_policy(mock_update: MagicMock) -> None:
     assert response.status_code == status.HTTP_200_OK
     mock_update.assert_called_once()
     kwargs = mock_update.call_args.kwargs
-    assert kwargs["min_replicas"] == 2
-    assert kwargs["max_replicas"] == 10
-    assert kwargs["auto_scaling"] == {"metrics": []}
+    assert kwargs["adapters"] is None
+    scaling = kwargs["scaling"]
+    assert (scaling.min_replicas, scaling.max_replicas, scaling.auto_scaling) == (2, 10, {"metrics": []})
 
 
 @override_dependencies(BASE_OVERRIDES)
@@ -942,12 +1164,78 @@ def test_patch_inference_without_fields_returns_400() -> None:
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
+@override_dependencies({**BASE_OVERRIDES, get_minio_client_optional: lambda: _STORAGE_CLIENT})
+@patch("app.inference.service.aims_service.update_aim_service_spec")
+def test_patch_inference_adapters(mock_update: MagicMock) -> None:
+    """Adapters reach the service alongside the storage client its readiness check needs; without
+    the client threaded through, that check would silently never run."""
+    mock_update.return_value = make_aim_service_k8s(as_response=True)
+    deployment_id = uuid4()
+    with TestClient(app) as client:
+        response = client.patch(
+            f"/v1/projects/test-namespace/inference/{deployment_id}",
+            json={"adapters": ["my-adapter"]},
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    kwargs = mock_update.call_args.kwargs
+    assert kwargs["adapters"] == ["my-adapter"]
+    assert kwargs["scaling"] is None
+    assert kwargs["id"] == deployment_id
+    assert kwargs["minio_client"] is _STORAGE_CLIENT
+
+
+@override_dependencies(BASE_OVERRIDES)
+@patch("app.inference.service.aims_service.update_aim_service_spec")
+def test_patch_inference_detaching_all_adapters_reaches_the_service(mock_update: MagicMock) -> None:
+    """An empty list is a real instruction (detach everything), not an omitted field."""
+    mock_update.return_value = make_aim_service_k8s(as_response=True)
+    with TestClient(app) as client:
+        response = client.patch(
+            f"/v1/projects/test-namespace/inference/{uuid4()}",
+            json={"adapters": []},
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert mock_update.call_args.kwargs["adapters"] == []
+    assert mock_update.call_args.kwargs["scaling"] is None
+
+
+@override_dependencies(BASE_OVERRIDES)
+@patch("app.inference.service.aims_service.update_aim_service_spec")
+def test_patch_inference_changes_adapters_and_scaling_in_one_request(mock_update: MagicMock) -> None:
+    """Both changes go out as one spec update rather than one call each, so a caller can never be
+    left with half of what they asked for."""
+    mock_update.return_value = make_aim_service_k8s(as_response=True)
+    with TestClient(app) as client:
+        response = client.patch(
+            f"/v1/projects/test-namespace/inference/{uuid4()}",
+            json={
+                "adapters": ["my-adapter"],
+                "minReplicas": 2,
+                "maxReplicas": 10,
+                "autoScaling": {"metrics": [{"type": "PodMetric"}]},
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    mock_update.assert_called_once()
+    kwargs = mock_update.call_args.kwargs
+    assert kwargs["adapters"] == ["my-adapter"]
+    scaling = kwargs["scaling"]
+    assert (scaling.min_replicas, scaling.max_replicas, scaling.auto_scaling) == (
+        2,
+        10,
+        {"metrics": [{"type": "PodMetric"}]},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Delete
 # ---------------------------------------------------------------------------
 
 
-@override_dependencies(CLUSTER_AUTH_OVERRIDES)
+@override_dependencies(SESSION_OVERRIDES)
 @patch("app.inference.router.undeploy_aim")
 def test_undeploy_inference_returns_204(mock_undeploy: MagicMock) -> None:
     """DELETE /{id} returns 204."""

@@ -20,7 +20,7 @@ export const SingleValue: Story = () => {
         step={0.05}
         onChange={(n) => typeof n === 'number' && setValue(n)}
       />
-      <p className="mt-2 text-sm text-default-500">Value: {value}</p>
+      <p className="mt-2 text-sm text-muted">Value: {value}</p>
     </div>
   );
 };
@@ -39,7 +39,7 @@ export const Range: Story = () => {
           if (Array.isArray(n)) setValue(n as [number, number]);
         }}
       />
-      <p className="mt-2 text-sm text-default-500">
+      <p className="mt-2 text-sm text-muted">
         Range: {value[0]} – {value[1]}
       </p>
     </div>

@@ -47,7 +47,7 @@ export function RuntimeProfileKeyValueEditor<T extends FieldValues>({
       {fields.map((field, index) => (
         <div
           key={field.id}
-          className="flex flex-col gap-2 rounded-lg border border-default-200 p-3"
+          className="flex flex-col gap-2 rounded-lg border border-default p-3"
           data-testid={`${testIdPrefix}-kv-row-${index}`}
         >
           <div className="flex items-end gap-2">
@@ -56,7 +56,6 @@ export function RuntimeProfileKeyValueEditor<T extends FieldValues>({
               name={`${String(name)}.${index}.key` as Path<T>}
               label={keyLabel}
               placeholder={keyPlaceholder}
-              variant="bordered"
               className="flex-1"
               isDisabled={isDisabled}
               data-testid={`${testIdPrefix}-key-${index}`}
@@ -81,7 +80,6 @@ export function RuntimeProfileKeyValueEditor<T extends FieldValues>({
             name={`${String(name)}.${index}.value` as Path<T>}
             label={valueLabel}
             placeholder={valuePlaceholder}
-            variant="bordered"
             isDisabled={isDisabled}
             data-testid={`${testIdPrefix}-value-${index}`}
           />

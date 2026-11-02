@@ -21,11 +21,15 @@ import { useChatWindowScroll, useSystemToast } from '@amdenterpriseai/hooks';
 
 import { getChatSettings, saveChatSettings } from '@/lib/app/chat-settings';
 
-import { ChatContext } from '@/types/chat';
-import { ChatBody } from '@/types/chat';
-import { ChatConversation, DebugInfo, Message } from '@/types/chat';
+import type {
+  ChatBody,
+  ChatContext,
+  ChatConversation,
+  DebugInfo,
+  Message,
+} from '@/types/chat';
+import type { Workload } from '@/types/workloads';
 import { DEFAULT_SETTINGS, InferenceSettings } from '@/types/models';
-import { Workload } from '@/types/workloads';
 
 import { BasicChatInput } from '@/components/features/chat/BasicChatInput';
 import { Toolbar } from '@amdenterpriseai/layouts';
@@ -45,18 +49,16 @@ interface ChatViewProps {
   workloadDisplayInfo?: Record<string, WorkloadDisplayInfo>;
 }
 
-const checkSupportForImageInput = (workload?: Workload) =>
-  workload
-    ? (workload.tags?.some((tag: string) =>
-        [
-          'vision',
-          'vision-language',
-          'image-to-text',
-          'image-text-to-text',
-          'multimodal',
-        ].includes(tag),
-      ) ?? false)
-    : false;
+const checkSupportForImageInput = (tags?: string[]) =>
+  tags?.some((tag: string) =>
+    [
+      'vision',
+      'vision-language',
+      'image-to-text',
+      'image-text-to-text',
+      'multimodal',
+    ].includes(tag),
+  ) ?? false;
 
 export const ChatView = ({
   workloads,
@@ -148,9 +150,13 @@ export const ChatView = ({
   const [chatInputContent, setChatInputContent] = useState<string>('');
 
   const enableImageInput =
-    checkSupportForImageInput(firstModelWorkload) &&
+    checkSupportForImageInput(
+      firstModelWorkload && workloadDisplayInfo[firstModelWorkload.id]?.tags,
+    ) &&
     (secondModelWorkload && chatMode === 'compare'
-      ? checkSupportForImageInput(secondModelWorkload)
+      ? checkSupportForImageInput(
+          workloadDisplayInfo[secondModelWorkload.id]?.tags,
+        )
       : true);
 
   function constructMessagesToSendToLLM(
@@ -454,7 +460,6 @@ export const ChatView = ({
           selectedKey={chatMode}
           onSelectionChange={(key) => setChatMode(key as 'chat' | 'compare')}
           aria-label={t('modes.label')}
-          size="md"
         >
           <Tab
             key="chat"
@@ -487,7 +492,7 @@ export const ChatView = ({
             </Button>
           </div>
 
-          <div className="flex gap-2 w-full md:w-[calc(50%-8px)] lg:w-auto">
+          <div className="flex items-center gap-2 w-full md:w-[calc(50%-8px)] lg:w-auto">
             <ModelDeploymentSelect
               workloads={workloads}
               onModelDeploymentChange={onFirstModelWorkloadChange}
@@ -505,7 +510,7 @@ export const ChatView = ({
             >
               <IconSettings
                 size="16"
-                className={!firstModelWorkload ? 'text-default-500' : ''}
+                className={!firstModelWorkload ? 'text-muted' : ''}
               />
             </Button>
             <SettingsDrawer
@@ -527,7 +532,7 @@ export const ChatView = ({
             />
           </div>
           {chatMode === 'compare' && (
-            <div className="flex gap-2 w-full md:w-[calc(50%-8px)] lg:w-auto">
+            <div className="flex items-center gap-2 w-full md:w-[calc(50%-8px)] lg:w-auto">
               <ModelDeploymentSelect
                 workloads={workloads}
                 onModelDeploymentChange={onSecondModelWorkloadChange}

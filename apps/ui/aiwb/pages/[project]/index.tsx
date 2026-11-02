@@ -6,35 +6,39 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 import type { GetServerSidePropsContext } from 'next/types';
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import {
+  fetchProjectCpuUsage,
   fetchProjectGPUDeviceUtilization,
   fetchProjectGPUMemoryUtilization,
+  fetchProjectQuota,
+  fetchProjectSystemMemory,
   fetchProjectWorkloadStats,
 } from '@/lib/app/projects';
+import { getPageTranslations } from '@/lib/server/i18n';
 
-import { displayHumanReadableMegaBytes } from '@amdenterpriseai/utils/app';
 import { getCurrentTimeRange } from '@amdenterpriseai/utils/app';
 
 import { TimeRangePeriod } from '@amdenterpriseai/types';
 import {
   TimeRange,
   TimeSeriesAllocationData,
-  TimeSeriesResponse,
+  TimeSeriesDataPoint,
 } from '@amdenterpriseai/types';
-import type { WorkloadStatsResponse } from '@/types/projects';
 
 import {
+  CPUCoreUsageCard,
+  GPUDeviceUsageCard,
+  GPUMemoryUsageCard,
   ProjectWorkloadsStatsCard,
   NamespaceWorkloadsTable,
+  SystemMemoryUsageCard,
 } from '@/components/features/projects';
 import {
   AiwbDocsPage,
   aiwbDocumentationMapping,
   ChartTimeSelector,
   RelevantDocs,
-  StatsWithLineChart,
 } from '@amdenterpriseai/components';
 
 import { useProject } from '@/contexts/ProjectContext';
@@ -48,10 +52,31 @@ const GPU_MEMORY_UTILIZATION_NUMERATOR_LABEL = 'gpu_memory_utilization';
 const GPU_MEMORY_UTILIZATION_DENOMINATOR_LABEL = 'allocated_gpu_vram';
 const GPU_DEVICE_UTILIZATION_NUMERATOR_LABEL = 'gpu_device_utilization';
 const GPU_DEVICE_UTILIZATION_DENOMINATOR_LABEL = 'allocated_gpus';
+const CPU_USAGE_NUMERATOR_LABEL = 'cpu_usage';
+const CPU_USAGE_DENOMINATOR_LABEL = 'allocated_cpu';
+const SYSTEM_MEMORY_NUMERATOR_LABEL = 'system_memory_usage';
+const SYSTEM_MEMORY_DENOMINATOR_LABEL = 'allocated_system_memory';
+
+export const getLatestValue = (
+  points: TimeSeriesDataPoint[],
+): number | null => {
+  for (let i = points.length - 1; i >= 0; i--) {
+    const value = points[i]?.value;
+    if (value != null) return value;
+  }
+  return null;
+};
+
+export const isOverAllocatedQuota = (
+  hasDedicatedQuota: boolean,
+  gpuCount: number | null | undefined,
+  latestUsage: number | null,
+): boolean =>
+  hasDedicatedQuota && latestUsage != null && latestUsage > (gpuCount ?? 0);
 
 const ProjectDashboardPage: React.FC & WithDocumentationLink = () => {
   const { t } = useTranslation(['projects', 'workloads', 'models']);
-  const { activeProject } = useProject();
+  const { activeProject, isStandaloneMode } = useProject();
   const queryClient = useQueryClient();
 
   const namespaceMetricsQueryKeyPrefix = useMemo(
@@ -64,17 +89,24 @@ const ProjectDashboardPage: React.FC & WithDocumentationLink = () => {
   );
   const currentTimePeriod = useRef<TimeRangePeriod>(TimeRangePeriod['15M']);
 
-  const { data: namespaceStats, isLoading: isNamespaceStatsLoading } =
-    useQuery<WorkloadStatsResponse>({
+  const { data: namespaceStats, isLoading: isNamespaceStatsLoading } = useQuery(
+    {
       queryKey: ['project', activeProject, 'stats'],
       queryFn: () => fetchProjectWorkloadStats(activeProject as string),
       enabled: !!activeProject,
-    });
+    },
+  );
+
+  const { data: projectQuota } = useQuery({
+    queryKey: ['project', activeProject, 'quota'],
+    queryFn: () => fetchProjectQuota(activeProject as string),
+    enabled: !!activeProject && !isStandaloneMode,
+  });
 
   const {
     data: namespaceGPUMemoryUtilization,
     isLoading: isNamespaceGPUMemoryUtilizationLoading,
-  } = useQuery<TimeSeriesResponse>({
+  } = useQuery({
     queryKey: [
       ...namespaceMetricsQueryKeyPrefix,
       'gpu-memory-utilization',
@@ -96,7 +128,7 @@ const ProjectDashboardPage: React.FC & WithDocumentationLink = () => {
   const {
     data: namespaceGPUDeviceUtilization,
     isLoading: isNamespaceGPUDeviceUtilizationLoading,
-  } = useQuery<TimeSeriesResponse>({
+  } = useQuery({
     queryKey: [
       ...namespaceMetricsQueryKeyPrefix,
       'gpu-device-utilization',
@@ -107,6 +139,48 @@ const ProjectDashboardPage: React.FC & WithDocumentationLink = () => {
     ],
     queryFn: () => {
       return fetchProjectGPUDeviceUtilization(
+        activeProject as string,
+        timeRange.start,
+        timeRange.end,
+      );
+    },
+    enabled: !!activeProject,
+  });
+
+  const { data: namespaceCpuUsage, isLoading: isNamespaceCpuUsageLoading } =
+    useQuery({
+      queryKey: [
+        ...namespaceMetricsQueryKeyPrefix,
+        'cpu-usage',
+        {
+          start: timeRange.start.toISOString(),
+          end: timeRange.end.toISOString(),
+        },
+      ],
+      queryFn: () => {
+        return fetchProjectCpuUsage(
+          activeProject as string,
+          timeRange.start,
+          timeRange.end,
+        );
+      },
+      enabled: !!activeProject,
+    });
+
+  const {
+    data: namespaceSystemMemory,
+    isLoading: isNamespaceSystemMemoryLoading,
+  } = useQuery({
+    queryKey: [
+      ...namespaceMetricsQueryKeyPrefix,
+      'system-memory-usage',
+      {
+        start: timeRange.start.toISOString(),
+        end: timeRange.end.toISOString(),
+      },
+    ],
+    queryFn: () => {
+      return fetchProjectSystemMemory(
         activeProject as string,
         timeRange.start,
         timeRange.end,
@@ -147,6 +221,36 @@ const ProjectDashboardPage: React.FC & WithDocumentationLink = () => {
       };
     }, [namespaceGPUDeviceUtilization]);
 
+  const namespaceCpuUsageChartData: TimeSeriesAllocationData = useMemo(() => {
+    if (!namespaceCpuUsage?.data) return { numerator: [], denominator: [] };
+    const used = namespaceCpuUsage.data.find(
+      (s) => s.metadata?.label === CPU_USAGE_NUMERATOR_LABEL,
+    );
+    const allocated = namespaceCpuUsage.data.find(
+      (s) => s.metadata?.label === CPU_USAGE_DENOMINATOR_LABEL,
+    );
+    return {
+      numerator: used?.values ?? [],
+      denominator: allocated?.values ?? [],
+    };
+  }, [namespaceCpuUsage]);
+
+  const namespaceSystemMemoryChartData: TimeSeriesAllocationData =
+    useMemo(() => {
+      if (!namespaceSystemMemory?.data)
+        return { numerator: [], denominator: [] };
+      const used = namespaceSystemMemory.data.find(
+        (s) => s.metadata?.label === SYSTEM_MEMORY_NUMERATOR_LABEL,
+      );
+      const allocated = namespaceSystemMemory.data.find(
+        (s) => s.metadata?.label === SYSTEM_MEMORY_DENOMINATOR_LABEL,
+      );
+      return {
+        numerator: used?.values ?? [],
+        denominator: allocated?.values ?? [],
+      };
+    }, [namespaceSystemMemory]);
+
   const handleTimeBoundChange = useCallback(
     (timePeriod: TimeRangePeriod, timeRange: TimeRange) => {
       currentTimePeriod.current = timePeriod as TimeRangePeriod;
@@ -169,11 +273,43 @@ const ProjectDashboardPage: React.FC & WithDocumentationLink = () => {
 
   const dataLastUpdatedAt = useLastQueryUpdated(namespaceMetricsQueryKeyPrefix);
 
+  const borrowedQuotaTooltip =
+    projectQuota?.isQuotaManaged && projectQuota.quotas.gpuCount === 0
+      ? `${t('dashboard.overview.borrowedQuota.title')}: ${t('dashboard.overview.borrowedQuota.description')}`
+      : undefined;
+
+  const hasDedicatedQuota =
+    !!projectQuota?.isQuotaManaged && !!projectQuota.quotas.gpuCount;
+
+  // Per-resource quota flags: the ceiling is a project "allocation" only if the project
+  // has a dedicated quota for THAT resource; otherwise it's a cluster-capacity fallback
+  // labeled "available" — mirrors how the GPU card keys off gpuCount.
+  const hasCpuQuota =
+    !!projectQuota?.isQuotaManaged && !!projectQuota.quotas.cpuMilliCores;
+  const hasMemoryQuota =
+    !!projectQuota?.isQuotaManaged && !!projectQuota.quotas.memoryBytes;
+
+  const latestGpuDeviceUsage = getLatestValue(
+    namespaceGPUDeviceUtilizationChartData.numerator,
+  );
+
+  const isOverAllocated = isOverAllocatedQuota(
+    hasDedicatedQuota,
+    projectQuota?.quotas.gpuCount,
+    latestGpuDeviceUsage,
+  );
+
+  const overAllocatedTooltip = isOverAllocated
+    ? `${t('dashboard.overview.overAllocatedQuota.title')}: ${t('dashboard.overview.overAllocatedQuota.description')}`
+    : undefined;
+
+  const deviceUsageAlertTooltip = borrowedQuotaTooltip ?? overAllocatedTooltip;
+
   return (
     <div className="min-h-full flex flex-col">
       <div className="flex-1 flex flex-col gap-8 mt-8">
         <div className="flex flex-col justify-center">
-          <div className="mb-8 flex items-center justify-between">
+          <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
             <h3>{t('dashboard.overview.title')}</h3>
             <ChartTimeSelector
               onTimeRangeChange={handleTimeBoundChange}
@@ -201,23 +337,30 @@ const ProjectDashboardPage: React.FC & WithDocumentationLink = () => {
                   data={namespaceStats?.statusCounts ?? []}
                 />
               </div>
-              <StatsWithLineChart
-                title={t('dashboard.overview.gpuDeviceUsage.title')}
-                tooltip={t('dashboard.overview.gpuDeviceUsage.description')}
-                data={namespaceGPUDeviceUtilizationChartData.numerator}
-                dataFormatter={(value) => Number(value).toFixed(0)}
+              <GPUDeviceUsageCard
+                data={namespaceGPUDeviceUtilizationChartData}
                 isLoading={isNamespaceGPUDeviceUtilizationLoading}
+                alertTooltip={deviceUsageAlertTooltip}
+                hasDedicatedQuota={hasDedicatedQuota}
                 fillHeight
               />
-              <StatsWithLineChart
-                title={t('dashboard.overview.vramDeviceUsage.title')}
-                tooltip={t('dashboard.overview.vramDeviceUsage.description')}
-                data={namespaceGPUMemoryUtilizationChartData.numerator}
-                dataFormatter={(value) =>
-                  displayHumanReadableMegaBytes(Number(value))
-                }
-                colors={['cyan', 'gray']}
+              <GPUMemoryUsageCard
+                data={namespaceGPUMemoryUtilizationChartData}
                 isLoading={isNamespaceGPUMemoryUtilizationLoading}
+                alertTooltip={borrowedQuotaTooltip}
+                hasDedicatedQuota={hasDedicatedQuota}
+                fillHeight
+              />
+              <CPUCoreUsageCard
+                data={namespaceCpuUsageChartData}
+                isLoading={isNamespaceCpuUsageLoading}
+                hasDedicatedQuota={hasCpuQuota}
+                fillHeight
+              />
+              <SystemMemoryUsageCard
+                data={namespaceSystemMemoryChartData}
+                isLoading={isNamespaceSystemMemoryLoading}
+                hasDedicatedQuota={hasMemoryQuota}
                 fillHeight
               />
             </div>
@@ -242,13 +385,10 @@ export async function getServerSideProps(context: GetServerSidePropsContext) {
   const project = params?.project as string;
 
   try {
-    const translations = await serverSideTranslations(locale, [
-      'common',
+    const translations = await getPageTranslations(locale, [
       'projects',
-      'users',
       'workloads',
       'models',
-      'sharedComponents',
     ]);
 
     const breadcrumb = [

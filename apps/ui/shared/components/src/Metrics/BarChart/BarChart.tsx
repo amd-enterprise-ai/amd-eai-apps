@@ -9,6 +9,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { cn } from '@heroui/react';
 import { IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
+import { useTranslation } from 'next-i18next';
 import React from 'react';
 import { isEqual } from 'lodash';
 
@@ -559,6 +560,7 @@ interface BarChartProps extends React.HTMLAttributes<HTMLDivElement> {
 
 const BarChart = React.forwardRef<HTMLDivElement, BarChartProps>(
   (props, forwardedRef) => {
+    const { t } = useTranslation('sharedComponents');
     const {
       data = [],
       categories = [],
@@ -590,7 +592,7 @@ const BarChart = React.forwardRef<HTMLDivElement, BarChartProps>(
       tooltipCallback,
       customTooltip,
       isLoading = false,
-      loadingText = 'Loading...',
+      loadingText = t('data.loading'),
       showTooltipOnNull = false,
       activeLegendProp,
       maxBarSize,

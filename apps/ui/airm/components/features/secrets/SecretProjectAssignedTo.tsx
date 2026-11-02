@@ -32,7 +32,12 @@ export const SecretProjectAssignedTo: React.FC<Props> = ({ secret }) => {
       }
       placement="top"
     >
-      <span className="cursor-pointer underline">{`${projectSecretCount} projects`}</span>
+      {/* biome-ignore lint/a11y/useSemanticElements: the element reveals supplemental text rather than performing an action. */}
+      <span
+        className="cursor-pointer underline"
+        role="button"
+        tabIndex={0}
+      >{`${projectSecretCount} projects`}</span>
     </Tooltip>
   );
 };

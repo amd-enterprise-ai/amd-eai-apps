@@ -1,0 +1,7 @@
+{
+  "get clusterrole e2e-aim-test-author -o json": [
+    1,
+    "",
+    "Error from server (NotFound): clusterroles.rbac.authorization.k8s.io \"e2e-aim-test-author\" not found"
+  ]
+}

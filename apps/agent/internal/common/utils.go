@@ -31,7 +31,8 @@ func ManagedNamespaceEventFilter(c client.Client) predicate.Predicate {
 	})
 }
 
-// RemoveFinalizer removes the provided finalizer from the object using a patch.
+// RemoveFinalizer removes the provided finalizer from an object read from the API.
+// The object must carry a resourceVersion so stale-cache writes fail with a conflict.
 func RemoveFinalizer(
 	ctx context.Context,
 	c client.Client,
@@ -49,10 +50,16 @@ func RemoveFinalizer(
 	}
 
 	controllerutil.RemoveFinalizer(obj, finalizer)
-	return c.Patch(ctx, obj, client.MergeFrom(base))
+	// Optimistic lock: a merge patch replaces the whole finalizers array, so a patch
+	// built from a stale informer-cache copy would re-add finalizers another controller
+	// already removed. On a deleting object the apiserver rejects that as "no new
+	// finalizers can be added if the object is being deleted", looping the reconciler.
+	// Carrying resourceVersion turns a stale write into a retriable conflict instead.
+	return c.Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
-// AddFinalizerIfNeeded adds the provided finalizer to the object if the object does not have the finalizer.
+// AddFinalizerIfNeeded adds a finalizer to an object read from the API when needed.
+// The object must carry a resourceVersion so stale-cache writes fail with a conflict.
 func AddFinalizerIfNeeded(
 	ctx context.Context,
 	c client.Client,
@@ -68,7 +75,11 @@ func AddFinalizerIfNeeded(
 			return fmt.Errorf("failed to deep copy object: expected client.Object, got %T", baseObj)
 		}
 		controllerutil.AddFinalizer(obj, finalizer)
-		return c.Patch(ctx, obj, client.MergeFrom(base))
+		// Optimistic lock so a stale-cache add cannot race a concurrent deletion: if the
+		// object started deleting after this cached read, the resourceVersion mismatch
+		// yields a retriable conflict rather than a rejected finalizer add (see
+		// RemoveFinalizer for the same hazard).
+		return c.Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 	}
 	return nil
 }

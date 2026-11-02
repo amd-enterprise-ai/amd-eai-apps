@@ -144,15 +144,14 @@ export const NodeGpuTemperatureChart: React.FC<Props> = ({
   );
 
   return (
-    <Card className="border border-default-200 shadow-sm rounded-sm dark:bg-default-100 min-h-[120px]">
+    <Card className="min-h-[120px]">
       <CardHeader className="pb-2">
         <div className="flex flex-wrap items-center justify-between gap-2 w-full">
           <span className="text-sm font-semibold text-foreground">
             {t('clusters:nodes.detail.deviceMetrics.gpuTemperature.title')}
           </span>
           <Tabs
-            size="sm"
-            variant="solid"
+            variant="primary"
             aria-label={t(
               'clusters:nodes.detail.deviceMetrics.gpuTemperature.title',
             )}
@@ -163,8 +162,7 @@ export const NodeGpuTemperatureChart: React.FC<Props> = ({
             classNames={{
               base: 'w-fit',
               panel: 'hidden',
-              tabList: 'dark:bg-default-200',
-              cursor: 'dark:bg-default-100',
+              tabList: 'dark:bg-default-hover',
             }}
             items={tabItems}
           >
@@ -174,7 +172,7 @@ export const NodeGpuTemperatureChart: React.FC<Props> = ({
       </CardHeader>
       <CardBody className="pt-0 mt-4">
         {showNoData ? (
-          <p className="text-default-500 text-sm">
+          <p className="text-muted text-sm">
             {t('clusters:nodes.detail.deviceMetrics.noTemperatureData')}
           </p>
         ) : (
@@ -200,7 +198,6 @@ export const NodeGpuTemperatureChart: React.FC<Props> = ({
                 );
               }}
               isLoading={isLoading}
-              loadingText={t('common:loading')}
             />
             {(isLoading || chartCategories.length > 0) && (
               <DynamicValueLegend

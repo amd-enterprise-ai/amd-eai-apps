@@ -7,8 +7,5 @@ SPDX-License-Identifier: MIT
 /* Component-level styles for the UI package */
 @import "tailwindcss";
 @import "@amdenterpriseai/tailwind-config";
-/* Scan HeroUI theme (in node_modules) and this package so Tailwind generates their utility classes */
-@source "../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}";
-@source "../../../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}";
 @source "./**/*.{js,ts,jsx,tsx}";
 @source "../__stories__/**/*.{js,ts,jsx,tsx}";

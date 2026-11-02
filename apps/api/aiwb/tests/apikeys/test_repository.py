@@ -8,7 +8,13 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_common.exceptions import ConflictException
-from app.apikeys.repository import create_api_key, delete_api_key, get_api_key_by_id, get_api_keys_for_namespace
+from app.apikeys.repository import (
+    create_api_key,
+    delete_api_key,
+    get_all_api_keys,
+    get_api_key_by_id,
+    get_api_keys_for_namespace,
+)
 from tests import factory
 
 
@@ -22,14 +28,12 @@ async def test_create_api_key(db_session: AsyncSession, test_namespace: str, tes
         session=db_session,
         display_name=name,
         truncated_key="aiwb_api_key_••••••••1234",
-        cluster_auth_key_id="cluster-auth-key-id-123",
         namespace=test_namespace,
         creator=test_user,
     )
 
     assert api_key.display_name == name
     assert api_key.truncated_key == "aiwb_api_key_••••••••1234"
-    assert api_key.cluster_auth_key_id == "cluster-auth-key-id-123"
     assert api_key.namespace == test_namespace
     assert api_key.created_by == test_user
 
@@ -47,7 +51,6 @@ async def test_create_api_key_duplicate_name_raises_conflict(
         session=db_session,
         display_name=name,
         truncated_key="aiwb_api_key_••••••••1234",
-        cluster_auth_key_id="cluster-auth-key-id-123",
         namespace=test_namespace,
         creator=test_user,
     )
@@ -58,7 +61,6 @@ async def test_create_api_key_duplicate_name_raises_conflict(
             session=db_session,
             display_name=name,
             truncated_key="aiwb_api_key_••••••••5678",
-            cluster_auth_key_id="cluster-auth-key-id-456",
             namespace=test_namespace,
             creator=test_user,
         )
@@ -102,7 +104,6 @@ async def test_get_api_key_by_id(db_session: AsyncSession, test_namespace: str, 
         display_name=f"Specific Key {unique_suffix}",
         namespace=test_namespace,
         truncated_key="aiwb_api_key_••••••••9999",
-        cluster_auth_key_id="specific-key-id",
         created_by=test_user,
     )
 
@@ -123,7 +124,6 @@ async def test_get_api_key_by_id_wrong_namespace_returns_none(db_session: AsyncS
         display_name=f"Namespace 1 Key {unique_suffix}",
         namespace="namespace-1",
         truncated_key="aiwb_api_key_••••••••8888",
-        cluster_auth_key_id="ns1-key-id",
         created_by=test_user,
     )
 
@@ -142,7 +142,6 @@ async def test_delete_api_key(db_session: AsyncSession, test_namespace: str, tes
         display_name=f"Key to Delete {unique_suffix}",
         namespace=test_namespace,
         truncated_key="aiwb_api_key_••••••••6666",
-        cluster_auth_key_id="delete-key-id",
         created_by=test_user,
     )
 
@@ -153,3 +152,33 @@ async def test_delete_api_key(db_session: AsyncSession, test_namespace: str, tes
     # Verify it's deleted
     deleted_key = await get_api_key_by_id(db_session, key_id, test_namespace)
     assert deleted_key is None
+
+
+@pytest.mark.asyncio
+async def test_get_all_api_keys_spans_namespaces(db_session: AsyncSession, test_user: str) -> None:
+    """Auditing keys against surviving namespaces needs the ones a scoped query cannot reach."""
+    unique_suffix = str(uuid4())[:8]
+    namespace_a = f"ns-a-{unique_suffix}"
+    namespace_b = f"ns-b-{unique_suffix}"
+
+    await factory.create_api_key(
+        db_session,
+        display_name=f"Key A {unique_suffix}",
+        namespace=namespace_a,
+        truncated_key="aiwb_api_key_••••••••1111",
+        created_by=test_user,
+    )
+    await factory.create_api_key(
+        db_session,
+        display_name=f"Key B {unique_suffix}",
+        namespace=namespace_b,
+        truncated_key="aiwb_api_key_••••••••2222",
+        created_by=test_user,
+    )
+
+    all_keys = await get_all_api_keys(db_session)
+
+    # Equality, not containment: the fixture rolls back per test and nothing else seeds the table,
+    # so a looser assertion would hide both duplicate rows and leakage across tests. Comparing the
+    # sequence also pins the namespace ordering the query promises, which callers group on.
+    assert [key.namespace for key in all_keys] == [namespace_a, namespace_b]

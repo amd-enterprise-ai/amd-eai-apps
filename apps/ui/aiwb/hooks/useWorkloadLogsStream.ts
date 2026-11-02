@@ -5,7 +5,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { LogEntry } from '@/types/workloads';
-import { WorkloadLogParams } from '@/types/workloads';
+import type { operations } from '@/types/api';
+
+type WorkloadLogStreamParams = NonNullable<
+  operations['stream_workload_logs']['parameters']['query']
+>;
 
 export interface UseWorkloadLogsStreamOptions {
   projectId: string;
@@ -17,7 +21,7 @@ export interface UseWorkloadLogsStreamReturn {
   isLoading: boolean;
   isStreaming: boolean;
   error: string | null;
-  startStreaming: (params: WorkloadLogParams) => void;
+  startStreaming: (params: WorkloadLogStreamParams) => void;
   stopStreaming: () => void;
   clearLogs: () => void;
 }
@@ -28,10 +32,10 @@ export interface UseWorkloadLogsStreamReturn {
 const buildStreamUrl = (
   projectId: string,
   workloadId: string,
-  params: WorkloadLogParams = {},
+  params: WorkloadLogStreamParams = {},
 ): string => {
   const urlParams = new URLSearchParams();
-  if (params.startDate) urlParams.append('startTime', params.startDate);
+  if (params.startTime) urlParams.append('startTime', params.startTime);
   if (params.level) urlParams.append('level', params.level);
   if (params.logType) urlParams.append('logType', params.logType);
 
@@ -48,7 +52,7 @@ export const useWorkloadLogsStream = ({
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
-  const paramsRef = useRef<WorkloadLogParams>({});
+  const paramsRef = useRef<WorkloadLogStreamParams>({});
 
   const stopStreaming = useCallback(() => {
     if (eventSourceRef.current) {
@@ -61,7 +65,7 @@ export const useWorkloadLogsStream = ({
   }, []);
 
   const connect = useCallback(
-    (params: WorkloadLogParams) => {
+    (params: WorkloadLogStreamParams) => {
       paramsRef.current = params;
       // Close existing connection if any
       if (eventSourceRef.current) {
@@ -111,7 +115,7 @@ export const useWorkloadLogsStream = ({
   );
 
   const startStreaming = useCallback(
-    (params: WorkloadLogParams = {}) => {
+    (params: WorkloadLogStreamParams = {}) => {
       // Prevent starting if already connected
       if (isStreaming && eventSourceRef.current) {
         return;

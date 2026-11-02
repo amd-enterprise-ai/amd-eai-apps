@@ -14,6 +14,7 @@ from app.charts.schemas import (
     ChartCreate,
     ChartFile,
     ChartResponse,
+    ChartSignature,
     ChartUpdate,
     _parse_chart_files,
     _parse_signature_file,
@@ -102,6 +103,24 @@ def test_chart_full_response_schema():
     assert len(response.files) == 1
     assert isinstance(response.files[0], ChartFile)
     assert response.files[0].path == "r.txt"
+    assert isinstance(response.signature, ChartSignature)
+    assert response.signature.image is None
+
+
+def test_chart_signature_typed_image_and_extra_keys():
+    """ChartSignature types `image` and tolerates arbitrary extra YAML keys."""
+    signature = ChartSignature(image="registry.example.com/foo:latest", replicas=1, model_name="test-model")
+    assert signature.image == "registry.example.com/foo:latest"
+    dumped = signature.model_dump(by_alias=True)
+    # Extra free-form signature keys survive round-tripping (extra="allow").
+    assert dumped["replicas"] == 1
+    assert dumped["model_name"] == "test-model"
+
+
+def test_chart_signature_image_optional():
+    """A signature without `image` (e.g. workspace charts) is valid."""
+    assert ChartSignature().image is None
+    assert ChartSignature(key="value").image is None
 
 
 @pytest.mark.asyncio
@@ -124,8 +143,39 @@ async def test_parse_signature_file_empty_file() -> None:
 
     result = await _parse_signature_file(upload_file)
 
-    # yaml.safe_load on empty string returns None
-    assert result is None
+    # An empty document (yaml.safe_load -> None) is coerced to {} so the stored
+    # signature is always an object and ChartResponse.signature validates.
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_parse_signature_file_comments_only() -> None:
+    """A comments-only document also parses to None and is coerced to {}."""
+    upload_file = UploadFile(filename="values.yaml", file=BytesIO(b"# just a comment\n"))
+
+    result = await _parse_signature_file(upload_file)
+
+    assert result == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"- a\n- b\n",  # list root
+        b"[]\n",  # empty list (falsy, but still not a mapping)
+        b"just a string\n",  # scalar string root
+        b"42\n",  # scalar int root
+        b"false\n",  # scalar bool root
+    ],
+)
+async def test_parse_signature_file_non_mapping_root_rejected(content: bytes) -> None:
+    """Non-mapping YAML roots are rejected at parse time rather than persisted as a
+    shape that would later 500 during ChartResponse.signature validation."""
+    upload_file = UploadFile(filename="values.yaml", file=BytesIO(content))
+
+    with pytest.raises(ValueError, match="must contain a YAML mapping"):
+        await _parse_signature_file(upload_file)
 
 
 @pytest.mark.asyncio

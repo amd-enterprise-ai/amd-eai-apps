@@ -1,0 +1,11 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# Tool binaries installed by the Makefile (LOCALBIN = ./bin), e.g. golangci-lint. These are
+# per-machine (the golangci-lint entry is a symlink to an absolute path) and are rewritten by the
+# lint hook at runtime, so committing them breaks CI. Install locally via `make lint`.
+/bin/
+
+# Coverage output from `make test-coverage`.
+/coverage.out

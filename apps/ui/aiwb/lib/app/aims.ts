@@ -9,8 +9,6 @@ import {
   AIMClusterModel,
   AIMModel,
   AIMClusterProfile,
-  AIMMetric,
-  AIMAutoscaling,
   AutoscalingPolicyConfig,
   SOURCE_URI_ANNOTATION,
 } from '@/types/aims';
@@ -21,22 +19,44 @@ import {
   AIMProfile,
   AIMService,
   AIMServiceStatus,
-  AIMStatus,
   AIMWorkloadStatus,
   ParsedAIM,
   AggregatedAIM,
 } from '@/types/aims';
-import { WorkloadStatus } from '@/types/enums/workloads';
-import { APIRequestError, getErrorMessage } from '@amdenterpriseai/utils/app';
-import type { PaginatedList } from '@/types/pagination';
+import { APIRequestError } from '@amdenterpriseai/utils/app';
+import type { components } from '@/types/api';
+
+type EnrichedAIMMetric =
+  | components['schemas']['OptimizationMetric']
+  | 'default';
+
+type AIMAutoscaling = {
+  metricQuery: string;
+  operationOverTime: string;
+  targetType: string;
+  targetValue: number;
+};
+import { apiClient, getApiClientErrorMessage } from '@/lib/api-client';
 import { fetchAllPages } from './pagination';
 import { translationKeyGenerator } from './i18n';
+
+/** AIMModel/AIMClusterModel CRD resource as returned by the fine-tuning endpoints. */
+type AIMModelResource = components['schemas']['AIMModelResource'];
 
 // Autoscaling constants
 export const AIM_MAX_REPLICAS = 30;
 
 const isAcceleratorType = (value: unknown): value is AcceleratorType =>
   value === 'cpu' || value === 'gpu';
+
+export const getMaxSupportedLoraRank = (
+  spec: AIMService['spec'],
+): number | undefined => {
+  const maxRank = spec?.adapterRuntime?.maxRank;
+  return typeof maxRank === 'number' && Number.isFinite(maxRank)
+    ? maxRank
+    : undefined;
+};
 
 /** Base model weights source on an AIMModel, regardless of which spec field carries it. */
 type BaseModelSource = { modelId: string; sourceUri: string };
@@ -53,16 +73,16 @@ type BaseModelSource = { modelId: string; sourceUri: string };
  * Accepts the `AIMClusterModel | AIMModel` union so `aimParser` can call it for
  * either shape; cluster models carry neither field and resolve to null.
  *
- * TODO(EAI 2.3): drop the legacy flat `spec.modelSources` branch once all
+ * TODO: drop the legacy flat `spec.modelSources` branch once all
  * models carry weights under `spec.profiles.overrides.modelSources`.
  */
 export const resolveBaseModelSource = (
-  aimModel: AIMClusterModel | AIMModel,
+  aimModel: AIMClusterModel | AIMModel | AIMModelResource,
 ): BaseModelSource | null => {
-  const spec = aimModel.spec as AIMModel['spec'];
-  const flat = spec.modelSources?.[0];
+  const spec = aimModel.spec;
+  const flat = spec?.modelSources?.[0];
   if (flat) return flat;
-  const override = spec.profiles?.overrides?.modelSources?.[0];
+  const override = spec?.profiles?.overrides?.modelSources?.[0];
   return override ?? null;
 };
 
@@ -86,14 +106,14 @@ export const TARGET_TYPE_OPTION_KEYS = [
 ] as const;
 
 export const PERFORMANCE_METRIC_KEYS = {
-  [AIMMetric.Latency]: 'performanceMetrics.values.latency',
-  [AIMMetric.Throughput]: 'performanceMetrics.values.throughput',
-  [AIMMetric.Default]: 'performanceMetrics.values.default',
-} as const satisfies Record<AIMMetric, string>;
+  latency: 'performanceMetrics.values.latency',
+  throughput: 'performanceMetrics.values.throughput',
+  default: 'performanceMetrics.values.default',
+} as const satisfies Record<EnrichedAIMMetric, string>;
 
 export const getMetricTranslationKey = translationKeyGenerator(
   PERFORMANCE_METRIC_KEYS,
-  AIMMetric.Default,
+  'default',
 );
 
 export const DEFAULT_AUTOSCALING: AutoscalingFieldValues = {
@@ -137,7 +157,7 @@ export type AIMServiceDisplayInfo = {
   canonicalName: string; // Canonical name (e.g., "meta-llama/Llama-3.1-8B")
   imageVersion: string; // Image version (e.g., "1.2.3")
   name: string; // Resource name (e.g., "aim-llama-2-7b-v2")
-  metric: AIMMetric;
+  metric: EnrichedAIMMetric;
   tags?: string[];
 };
 
@@ -153,7 +173,7 @@ export const resolveAIMServiceDisplay = (
   aimService: AIMService,
   parsedAIMs?: ParsedAIM[],
 ): AIMServiceDisplayInfo => {
-  const resourceName = aimService.spec.model.name;
+  const resourceName = aimService.spec?.model?.name;
   const matchingAIM = resourceName
     ? parsedAIMs?.find((aim) => aim.model === resourceName)
     : undefined;
@@ -162,11 +182,16 @@ export const resolveAIMServiceDisplay = (
   const displayName =
     aimService.metadata.annotations?.[AIM_DISPLAY_NAME_ANNOTATION] ||
     (matchingAIM?.model ?? modelRef ?? aimService.metadata.name);
-  const metric = [AIMMetric.Latency, AIMMetric.Throughput].includes(
-    aimService.spec.overrides?.metric as AIMMetric,
+  // The optimization metric is a profile *selector* value
+  // (`spec.profile.selector.metric`), set from the deploy request. It is not a
+  // profileOverride — that map carries post-selection overrides (GPU count,
+  // engine args) and never the metric.
+  const selectorMetric = aimService.spec?.profile?.selector?.metric;
+  const metric = ['latency', 'throughput'].includes(
+    selectorMetric as EnrichedAIMMetric,
   )
-    ? (aimService.spec.overrides?.metric as AIMMetric)
-    : AIMMetric.Default;
+    ? (selectorMetric as EnrichedAIMMetric)
+    : 'default';
 
   // Fine-tuned deployments aren't in the cluster catalog; the canonical and
   // user-given name live on AIMService annotations.
@@ -191,20 +216,20 @@ export const resolveAIMServiceDisplay = (
  * used by AIM cards to display deployment state badges.
  */
 const mapAIMServiceStatusToAIMWorkloadStatus = (
-  status: AIMServiceStatus,
+  status: AIMServiceStatus | undefined,
 ): AIMWorkloadStatus => {
   switch (status) {
-    case AIMServiceStatus.RUNNING:
+    case 'Running':
       return AIMWorkloadStatus.DEPLOYED;
-    case AIMServiceStatus.PENDING:
+    case 'Pending':
       return AIMWorkloadStatus.PENDING;
-    case AIMServiceStatus.STARTING:
+    case 'Starting':
       return AIMWorkloadStatus.STARTING;
-    case AIMServiceStatus.DEGRADED:
+    case 'Degraded':
       return AIMWorkloadStatus.DEGRADED;
-    case AIMServiceStatus.FAILED:
+    case 'Failed':
       return AIMWorkloadStatus.FAILED;
-    case AIMServiceStatus.DELETED:
+    case 'Deleted':
       return AIMWorkloadStatus.DELETED;
     default:
       return AIMWorkloadStatus.NOT_DEPLOYED;
@@ -219,7 +244,7 @@ const mapAIMServiceStatusToAIMWorkloadStatus = (
  * @returns {ParsedAIM} The parsed aim data with extracted description, version, tags, and status.
  */
 export const aimParser = (
-  aim: AIMClusterModel | AIMModel,
+  aim: AIMClusterModel | AIMModel | AIMModelResource,
   deployedServices?: AIMService[],
 ): ParsedAIM => {
   // Fine-tuned AIMModels carry no spec.image, so status.imageMetadata is absent;
@@ -256,7 +281,7 @@ export const aimParser = (
     annotations,
     model: aim.metadata.name,
     aimId: aim.status?.aimId ?? null,
-    imageReference: aim.spec.image ?? '',
+    imageReference: aim.spec?.image ?? '',
     description: {
       short: oci?.description || '',
       full: model?.descriptionFull || '',
@@ -271,7 +296,7 @@ export const aimParser = (
     workloadStatuses:
       deployedServices && deployedServices.length > 0
         ? deployedServices.map((s) =>
-            mapAIMServiceStatusToAIMWorkloadStatus(s.status.status),
+            mapAIMServiceStatusToAIMWorkloadStatus(s.status?.status),
           )
         : [AIMWorkloadStatus.NOT_DEPLOYED],
     isPreview,
@@ -285,6 +310,45 @@ export const aimParser = (
   return parsedAim;
 };
 
+/** Inference capability a deployment's Connect snippet should target. */
+export type InferenceCapability = 'chat' | 'transcription';
+
+/**
+ * Catalog tag values that mark a model as speech-to-text capable. Mirrors the
+ * backend's `TRANSCRIPTION_TAG_VALUES` (apps/api/aiwb/app/aims/constants.py): a
+ * model advertising any of these serves `/v1/audio/transcriptions` rather than
+ * chat completions. Implementation detail of `getModelCapability`.
+ */
+const TRANSCRIPTION_TAG_VALUES: readonly string[] = [
+  'transcription',
+  'speech-to-text',
+  'automatic-speech-recognition',
+];
+
+/**
+ * Derives the inference capability a catalog model exposes from its image
+ * metadata tags. Namespace-scoped models (custom-onboarded / fine-tuned) carry
+ * no catalog tags, so they fall through to chat — matching the backend, which
+ * classifies them as chat by label until their source tags are read separately.
+ * Tag matching is exact (case- and separator-sensitive), mirroring the backend.
+ */
+export const getModelCapability = (
+  tags: string[] | undefined,
+): InferenceCapability =>
+  (tags ?? []).some((tag) => TRANSCRIPTION_TAG_VALUES.includes(tag))
+    ? 'transcription'
+    : 'chat';
+
+/**
+ * OpenAI-compatible request path a deployment serves for the given capability.
+ * Shared by the Connect modal and the deployment detail page so the copyable
+ * endpoint URL never disagrees with the generated snippet.
+ */
+export const getInferenceApiPath = (capability: InferenceCapability): string =>
+  capability === 'transcription'
+    ? '/v1/audio/transcriptions'
+    : '/v1/chat/completions';
+
 export const getProjectFineTunedModel = async (
   resourceName: string,
   projectId: string,
@@ -293,25 +357,19 @@ export const getProjectFineTunedModel = async (
     throw new APIRequestError('No AIM model resource name provided', 422);
   }
 
-  const response = await fetch(
-    `/api/projects/${projectId}/fine-tuning/models/${encodeURIComponent(resourceName)}`,
-    {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    },
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/fine-tuning/models/{model_id}',
+    { params: { path: { project: projectId, model_id: resourceName } } },
   );
 
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to fetch AIM model: ${errorMessage}`,
+      `Failed to fetch AIM model: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 
-  return await response.json();
+  return data;
 };
 
 /**
@@ -319,33 +377,29 @@ export const getProjectFineTunedModel = async (
  * `aimIds` to narrow the result; the backend accepts repeated `?aimId=` query
  * params so multiple aimIds are batched into a single round-trip.
  *
- * Per the "Paginated List Loaders" rule in `apps/ui/aiwb/CLAUDE.md`, this is
- * the single-page primitive — UI consumers walking every page for a given
+ * This is the single-page primitive — UI consumers walking every page for a given
  * filter should call {@link getAimClusterProfilesByAimIds}.
  */
 export const listAimClusterProfilesPage = async (
   page: number,
   pageSize: number,
   options: { aimIds?: string[] } = {},
-): Promise<PaginatedList<AIMClusterProfile>> => {
-  const params = new URLSearchParams({
-    page: String(page),
-    pageSize: String(pageSize),
-  });
-  for (const id of options.aimIds ?? []) {
-    if (id) params.append('aimId', id);
-  }
-  const response = await fetch(`/api/inference/profiles?${params.toString()}`, {
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+): Promise<components['schemas']['InferenceProfilesList']> => {
+  const { data, error, response } = await apiClient.GET(
+    '/api/inference/profiles',
+    {
+      params: {
+        query: { page, pageSize, aimId: options.aimIds?.filter(Boolean) },
+      },
+    },
+  );
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to fetch AIM cluster profiles: ${errorMessage}`,
+      `Failed to fetch AIM cluster profiles: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-  return response.json();
+  return data;
 };
 
 /**
@@ -397,18 +451,17 @@ export const getAimClusterProfileByName = async (
   if (!name) {
     throw new APIRequestError('No profile name provided', 422);
   }
-  const response = await fetch(
-    `/api/inference/profiles/${encodeURIComponent(name)}`,
-    { headers: { 'Content-Type': 'application/json' } },
+  const { data, error, response } = await apiClient.GET(
+    '/api/inference/profiles/{name}',
+    { params: { path: { name } } },
   );
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to fetch AIM cluster profile '${name}': ${errorMessage}`,
+      `Failed to fetch AIM cluster profile '${name}': ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-  return response.json();
+  return data;
 };
 
 /**
@@ -420,29 +473,26 @@ export const listProjectAimProfilesPage = async (
   page: number,
   pageSize: number,
   options: { aimIds?: string[] } = {},
-): Promise<PaginatedList<AIMProfile>> => {
+): Promise<components['schemas']['InferenceProfilesList']> => {
   if (!project) {
     throw new APIRequestError('No project selected', 422);
   }
-  const params = new URLSearchParams({
-    page: String(page),
-    pageSize: String(pageSize),
-  });
-  for (const id of options.aimIds ?? []) {
-    if (id) params.append('aimId', id);
-  }
-  const response = await fetch(
-    `/api/projects/${encodeURIComponent(project)}/profiles?${params.toString()}`,
-    { headers: { 'Content-Type': 'application/json' } },
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/profiles',
+    {
+      params: {
+        path: { project },
+        query: { page, pageSize, aimId: options.aimIds?.filter(Boolean) },
+      },
+    },
   );
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to fetch project AIM profiles: ${errorMessage}`,
+      `Failed to fetch project AIM profiles: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-  return response.json();
+  return data;
 };
 
 /**
@@ -496,18 +546,17 @@ export const getProjectAimProfileByName = async (
   if (!name) {
     throw new APIRequestError('No profile name provided', 422);
   }
-  const response = await fetch(
-    `/api/projects/${encodeURIComponent(project)}/profiles/${encodeURIComponent(name)}`,
-    { headers: { 'Content-Type': 'application/json' } },
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/profiles/{name}',
+    { params: { path: { project, name } } },
   );
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to fetch project AIM profile '${name}': ${errorMessage}`,
+      `Failed to fetch project AIM profile '${name}': ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-  return response.json();
+  return data;
 };
 
 /**
@@ -520,7 +569,7 @@ export const getProjectAimProfileByName = async (
  * @param {number} [config.targetValue] - Target metric value that triggers scaling (default: 10)
  * @returns {AutoscalingPolicyConfig} Kubernetes autoscaling policy configuration
  *
- * @see {@link https://github.com/silogen/aim-engine/blob/main/docs/docs/guides/scaling-and-autoscaling.md}
+ * @see {@link https://github.com/amd-enterprise-ai/aim-engine/blob/main/docs/docs/guides/scaling-and-autoscaling.md}
  */
 export const createAimScalingPolicyConfig = ({
   metricQuery = DEFAULT_AUTOSCALING.metricQuery,
@@ -567,55 +616,53 @@ export const createAimScalingPolicyConfig = ({
 export const getAIMServiceStatusVariants = (
   t: (key: string) => string,
 ): Record<AIMServiceStatus, StatusBadgeVariant> => ({
-  [AIMServiceStatus.PENDING]: {
+  Pending: {
     label: t('models:status.pending'),
     intent: Intent.PENDING,
   },
-  [AIMServiceStatus.DEGRADED]: {
+  Degraded: {
     label: t('models:status.degraded'),
     intent: Intent.WARNING,
   },
-  [AIMServiceStatus.RUNNING]: {
+  Running: {
     label: t('models:status.running'),
     color: 'primary',
     icon: IconCircleCaretRight,
   },
-  [AIMServiceStatus.FAILED]: {
+  Failed: {
     label: t('models:status.failed'),
     intent: Intent.DANGER,
   },
-  [AIMServiceStatus.STARTING]: {
+  Starting: {
     label: t('models:status.starting'),
     intent: Intent.PENDING,
   },
-  [AIMServiceStatus.DELETED]: {
+  Deleted: {
     label: t('models:status.deleted'),
     intent: Intent.DANGER,
   },
 });
 
 /**
- * Converts an AIM Service status to a Workload status for aggregation and display purposes.
- *
- * @param {AIMServiceStatus} status - The AIM service status to convert.
- * @returns {WorkloadStatus} The corresponding workload status.
+ * Maps an AIM service status onto the workload wire contract, which has no
+ * `Degraded` state (an AIM-service-only status folded to `Unknown` here). Used
+ * by the chat workload builder, whose synthetic workloads are wire-typed. The
+ * deployed-models table keeps a local mapper instead, to preserve `Degraded`.
  */
-export const mapAIMServiceStatusToWorkloadStatus = (
-  status: AIMServiceStatus,
-): WorkloadStatus => {
+export const mapAIMServiceStatusToWorkloadWireStatus = (
+  status: AIMServiceStatus | undefined,
+): components['schemas']['WorkloadStatus'] => {
   switch (status) {
-    case AIMServiceStatus.PENDING:
-      return WorkloadStatus.PENDING;
-    case AIMServiceStatus.STARTING:
-      return WorkloadStatus.STARTING;
-    case AIMServiceStatus.RUNNING:
-      return WorkloadStatus.RUNNING;
-    case AIMServiceStatus.DEGRADED:
-      return WorkloadStatus.DEGRADED;
-    case AIMServiceStatus.FAILED:
-      return WorkloadStatus.FAILED;
+    case 'Pending':
+      return 'Pending';
+    case 'Starting':
+      return 'Starting';
+    case 'Running':
+      return 'Running';
+    case 'Failed':
+      return 'Failed';
     default:
-      return WorkloadStatus.UNKNOWN;
+      return 'Unknown';
   }
 };
 
@@ -673,7 +720,7 @@ export const transformToAggregatedAIMs = (
       sortedAims.find(
         (aim) =>
           officialReleaseRegex.test(aim.imageVersion.trim()) &&
-          aim.status === AIMStatus.READY,
+          aim.status === 'Ready',
       ) ?? null;
 
     const metaSource = latestAim ?? sortedAims[0];
@@ -710,7 +757,7 @@ export const transformToAggregatedAIMs = (
       isCustomImport = isCustomImport || aim.isCustomImport === true;
 
       // At least one version with Ready status makes the model supported
-      isSupported = isSupported || aim.status === AIMStatus.READY;
+      isSupported = isSupported || aim.status === 'Ready';
 
       aim.acceleratorTypes?.forEach((type) => {
         acceleratorTypeSet.add(type);
@@ -746,30 +793,25 @@ export const transformToAggregatedAIMs = (
 };
 
 /**
- * Filters the catalog while preserving family-level support status.
+ * Filters the catalog while preserving every family-level aggregate.
  *
- * Accelerator filters operate on individual ParsedAIM versions, so re-aggregating
- * the filtered subset can make a family appear unsupported when its only Ready
- * version was excluded by the filter. This function corrects that by restoring
- * each family's support status from the unfiltered aggregation.
+ * Accelerator filters operate on individual ParsedAIM versions. Re-aggregating
+ * the filtered subset would recompute family-level state (support status,
+ * deployment counts, ordering) from whatever versions survived the filter — so a
+ * family whose only Ready or only deployed version is hidden would lose its
+ * supported flag, drop its "Has deployments" count, and get reshuffled within the
+ * supported group. The filter should only decide which families are visible, not
+ * mutate their canonical state. We therefore aggregate the full catalog once and
+ * keep the families whose repository still has at least one version after filtering.
  */
 export const buildFilteredCatalog = (
   allAims: ParsedAIM[],
   filteredAims: ParsedAIM[],
 ): AggregatedAIM[] => {
-  const supportByRepo = new Map(
-    transformToAggregatedAIMs(allAims).map((a) => [
-      a.repository,
-      a.isSupported,
-    ]),
+  const visibleRepos = new Set(
+    filteredAims.map((a) => a.annotations['aim.eai.amd.com/source-repository']),
   );
-  const result = transformToAggregatedAIMs(filteredAims).map((a) => ({
-    ...a,
-    isSupported: supportByRepo.get(a.repository) ?? a.isSupported,
-  }));
-  // Re-sort after restoring correct isSupported values. transformToAggregatedAIMs
-  // sorts by the filtered subset's support status, which may be wrong for families
-  // whose only Ready version was excluded by an accelerator filter.
-  result.sort((a, b) => Number(b.isSupported) - Number(a.isSupported));
-  return result;
+  return transformToAggregatedAIMs(allAims).filter((family) =>
+    visibleRepos.has(family.repository),
+  );
 };

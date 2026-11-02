@@ -21,19 +21,19 @@ const FormSection = ({
   title: string;
   fields: string[];
 }) => (
-  <section className="flex flex-col gap-4 rounded-lg border border-default-200 bg-content1 p-6">
+  <section className="flex flex-col gap-4 rounded-lg border border-default bg-surface p-6">
     <h2 className="text-xl font-semibold">{title}</h2>
     <div className="grid grid-cols-1 gap-3">
       {fields.map((field) => (
         <label
           key={field}
-          className="flex flex-col gap-1 text-sm text-default-600"
+          className="flex flex-col gap-1 text-sm text-foreground"
         >
           {field}
           <input
             type="text"
             placeholder={`Enter ${field.toLowerCase()}…`}
-            className="rounded border border-default-300 bg-content2 px-3 py-2"
+            className="rounded border border-default bg-surface-secondary px-3 py-2"
           />
         </label>
       ))}

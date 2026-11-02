@@ -12,6 +12,7 @@ import type {
 import { StatsWithLineChart } from '@amdenterpriseai/components';
 import { useGPUMetrics } from '@/hooks/useGPUMetrics';
 import type { projectsKeys } from '@/types/react-i18next';
+import type { components } from '@/types/api';
 
 // Constants
 const CHART_GUIDE_COLOR = 'gray' as const;
@@ -22,6 +23,9 @@ type DashboardProps = {
   data: TimeSeriesAllocationData;
   isLoading?: boolean;
   width?: number;
+  fillHeight?: boolean;
+  alertTooltip?: string;
+  hasDedicatedQuota?: boolean;
   workloadId?: never;
   namespace?: never;
   timePeriod?: never;
@@ -34,6 +38,8 @@ type WorkloadProps = {
   timePeriod: TimeRangePeriod;
   isLoading?: boolean;
   width?: number;
+  alertTooltip?: string;
+  hasDedicatedQuota?: boolean;
 };
 
 type BaseProps = DashboardProps | WorkloadProps;
@@ -53,12 +59,13 @@ type ChartColor =
   | 'amber';
 
 export interface GPUUsageCardConfig {
-  metricName: string;
+  metricName: components['schemas']['MetricName'];
   chartColor: ChartColor;
   titleKey: projectsKeys;
   tooltipKey: projectsKeys;
   upperLimitUnallocatedKey: projectsKeys;
   upperLimitKey: projectsKeys;
+  upperLimitAvailableKey: projectsKeys;
   dataFormatter: (value: number | null) => string;
 }
 
@@ -106,6 +113,7 @@ export const BaseGPUUsageCard: React.FC<Props> = (props) => {
 
   const width =
     ('width' in props ? props.width : undefined) ?? DEFAULT_CHART_WIDTH;
+  const fillHeight = 'fillHeight' in props ? props.fillHeight : undefined;
 
   // Determine if denominator data is available
   const hasDenominator = chartData.denominator.length > 0;
@@ -114,20 +122,25 @@ export const BaseGPUUsageCard: React.FC<Props> = (props) => {
     <StatsWithLineChart
       title={t(config.titleKey)}
       tooltip={t(config.tooltipKey)}
+      alertTooltip={props.alertTooltip}
       data={chartData.numerator}
       dataFormatter={(value) => config.dataFormatter(Number(value))}
       upperLimitData={hasDenominator ? chartData.denominator : undefined}
       upperLimitFormatter={
         hasDenominator
           ? (value) =>
-              value === null || value === 0
+              value == null || value === 0
                 ? t(config.upperLimitUnallocatedKey)
-                : t(config.upperLimitKey, {
-                    num: config.dataFormatter(Number(value)),
-                  })
+                : t(
+                    props.hasDedicatedQuota
+                      ? config.upperLimitKey
+                      : config.upperLimitAvailableKey,
+                    { num: config.dataFormatter(Number(value)) },
+                  )
           : undefined
       }
       width={width}
+      fillHeight={fillHeight}
       colors={
         hasDenominator
           ? [CHART_GUIDE_COLOR, config.chartColor]

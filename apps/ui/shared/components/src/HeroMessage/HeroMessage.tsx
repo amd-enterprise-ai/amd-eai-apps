@@ -46,11 +46,11 @@ export function HeroMessage({
 }: HeroMessageProps) {
   const intentDefaults = intent ? INTENT_TO_PROPS[intent] : null;
   const IconComponent = iconProp ?? intentDefaults?.icon ?? null;
-  const iconColorClass = intentDefaults?.color ?? 'text-primary';
+  const iconColorClass = intentDefaults?.color ?? 'text-accent';
 
   return (
     <div className="w-full h-full flex justify-center items-center">
-      <div className="dark:bg-default-50 max-w-[600px] flex flex-col items-start border dark:border-default-100 border-default-200 p-12 rounded-md">
+      <div className="dark:bg-surface-secondary max-w-[600px] flex flex-col items-start border dark:border-default border-default p-12 rounded-md">
         {IconComponent && (
           <IconComponent className={iconColorClass} size={48} />
         )}

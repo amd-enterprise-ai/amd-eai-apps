@@ -133,9 +133,11 @@ MLflow workspace transitions to Running
 Only one MLflow workspace per project
     [Documentation]    Verify that only one MLflow workspace can exist per project
     ...    Tests: MLflow project-scoped constraint (409 Conflict)
+    ...
+    ...    Runs in a fresh project so only the workspace created by this scenario can occupy it.
     [Tags]    workspace    mlflow    constraint
 
-    Given a ready project "e2e-test-mlflow-constraint" with user access exists
+    Given a fresh project with user access exists
     And secret "minio-credentials-fetcher" is assigned to project
     And MLflow workspace is deployed    gpus=0
     And workspace transitions to "Running"
@@ -324,6 +326,11 @@ ComfyUI workspace transitions to Running
     [Documentation]    Verify that a ComfyUI workspace transitions from Pending to Running
     ...    Tests: Workspace deployment → wait for Running status
     ...    Requires: MinIO credentials secret assigned to project, GPU cluster for model download
+    ...    NOTE: All `comfyui`-tagged tests are excluded from CI (--exclude comfyui in
+    ...    the AIWB E2E step): ComfyUI's container does heavy runtime setup that exceeds
+    ...    its startupProbe budget and crash-loops on a cold cluster, so this never
+    ...    reaches Running.
+    ...    TODO: re-enable once the fixed ai-workloads chart deploys.
     [Tags]    workspace    comfyui    status    gpu
 
     Given a ready project with user access exists

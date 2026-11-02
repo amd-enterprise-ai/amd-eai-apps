@@ -2,7 +2,25 @@
 
 // SPDX-License-Identifier: MIT
 
-import type { OnboardPhase } from './custom-models';
+import type { components } from '@/types/api';
+
+/** Lifecycle phase of a custom (BYOM) model, sourced from the backend schema. */
+export type OnboardPhase = components['schemas']['OnboardPhase'];
+
+/**
+ * Runtime values for {@link OnboardPhase}. The generated type is a bare string
+ * union, so this mirrors the backend enum for comparisons that would otherwise
+ * rely on magic strings. Keying `satisfies` on `Uppercase<OnboardPhase>` makes
+ * the set exhaustive: adding a phase to the backend union (and thus a new
+ * uppercase key requirement) without adding it here fails the build, and a
+ * renamed or dropped phase does the same.
+ */
+export const OnboardPhase = {
+  PENDING: 'Pending',
+  IMPORTING: 'Importing',
+  READY: 'Ready',
+  FAILED: 'Failed',
+} as const satisfies Record<Uppercase<OnboardPhase>, OnboardPhase>;
 
 /** Label set on AIMService resources backed by a namespace-scoped fine-tuned AIMModel. */
 export const FINE_TUNED_LABEL = 'aiwb.apps.eai.amd.com/fine-tuned';
@@ -11,9 +29,19 @@ export const FINE_TUNED_LABEL = 'aiwb.apps.eai.amd.com/fine-tuned';
 export const NAMESPACE_AIM_MODEL_LABEL =
   'aiwb.apps.eai.amd.com/namespace-aim-model';
 
-/** Labels stamped on AIMModel CRs by the finetuning pipeline. */
+/** Metadata stamped on AIMModel CRs by the finetuning pipeline. */
 export const AIM_MODEL_NAME_LABEL = 'aiwb.apps.eai.amd.com/model-name';
 export const AIM_MODEL_WORKLOAD_ID_LABEL = 'airm.silogen.ai/workload-id';
+export const AIM_MODEL_TRAINING_OUTPUT_ANNOTATION =
+  'aiwb.apps.eai.amd.com/training-output';
+
+/**
+ * Annotation carrying the human-readable description supplied when a fine-tuned
+ * model is created. Stamped on the AIMModel CR by the API as
+ * `SOURCE_DESCRIPTION_ANNOTATION` (apps/api/aiwb/app/custom_models/constants.py).
+ */
+export const AIM_MODEL_SOURCE_DESCRIPTION_ANNOTATION =
+  'aiwb.apps.eai.amd.com/source-description';
 
 /**
  * Annotation on fine-tuned AIMService CRs carrying the slash-preserved canonical
@@ -68,15 +96,7 @@ export enum AIMWorkloadStatus {
  *
  * This is about the model's availability, not whether it's deployed.
  */
-export enum AIMStatus {
-  NOT_AVAILABLE = 'NotAvailable',
-  PENDING = 'Pending',
-  PROGRESSING = 'Progressing',
-  READY = 'Ready',
-  DEGRADED = 'Degraded',
-  FAILED = 'Failed',
-  DELETED = 'Deleted',
-}
+export type AIMStatus = components['schemas']['AIMModelStatus'];
 
 /**
  * AIMServiceStatus: Runtime status of a deployed AIM service instance
@@ -85,85 +105,20 @@ export enum AIMStatus {
  * (the AIMService Kubernetes resource).
  *
  * This is about the deployment's runtime state, not the model availability.
- * doc: https://github.com/silogen/aim-engine/blob/main/docs/docs/concepts/services.md
+ * doc: https://github.com/amd-enterprise-ai/aim-engine/blob/main/docs/docs/concepts/services.md
  */
-export enum AIMServiceStatus {
-  PENDING = 'Pending',
-  STARTING = 'Starting',
-  RUNNING = 'Running',
-  DEGRADED = 'Degraded',
-  FAILED = 'Failed',
-  DELETED = 'Deleted',
-}
+export type AIMServiceStatus = components['schemas']['AIMServiceStatus'];
+
+export type AcceleratorType = components['schemas']['AcceleratorType'];
 
 /**
- * Free-form K8s annotations as carried on the AIMClusterModel CR. Always
- * include the well-known image-source annotations (`aim.eai.amd.com/...`),
- * and optionally include onboarding annotations for user-imported models
- * (see `custom_models/constants.py`).
+ * Complete cluster-scoped AIM resource as returned by the catalog API — the
+ * backend `AIMResponse` schema as-is. `spec`/`status` are optional on the wire
+ * (the schema defaults them), so consumers read `spec?.image` /
+ * `status?.status` defensively. Fine-tuned (namespace-scoped) models use
+ * {@link AIMModel}.
  */
-export type AIMClusterModelMetadataAnnotations = Record<string, string>;
-
-export type AcceleratorType = 'cpu' | 'gpu';
-
-export type DiscoveredProfileHardwareGroup = {
-  /** Loose at the wire to round-trip unknown future engine values; the parser narrows to {@link AcceleratorType}. */
-  acceleratorType?: string | null;
-  acceleratorModel?: string | null;
-  acceleratorCount?: number | null;
-  supported?: boolean;
-  hardwareSummary?: string | null;
-  profiles?: Array<Record<string, unknown>>;
-};
-
-export type DiscoveredProfileCounts = {
-  total?: number | null;
-  supported?: number | null;
-  unsupported?: number | null;
-  byHardware?: DiscoveredProfileHardwareGroup[];
-};
-
-/**
- * Complete AIM resource as returned by the API
- */
-export type AIMClusterModel = {
-  metadata: {
-    name: string;
-    namespace: string | null;
-    uid: string;
-    labels: Record<string, string>;
-    annotations: AIMClusterModelMetadataAnnotations;
-    creationTimestamp: string;
-    ownerReferences: {
-      apiVersion: string;
-      blockOwnerDeletion: boolean;
-      kind: string;
-      name: string;
-      uid: string;
-    }[];
-  };
-  spec: {
-    image: string;
-  };
-  status: {
-    status: AIMStatus;
-    /** Canonical model architecture identifier resolved by the v1alpha2 controller. */
-    aimId?: string | null;
-    imageMetadata: AIMImageMetadata;
-    discoveredProfiles?: DiscoveredProfileCounts;
-  };
-};
-
-/** Weights source entry as carried on an AIMModel spec (flat or profile override). */
-export type AIMModelSource = {
-  modelId: string;
-  sourceUri: string;
-  env?: {
-    name: string;
-    value?: string;
-    valueFrom?: Record<string, unknown>;
-  }[];
-};
+export type AIMClusterModel = components['schemas']['AIMResponse'];
 
 /**
  * Project-scoped fine-tuned AIMModel as returned by both the single-item
@@ -177,196 +132,32 @@ export type AIMModelSource = {
  * `resolveBaseModelSource` (lib/app/aims.ts) rather than reaching into one
  * field directly.
  */
-export interface AIMModel {
-  metadata: {
-    name: string;
-    namespace?: string | null;
-    uid?: string;
-    creationTimestamp: string;
-    labels?: Record<string, string>;
-    annotations?: Record<string, string>;
-    ownerReferences?: {
-      apiVersion: string;
-      blockOwnerDeletion?: boolean;
-      kind: string;
-      name: string;
-      uid: string;
-    }[];
-  };
-  spec: {
-    /** Container image. Absent for fine-tuned models (no published image). */
-    image?: string;
-    /** Legacy flat weights source. See {@link resolveBaseModelSource}. */
-    modelSources?: AIMModelSource[];
-    profiles?: {
-      derivedFrom?: {
-        selector?: {
-          modelRef?: { name: string; scope?: string };
-          role?: string;
-        };
-      };
-      overrides?: {
-        aimId?: string;
-        modelId?: string;
-        image?: string;
-        modelSources?: AIMModelSource[];
-      };
-      versionPolicy?: string;
-    };
-    resources?: Record<string, unknown>;
-  };
-  status?: {
-    status: string;
-    /** Canonical model architecture identifier (matches AIMProfile spec.aimId). */
-    aimId?: string | null;
-    sourceType?: string;
-    conditions?: AIMServiceCondition[];
-    imageMetadata?: {
-      model?: {
-        canonicalName?: string;
-        descriptionFull?: string;
-        hfTokenRequired?: boolean | null;
-        source?: string;
-        tags?: string[];
-        title?: string;
-        variants?: string[];
-      };
-      oci?: {
-        created?: string;
-        description?: string;
-        licenses?: string;
-        revision?: string;
-        source?: string;
-        title?: string;
-        vendor?: string;
-        version?: string;
-      };
-      originalLabels?: Record<string, string>;
-    };
-    /** Hardware-grouped discovery breakdown emitted by aim-engine. */
-    discoveredProfiles?: DiscoveredProfileCounts;
-  };
-}
+export type AIMModel = components['schemas']['AIMModelResource'];
 
 /**
- * Mirrors aim-engine's AIMResolvedReference (v1alpha1 API ref). All fields
- * optional; the engine populates them when the source resource is known.
- * `scope` is the key disambiguator for namespace-vs-cluster lookups —
- * consumers should branch on it instead of probing both endpoints.
+ * FE-known shape for a single AIMService status condition. The backend types
+ * `AIMServiceStatusFields.conditions` as a loose `list[dict[str, Any]]` (no
+ * generated schema to point at), so this captures just the fields the UI reads;
+ * consumers cast the loose wire array to `AIMServiceCondition[]`.
  */
-export type ResolvedRef = {
-  name?: string;
-  namespace?: string;
-  scope?: 'Namespace' | 'Cluster' | 'Merged' | 'Unknown';
-  kind?: string;
-  uid?: string;
-};
-
-export type AIMServiceRuntime = {
-  currentReplicas?: number | null;
-  desiredReplicas?: number | null;
-  minReplicas?: number | null;
-  maxReplicas?: number | null;
-  replicas?: string | null;
-};
-
 export type AIMServiceCondition = {
-  lastTransitionTime: string;
-  message: string;
-  observedGeneration: number;
+  lastTransitionTime?: string | null;
+  message?: string | null;
+  observedGeneration?: number | null;
   reason: string;
   status: string;
   type: string;
 };
 
-export type AIMServiceMetric = {
-  type: string; // 'PodMetric'
-  podmetric: {
-    metric: {
-      backend: string;
-      metricNames: string[];
-      query: string;
-      operationOverTime: string;
-    };
-    target: {
-      type: string; // 'Value' | 'AverageValue' | 'Utilization'
-      value: string;
-    };
-  };
-};
-
 /**
- * AIMService spec from Kubernetes
- * Contains model configuration and autoscaling settings
+ * AIMService represents a deployed AIM instance — the backend
+ * `InferenceDeploymentResponse` schema as-is. Note the wire shape: `spec` and
+ * `status` are optional, `id`/`endpoints`/`statusValue`
+ * are read-only, `endpoints` is a plain `{ [key]: string }` map, and
+ * `status.status` is the {@link AIMServiceStatus} string union.
+ * Consumers must guard for the optional/nullable fields.
  */
-export type AIMServiceSpec = {
-  model: {
-    name?: string;
-    image?: string;
-  };
-  replicas: number;
-  overrides: Record<string, unknown>;
-  cacheModel: boolean;
-  routing?: {
-    annotations: Record<string, string>;
-    enabled: boolean;
-  };
-  runtimeConfigName: string;
-  /** Selector for the resolved AIMProfile/AIMClusterProfile. Backend stores this loose; FE only ever reads `name`. */
-  profile?: { name: string } | null;
-  /** Per-service overrides on the resolved profile (engineArgs, containerEnv). */
-  profileOverrides?: Record<string, unknown>;
-  minReplicas?: number;
-  maxReplicas?: number;
-  autoScaling?: {
-    metrics: AIMServiceMetric[];
-  };
-};
-
-/**
- * AIMService represents a deployed AIM instance
- */
-export type AIMService = {
-  id: string | null;
-  metadata: {
-    name: string;
-    namespace: string;
-    uid: string;
-    labels: Record<string, string>;
-    annotations: Record<string, string>;
-    creationTimestamp: string;
-    ownerReferences: unknown[];
-  };
-  spec: AIMServiceSpec;
-  status: {
-    status: AIMServiceStatus;
-    routing?: {
-      path: string;
-    };
-    conditions?: AIMServiceCondition[];
-    observedGeneration?: number;
-    runtime?: AIMServiceRuntime;
-    /**
-     * Reference to the resolved AIMClusterModel/AIMModel. The semantics of
-     * `name` differ between engine reconcilers — v1alpha1 sets the resource
-     * name, v1alpha2 profile pipeline sets the canonical model id. For
-     * resource-name lookups, prefer `spec.model.name` (the user-supplied
-     * AIMClusterModel name, stable across pipelines).
-     */
-    resolvedModel?: ResolvedRef;
-    /**
-     * Reference to the resolved AIMProfile/AIMClusterProfile. Consumers that
-     * need accelerator / precision / metric details fetch the profile via
-     * the catalog endpoints — `scope` tells you which one to target.
-     */
-    resolvedProfile?: ResolvedRef;
-  };
-  clusterAuthGroupId: string | null;
-  endpoints: {
-    internal: string;
-    external?: string;
-  };
-};
+export type AIMService = components['schemas']['InferenceDeploymentResponse'];
 
 export type ParsedAIM = {
   model: string;
@@ -424,7 +215,7 @@ export type AggregatedAIM = {
    */
   latestAim: ParsedAIM | null;
   /**
-   * True if at least one version has AIMStatus.READY.
+   * True if at least one version has a 'Ready' status.
    */
   isSupported: boolean;
   /**
@@ -454,62 +245,33 @@ export type AggregatedAIM = {
      * Absent for stock AIM catalog models.
      */
     onboardPhase?: OnboardPhase;
+    /**
+     * Onboard-chosen runtime precision for user-imported (BYOM) custom models,
+     * used to seed the deploy drawer's precision default. Absent for stock AIM
+     * catalog models and for models onboarded before precision was tracked.
+     */
+    preferredPrecision?: string;
+    /**
+     * Number of profile rows the custom model exposes (its Default plus any
+     * named profiles), so the card can show a count without a per-model
+     * profiles request. Absent for stock AIM catalog models.
+     */
+    profileCount?: number;
+    /**
+     * The custom model's Default profile row (selected by its isDefault flag),
+     * so the card can summarise the Default without a per-model profiles
+     * request. Absent for stock AIM catalog models and until the engine has
+     * emitted the Default profile set.
+     */
+    defaultProfile?: components['schemas']['CustomProfileResponse'];
   };
 };
 
-export type AIMAutoscaling = {
-  metricQuery: string;
-  operationOverTime: string;
-  targetType: string;
-  targetValue: number;
-};
-
-export type AIMDeployPayload = {
-  model: string;
-  displayName?: string;
-  replicas?: number;
-  imagePullSecrets?: string[];
-  hfToken?: string;
-  metric?: string;
-
-  // Autoscaling configuration
-  minReplicas?: number;
-  maxReplicas?: number;
+export type AIMDeployPayload = Omit<
+  components['schemas']['InferenceDeployRequest'],
+  'autoScaling'
+> & {
   autoScaling?: AutoscalingPolicyConfig;
-
-  // AIMServiceOverrides / profile selection (advanced profile params)
-  precision?: string;
-  gpuModel?: string;
-  gpuCount?: number;
-  profileName?: string;
-};
-
-/** Deploy body for custom/BYOM models — runtime profile comes from onboarding, not deploy. */
-export type CustomModelDeployPayload = Pick<
-  AIMDeployPayload,
-  | 'model'
-  | 'displayName'
-  | 'replicas'
-  | 'minReplicas'
-  | 'maxReplicas'
-  | 'autoScaling'
->;
-
-/** Profile fields excluded from custom-model deploy payloads; runtime config lives on the namespace AIMProfile. */
-export const AIM_DEPLOY_PROFILE_OVERRIDE_KEYS = [
-  'metric',
-  'precision',
-  'gpuModel',
-  'gpuCount',
-  'profileName',
-  'imagePullSecrets',
-  'hfToken',
-] as const satisfies ReadonlyArray<keyof AIMDeployPayload>;
-
-export type UpdateScalingPolicyPayload = {
-  minReplicas: number;
-  maxReplicas: number;
-  autoScaling: AutoscalingPolicyConfig;
 };
 
 /**
@@ -539,16 +301,6 @@ export type AutoscalingPolicyConfig = {
   }>;
 };
 
-/**
- * AIMMetric: Optimization goal for an AIM deployment.
- * Default means AIM selects the most appropriate metric automatically.
- */
-export enum AIMMetric {
-  Latency = 'latency',
-  Throughput = 'throughput',
-  Default = 'default',
-}
-
 /** Canonical `spec.type` value on AIMClusterProfile/AIMProfile. Only 'optimized' is treated as optimized. */
 export const AIM_PROFILE_TYPE_OPTIMIZED = 'optimized' as const;
 
@@ -559,114 +311,29 @@ export const AIM_PROFILE_TYPE_OPTIMIZED = 'optimized' as const;
  * Field renames vs. v1alpha1: `gpu` → `acceleratorModel`, `gpuCount` → `acceleratorCount`.
  * New: `acceleratorType` ('gpu' | 'cpu') and `primary` (preferred profile flag).
  */
-export type AIMProfileSpec = {
-  modelName?: string;
-  metric?: AIMMetric.Latency | AIMMetric.Throughput | string | null;
-  type?: 'optimized' | 'preview' | 'unoptimized' | string;
-  engine?: string;
-  acceleratorModel?: string;
-  acceleratorType?: 'gpu' | 'cpu' | string;
-  acceleratorCount?: number;
-  precision?: string;
-  primary?: boolean;
-};
+export type AIMProfileSpec = components['schemas']['AIMProfileSpec'];
 
-/** Status fields on AIMClusterProfile/AIMProfile. */
-export type AIMProfileStatusFields = {
-  status?: 'Ready' | 'NotAvailable' | string;
-  version?: string;
-  matchingNodes?: number;
-  /** Human-readable summary like "1 x MI300X" or "CPU". */
-  hardwareSummary?: string;
+export type ModelProfileSummaryFields = {
+  metric?: AIMProfileSpec['metric'] | null;
+  gpu?: AIMProfileSpec['acceleratorModel'] | null;
+  templateGpuCount?: AIMProfileSpec['acceleratorCount'] | null;
+  acceleratorType?: AIMProfileSpec['acceleratorType'] | null;
+  precision?: AIMProfileSpec['precision'] | null;
+  maxLoraRank?: number | null;
+  /** Authored profile label, set only for custom-model deployments. */
+  profileDisplayName?: string | null;
 };
 
 /**
- * Cluster-scoped AIMClusterProfile CRD resource.
+ * Cluster-scoped AIMClusterProfile CRD resource — the backend
+ * `AIMProfileResource` schema as-is. `spec`/`status` are optional on the wire;
+ * consumers read them defensively.
  * Returned by GET /inference/models/{name}/profiles.
  */
-export type AIMClusterProfile = {
-  metadata: {
-    name: string;
-    labels?: Record<string, string>;
-  };
-  spec: AIMProfileSpec;
-  status: AIMProfileStatusFields;
-};
+export type AIMClusterProfile = components['schemas']['AIMProfileResource'];
 
 /**
  * Namespace-scoped AIMProfile CRD resource.
  * Returned by GET /projects/{project}/models/{model_name}/profiles.
  */
-export type AIMProfile = {
-  metadata: {
-    name: string;
-    labels?: Record<string, string>;
-  };
-  spec: AIMProfileSpec;
-  status: AIMProfileStatusFields;
-};
-
-/**
- * Complete AIM image metadata structure
- */
-export type AIMImageMetadata = {
-  model: {
-    canonicalName: string;
-    descriptionFull?: string;
-    hfTokenRequired: boolean | null;
-    source: string;
-    tags: string[];
-    title: string;
-    variants: string[];
-  };
-  oci?: {
-    description?: string;
-    version?: string;
-    title?: string;
-    licenses?: string;
-    vendor?: string;
-    authors?: string;
-    source?: string;
-    documentation?: string;
-    created?: string;
-    revision?: string;
-  };
-};
-
-/**
- * Per-pod status for a single inference deployment replica.
- *
- * Mirrors backend `InferenceReplicaResponse` (camelCase wire format) returned
- * by GET /v1/projects/{project}/inference/{id}/replicas. Field shape matches
- * Kubernetes pod status fields with one explicit override: `podIp` (the
- * backend serializes K8s `podIP` to standard camelCase).
- */
-export interface InferenceReplica {
-  metadata: {
-    name: string;
-    creationTimestamp?: string;
-  };
-  status?: {
-    phase?: string;
-    podIp?: string;
-    containerStatuses?: {
-      ready?: boolean;
-      restartCount?: number;
-      state?: Record<string, unknown>;
-    }[];
-    conditions?: {
-      type?: string;
-      status?: string;
-      reason?: string;
-      message?: string;
-    }[];
-  };
-  spec?: {
-    nodeName?: string;
-    containers?: {
-      resources?: {
-        limits?: Record<string, string>;
-      };
-    }[];
-  };
-}
+export type AIMProfile = components['schemas']['AIMProfileResource'];

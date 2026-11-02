@@ -34,7 +34,8 @@ Finetune model
     ...                base_model: AIMModel UUID or HuggingFace canonical name
     ...                            (e.g., "meta-llama/Llama-3.2-1B-Instruct")
     ...                finetune_data: Dictionary with the rest of the FinetuneCreate fields
-    ...                               (name, datasetId, epochs, learningRate, batchSize, hfTokenSecretName)
+    ...                               (displayName, datasetIds, epochs, learningRate, batchSize,
+    ...                               hfTokenSecretName). Deprecated datasetId is also accepted.
     ...                namespace: Project namespace for the request
     ...                expected_status: Expected HTTP status code (default: any)
     ...                display_name: Optional display name for the workload

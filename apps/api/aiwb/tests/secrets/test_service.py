@@ -341,6 +341,87 @@ async def test_create_secret_image_pull_valid_json_succeeds(
 
 
 @pytest.mark.asyncio
+async def test_create_secret_s3_missing_credentials_raises_validation_exception(
+    test_namespace: str,
+    mock_kube_client: AsyncMock,
+) -> None:
+    """Test creating an S3 secret without recognized credential keys raises ValidationException."""
+    secret_data = SecretCreate(
+        display_name="s3-secret",
+        data={"unrelated": "dmFsdWU="},
+        use_case=SecretUseCase.S3,
+    )
+
+    with patch("app.secrets.service.create_kubernetes_secret") as mock_create:
+        with pytest.raises(ValidationException, match="missing required credential"):
+            await service.create_secret(
+                kube_client=mock_kube_client,
+                namespace=test_namespace,
+                secret_in=secret_data,
+            )
+        mock_create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_secret_s3_partial_credentials_raises_validation_exception(
+    test_namespace: str,
+    mock_kube_client: AsyncMock,
+) -> None:
+    """Test that an S3 secret with only an access key (no secret key) is rejected."""
+    secret_data = SecretCreate(
+        display_name="s3-secret",
+        data={"AWS_ACCESS_KEY_ID": "dmFsdWU="},
+        use_case=SecretUseCase.S3,
+    )
+
+    with patch("app.secrets.service.create_kubernetes_secret") as mock_create:
+        with pytest.raises(ValidationException, match="secret key"):
+            await service.create_secret(
+                kube_client=mock_kube_client,
+                namespace=test_namespace,
+                secret_in=secret_data,
+            )
+        mock_create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_secret_s3_valid_credentials_succeeds(
+    test_namespace: str,
+    mock_kube_client: AsyncMock,
+) -> None:
+    """Test creating an S3 secret with access and secret keys (using aliased keys) calls the gateway."""
+    secret_data = SecretCreate(
+        display_name="s3-secret",
+        data={
+            "accessKeyId": "YWtpZA==",
+            "secretAccessKey": "c2VjcmV0",
+            "endpoint": "aHR0cHM6Ly9zMy5leGFtcGxlLmNvbQ==",
+        },
+        use_case=SecretUseCase.S3,
+    )
+
+    mock_created_secret = KubernetesSecretResource(
+        metadata=K8sMetadata(
+            name="s3-secret",
+            namespace=test_namespace,
+            creation_timestamp="2025-01-01T00:00:00Z",
+            labels={USE_CASE_LABEL: "S3"},
+        ),
+    )
+
+    with patch("app.secrets.service.list_kubernetes_secrets", return_value=[]):
+        with patch("app.secrets.service.create_kubernetes_secret", return_value=mock_created_secret):
+            result = await service.create_secret(
+                kube_client=mock_kube_client,
+                namespace=test_namespace,
+                secret_in=secret_data,
+            )
+
+    assert result.metadata.name == "s3-secret"
+    assert result.use_case == SecretUseCase.S3
+
+
+@pytest.mark.asyncio
 async def test_delete_secret(
     test_namespace: str,
     mock_kube_client: AsyncMock,

@@ -12,11 +12,14 @@ dependencies = []
 [dependency-groups]
 dev = [
     "robotframework>=7.4.2",
-    "robotframework-browser>=19.15.1",
+    "robotframework-browser>=20.2.0",
     "robotframework-requests>=0.9.7",
     "robotframework-jsonlibrary>=0.5",
     "PyJWT>=2.12.0",
     "PyYAML>=6.0.2",
-    "kubernetes>=36.0.2",
+    "kubernetes>=36.0.3",
     "loguru>=0.7.3",
+    # Required by the AIWB API specs' AIMModelHelper library, which UI specs reuse
+    # for object-storage fixtures; without it the whole library fails to import.
+    "minio>=7.2.20",
 ]

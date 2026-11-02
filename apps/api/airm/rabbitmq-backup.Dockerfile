@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-FROM alpine:3.21
+FROM alpine:3.24
 
 # Install dependencies: curl and MinIO client
 RUN apk add --no-cache curl && \

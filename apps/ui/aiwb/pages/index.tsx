@@ -6,11 +6,11 @@ import { useEffect, useMemo } from 'react';
 
 import type { GetServerSidePropsContext } from 'next/types';
 import { useRouter } from 'next/router';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import { useLocalStorage } from '@amdenterpriseai/hooks';
 
 import { useProject } from '@/contexts/ProjectContext';
+import { getPageTranslations } from '@/lib/server/i18n';
 import { ProjectSelectPrompt } from '@/components/shared/ProjectSelect';
 import LoadingState from '@/components/shared/PageErrorHandler/LoadingState';
 
@@ -56,7 +56,7 @@ export default RootPage;
 export async function getServerSideProps(context: GetServerSidePropsContext) {
   const { locale = 'en' } = context;
 
-  const translations = await serverSideTranslations(locale, ['common']);
+  const translations = await getPageTranslations(locale);
 
   return {
     props: {

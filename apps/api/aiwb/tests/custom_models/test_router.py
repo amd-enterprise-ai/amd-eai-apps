@@ -91,6 +91,7 @@ def test_preview_returns_200(mock_preview) -> None:  # type: ignore[misc, no-unt
         )
     assert response.status_code == status.HTTP_200_OK
     body = response.json()
+    assert body["sourceType"] == "huggingFace"
     assert body["repoId"] == "meta-llama/Meta-Llama-3-8B-Instruct"
     assert body["revision"] == "main"
     assert body["sha"] == "abc123"
@@ -131,6 +132,67 @@ def test_preview_with_hf_token_secret(mock_preview) -> None:  # type: ignore[mis
     mock_preview.assert_called_once()
     call_request = mock_preview.call_args.kwargs["request"]
     assert call_request.hf_token_secret_name == "my-hf-secret"
+
+
+@override_dependencies(PREVIEW_OVERRIDES)
+@patch("app.projects.router.preview_model_source", return_value=_PREVIEW_RESPONSE)
+def test_preview_accepts_s3_source_fields(mock_preview) -> None:  # type: ignore[misc, no-untyped-def]
+    """S3 preview requests accept sourceType='s3' and a valid s3StorageName."""
+    with TestClient(app) as client:
+        response = client.post(
+            PREVIEW_URL,
+            json={
+                "sourceType": "s3",
+                "source": "s3://my-bucket/path/to/model",
+                "s3StorageName": "my-s3-storage",
+            },
+        )
+    assert response.status_code == status.HTTP_200_OK
+    call_request = mock_preview.call_args.kwargs["request"]
+    assert call_request.source_type == "s3"
+    assert call_request.s3_storage_name == "my-s3-storage"
+
+
+@override_dependencies(PREVIEW_OVERRIDES)
+def test_preview_s3_source_requires_s3_storage_name() -> None:
+    """sourceType='s3' without s3StorageName fails request validation."""
+    with TestClient(app) as client:
+        response = client.post(
+            PREVIEW_URL,
+            json={"sourceType": "s3", "source": "s3://my-bucket/path/to/model"},
+        )
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+@override_dependencies(PREVIEW_OVERRIDES)
+def test_preview_s3_source_rejects_hf_token_secret_name() -> None:
+    """sourceType='s3' rejects hfTokenSecretName to avoid mixed-source payloads."""
+    with TestClient(app) as client:
+        response = client.post(
+            PREVIEW_URL,
+            json={
+                "sourceType": "s3",
+                "source": "s3://my-bucket/path/to/model",
+                "s3StorageName": "my-s3-storage",
+                "hfTokenSecretName": "my-hf-secret",
+            },
+        )
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+@override_dependencies(PREVIEW_OVERRIDES)
+def test_preview_hf_source_rejects_s3_storage_name() -> None:
+    """sourceType='huggingFace' rejects s3StorageName to avoid mixed-source payloads."""
+    with TestClient(app) as client:
+        response = client.post(
+            PREVIEW_URL,
+            json={
+                "sourceType": "huggingFace",
+                "source": "org/model",
+                "s3StorageName": "my-s3-storage",
+            },
+        )
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
 @override_dependencies(PREVIEW_OVERRIDES)
@@ -274,6 +336,69 @@ def test_onboard_accepts_custom_profile(mock_onboard) -> None:  # type: ignore[m
     assert response.status_code == status.HTTP_204_NO_CONTENT
     call_request = mock_onboard.call_args.kwargs["request"]
     assert call_request.custom_profile == {"precision": "fp16", "gpuCount": 1}
+
+
+@override_dependencies(ONBOARD_OVERRIDES)
+@patch("app.projects.router.onboard_custom_model_source")
+def test_onboard_accepts_s3_source_fields(mock_onboard) -> None:  # type: ignore[misc, no-untyped-def]
+    """S3 onboarding payload accepts sourceType='s3' and s3StorageName."""
+    body = {
+        **_ONBOARD_BODY,
+        "sourceType": "s3",
+        "repoId": "s3://my-bucket/path/to/model",
+        "revision": "s3",
+        "sha": "s3",
+        "s3StorageName": "my-s3-storage",
+    }
+    with TestClient(app) as client:
+        response = client.post(ONBOARD_URL, json=body)
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+    call_request = mock_onboard.call_args.kwargs["request"]
+    assert call_request.source_type == "s3"
+    assert call_request.s3_storage_name == "my-s3-storage"
+
+
+@override_dependencies(ONBOARD_OVERRIDES)
+def test_onboard_s3_source_requires_s3_storage_name() -> None:
+    """sourceType='s3' without s3StorageName fails request validation."""
+    body = {
+        **_ONBOARD_BODY,
+        "sourceType": "s3",
+        "repoId": "s3://my-bucket/path/to/model",
+        "revision": "s3",
+        "sha": "s3",
+    }
+    with TestClient(app) as client:
+        response = client.post(ONBOARD_URL, json=body)
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+@override_dependencies(ONBOARD_OVERRIDES)
+def test_onboard_s3_source_rejects_hf_token_secret_name() -> None:
+    """sourceType='s3' rejects hfTokenSecretName to avoid mixed-source payloads."""
+    body = {
+        **_ONBOARD_BODY,
+        "sourceType": "s3",
+        "repoId": "s3://my-bucket/path/to/model",
+        "revision": "s3",
+        "sha": "s3",
+        "s3StorageName": "my-s3-storage",
+        "hfTokenSecretName": "my-hf-secret",
+    }
+    with TestClient(app) as client:
+        response = client.post(ONBOARD_URL, json=body)
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+@override_dependencies(ONBOARD_OVERRIDES)
+def test_onboard_hf_source_rejects_s3_storage_name() -> None:
+    """sourceType='huggingFace' rejects s3StorageName to avoid mixed-source payloads."""
+    with TestClient(app) as client:
+        response = client.post(
+            ONBOARD_URL,
+            json={**_ONBOARD_BODY, "sourceType": "huggingFace", "s3StorageName": "my-s3-storage"},
+        )
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
 @override_dependencies(ONBOARD_OVERRIDES)

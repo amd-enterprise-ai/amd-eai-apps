@@ -9,8 +9,15 @@ Resource            resources/deployment.resource
 Resource            resources/aiwb_aims.resource
 Resource            resources/api/health.resource
 Resource            resources/authorization.resource
+Resource            resources/airm_projects.resource
 
 Suite Setup         Verify Workbench Service Health
+# Shared projects — whether this run adopted them or created them — are removed once, here, after
+# every suite has finished with them, never by a per-test teardown, which would delete a shared
+# project another test is still using. Keeps the interrupted-run cleanup guarantee without racing
+# the next setup.
+Suite Teardown      Clean Up Adopted Projects
+Test Timeout        60 minutes
 
 
 *** Keywords ***

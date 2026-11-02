@@ -2,68 +2,79 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { afterEach, beforeEach, describe, expect, it, Mock, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   listAllProjectFineTunedModels,
   listProjectFineTunedModels,
 } from '@/lib/app/models';
 
-const mockFetch = vi.fn();
+// Typed-apiClient mock: the fine-tuning list rides the generated GET contract,
+// so assert on the typed path/param shape rather than a URL string. Mock the
+// client (not globalThis.fetch) — openapi-fetch builds a Request from the
+// browser-relative baseUrl, which Node cannot parse in tests.
+const mockGET = vi.fn();
+
+vi.mock('@/lib/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api-client')>();
+  return {
+    ...actual,
+    apiClient: {
+      GET: (...args: unknown[]) => mockGET(...args),
+    },
+  };
+});
+
+const okData = (data: unknown) => ({
+  data,
+  error: undefined,
+  response: { status: 200 } as Response,
+});
+
+const errData = (status: number) => ({
+  data: undefined,
+  error: { detail: 'boom' },
+  response: { status, statusText: 'Server Error' } as Response,
+});
 
 beforeEach(() => {
-  vi.stubGlobal('fetch', mockFetch);
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-  mockFetch.mockReset();
-});
-
-const lastCall = () =>
-  (mockFetch as Mock).mock.calls.at(-1) as [string, RequestInit];
-
-const okJson = (body: unknown) => ({
-  ok: true,
-  status: 200,
-  json: () => Promise.resolve(body),
-});
-const errJson = (status: number) => ({
-  ok: false,
-  status,
-  json: () => Promise.resolve({ detail: 'boom' }),
-  text: () => Promise.resolve('boom'),
+  vi.clearAllMocks();
 });
 
 describe('listProjectFineTunedModels', () => {
   it('GETs the project fine-tuning list endpoint with default page=1/pageSize=10', async () => {
-    mockFetch.mockResolvedValueOnce(
-      okJson({
-        data: [],
-        pagination: { page: 1, pageSize: 10, total: 0 },
-      }),
+    mockGET.mockResolvedValueOnce(
+      okData({ data: [], pagination: { page: 1, pageSize: 10, total: 0 } }),
     );
 
     await listProjectFineTunedModels('proj-1');
 
-    expect(lastCall()[0]).toBe(
-      '/api/projects/proj-1/fine-tuning/models?pageSize=10&page=1',
+    expect(mockGET).toHaveBeenCalledWith(
+      '/api/projects/{project}/fine-tuning/models',
+      {
+        params: {
+          path: { project: 'proj-1' },
+          query: { page: 1, pageSize: 10 },
+        },
+      },
     );
-    expect(lastCall()[1].method).toBe('GET');
   });
 
   it('forwards explicit page and pageSize to the query string', async () => {
-    mockFetch.mockResolvedValueOnce(
-      okJson({
-        data: [],
-        pagination: { page: 3, pageSize: 25, total: 80 },
-      }),
+    mockGET.mockResolvedValueOnce(
+      okData({ data: [], pagination: { page: 3, pageSize: 25, total: 80 } }),
     );
 
     await listProjectFineTunedModels('proj-1', { page: 3, pageSize: 25 });
 
-    expect(lastCall()[0]).toBe(
-      '/api/projects/proj-1/fine-tuning/models?pageSize=25&page=3',
+    expect(mockGET).toHaveBeenCalledWith(
+      '/api/projects/{project}/fine-tuning/models',
+      {
+        params: {
+          path: { project: 'proj-1' },
+          query: { page: 3, pageSize: 25 },
+        },
+      },
     );
   });
 
@@ -72,7 +83,7 @@ describe('listProjectFineTunedModels', () => {
       data: [{ metadata: { name: 'ft-1' } }, { metadata: { name: 'ft-2' } }],
       pagination: { page: 1, pageSize: 10, total: 2 },
     };
-    mockFetch.mockResolvedValueOnce(okJson(envelope));
+    mockGET.mockResolvedValueOnce(okData(envelope));
 
     const result = await listProjectFineTunedModels('proj-1');
 
@@ -80,7 +91,7 @@ describe('listProjectFineTunedModels', () => {
   });
 
   it('throws APIRequestError on non-OK response', async () => {
-    mockFetch.mockResolvedValueOnce(errJson(500));
+    mockGET.mockResolvedValueOnce(errData(500));
 
     await expect(listProjectFineTunedModels('proj-1')).rejects.toThrow(
       /Failed to get fine-tuned models/,
@@ -90,23 +101,26 @@ describe('listProjectFineTunedModels', () => {
 
 describe('listAllProjectFineTunedModels', () => {
   it('GETs the project fine-tuning list endpoint with pageSize=100 on the first page', async () => {
-    mockFetch.mockResolvedValueOnce(
-      okJson({
-        data: [],
-        pagination: { page: 1, pageSize: 100, total: 0 },
-      }),
+    mockGET.mockResolvedValueOnce(
+      okData({ data: [], pagination: { page: 1, pageSize: 100, total: 0 } }),
     );
 
     await listAllProjectFineTunedModels('proj-1');
 
-    expect(lastCall()[0]).toBe(
-      '/api/projects/proj-1/fine-tuning/models?pageSize=100&page=1',
+    expect(mockGET).toHaveBeenCalledWith(
+      '/api/projects/{project}/fine-tuning/models',
+      {
+        params: {
+          path: { project: 'proj-1' },
+          query: { page: 1, pageSize: 100 },
+        },
+      },
     );
   });
 
   it('unwraps the paginated envelope to AIMModel[] for a single page', async () => {
-    mockFetch.mockResolvedValueOnce(
-      okJson({
+    mockGET.mockResolvedValueOnce(
+      okData({
         data: [{ metadata: { name: 'ft-1' } }, { metadata: { name: 'ft-2' } }],
         pagination: { page: 1, pageSize: 100, total: 2 },
       }),
@@ -118,25 +132,25 @@ describe('listAllProjectFineTunedModels', () => {
       { metadata: { name: 'ft-1' } },
       { metadata: { name: 'ft-2' } },
     ]);
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockGET).toHaveBeenCalledTimes(1);
   });
 
   it('walks subsequent pages and concatenates when total exceeds one page', async () => {
-    mockFetch
+    mockGET
       .mockResolvedValueOnce(
-        okJson({
+        okData({
           data: [{ metadata: { name: 'ft-1' } }],
           pagination: { page: 1, pageSize: 100, total: 250 },
         }),
       )
       .mockResolvedValueOnce(
-        okJson({
+        okData({
           data: [{ metadata: { name: 'ft-2' } }],
           pagination: { page: 2, pageSize: 100, total: 250 },
         }),
       )
       .mockResolvedValueOnce(
-        okJson({
+        okData({
           data: [{ metadata: { name: 'ft-3' } }],
           pagination: { page: 3, pageSize: 100, total: 250 },
         }),
@@ -149,13 +163,13 @@ describe('listAllProjectFineTunedModels', () => {
       { metadata: { name: 'ft-2' } },
       { metadata: { name: 'ft-3' } },
     ]);
-    expect(mockFetch).toHaveBeenCalledTimes(3);
-    expect((mockFetch as Mock).mock.calls[1][0]).toContain('page=2');
-    expect((mockFetch as Mock).mock.calls[2][0]).toContain('page=3');
+    expect(mockGET).toHaveBeenCalledTimes(3);
+    expect(mockGET.mock.calls[1][1].params.query.page).toBe(2);
+    expect(mockGET.mock.calls[2][1].params.query.page).toBe(3);
   });
 
   it('returns [] and does not throw on non-OK response (graceful degrade)', async () => {
-    mockFetch.mockResolvedValueOnce(errJson(500));
+    mockGET.mockResolvedValueOnce(errData(500));
 
     const result = await listAllProjectFineTunedModels('proj-1');
 
@@ -164,14 +178,14 @@ describe('listAllProjectFineTunedModels', () => {
 
   it('returns [] when a subsequent page fails (graceful degrade)', async () => {
     // total=150, pageSize=100 -> totalPages=2, so only one remaining page is fetched.
-    mockFetch
+    mockGET
       .mockResolvedValueOnce(
-        okJson({
+        okData({
           data: [{ metadata: { name: 'ft-1' } }],
           pagination: { page: 1, pageSize: 100, total: 150 },
         }),
       )
-      .mockResolvedValueOnce(errJson(500));
+      .mockResolvedValueOnce(errData(500));
 
     const result = await listAllProjectFineTunedModels('proj-1');
 

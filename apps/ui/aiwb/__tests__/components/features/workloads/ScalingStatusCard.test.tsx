@@ -7,8 +7,10 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { vi } from 'vitest';
 
 import { ScalingStatusCard } from '@/components/features/workloads/ScalingStatusCard';
-import { AIMServiceSpec } from '@/types/aims';
+import type { components } from '@/types/api';
 import wrapper from '@/__tests__/ProviderWrapper';
+
+type AIMServiceSpec = components['schemas']['AIMServiceSpec'];
 
 vi.mock('next-i18next', () => ({
   useTranslation: () => ({
@@ -133,8 +135,6 @@ describe('ScalingStatusCard', () => {
       name: 'ghcr.io/silogen/aim-meta-llama-llama-3-1-8b-instruct:0.7.0',
     },
     replicas: 1,
-    overrides: {},
-    cacheModel: false,
     routing: {
       annotations: {},
       enabled: false,
@@ -168,8 +168,6 @@ describe('ScalingStatusCard', () => {
       name: 'test-model',
     },
     replicas: 1,
-    overrides: {},
-    cacheModel: false,
     routing: {
       annotations: {},
       enabled: false,

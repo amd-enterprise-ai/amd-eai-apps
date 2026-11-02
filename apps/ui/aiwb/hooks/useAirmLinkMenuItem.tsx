@@ -19,11 +19,10 @@ export const useAirmLinkMenuItem = () => {
   return (
     <DropdownSection showDivider key="switch-app-section">
       <DropdownItem
-        as="a"
         href={airmAppUrl}
         target="_blank"
         rel="noopener noreferrer"
-        endContent={<IconExternalLink size={16} stroke={2} />}
+        startContent={<IconExternalLink size={16} stroke={2} />}
         key="menu-switch-app"
       >
         {t('userMenu.airmAppLabel')}

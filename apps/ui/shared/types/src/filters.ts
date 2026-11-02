@@ -22,6 +22,7 @@ export type FilterComponentField = {
   icon?: React.ReactNode;
   placeholder?: string;
   className?: string;
+  variant?: 'primary' | 'secondary';
   allowEmptySelection?: boolean;
   allowMultipleSelection?: boolean;
   defaultSelectedValues?: (string | number | boolean)[];

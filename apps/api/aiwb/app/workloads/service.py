@@ -28,8 +28,15 @@ from .constants import ACTIVE_WORKLOAD_STATUSES, DISPLAY_NAME_ANNOTATION
 from .enums import WorkloadStatus, WorkloadType
 from .gateway import delete_workload_resources
 from .models import Workload
-from .repository import get_workload_by_id, get_workloads, update_workload_status
+from .repository import (
+    get_existing_dataset_ids,
+    get_workload_by_id,
+    get_workload_dataset_refs,
+    get_workloads,
+    update_workload_status,
+)
 from .schemas import (
+    WorkloadDatasetResponse,
     WorkloadMetrics,
     WorkloadMetricsListPaginated,
     WorkloadResourceType,
@@ -37,6 +44,42 @@ from .schemas import (
     WorkloadStatusCount,
 )
 from .utils import get_resource_type
+
+
+async def resolve_workload_datasets(
+    session: AsyncSession,
+    workload_id: UUID,
+) -> list[WorkloadDatasetResponse]:
+    """Resolve a workload's dataset snapshots against datasets that still exist."""
+    # K8s-sourced workload objects do not contain the persisted dataset snapshots.
+    refs = await get_workload_dataset_refs(session, workload_id)
+    available_ids = await get_existing_dataset_ids(session, [ref["id"] for ref in refs])
+    return _dataset_responses(refs, available_ids)
+
+
+async def resolve_workloads_datasets(
+    session: AsyncSession,
+    workloads: list[Workload],
+) -> dict[UUID, list[WorkloadDatasetResponse]]:
+    """Resolve dataset snapshots for a workload page in one availability query."""
+    refs_by_workload = {workload.id: workload.dataset_refs or [] for workload in workloads}
+    dataset_ids = list(dict.fromkeys(ref["id"] for refs in refs_by_workload.values() for ref in refs))
+    available_ids = await get_existing_dataset_ids(session, dataset_ids)
+    return {workload_id: _dataset_responses(refs, available_ids) for workload_id, refs in refs_by_workload.items()}
+
+
+def _dataset_responses(
+    refs: list[dict[str, str]],
+    available_ids: set[str],
+) -> list[WorkloadDatasetResponse]:
+    return [
+        WorkloadDatasetResponse(
+            id=ref["id"],
+            name=ref["name"],
+            available=ref["id"] in available_ids,
+        )
+        for ref in refs
+    ]
 
 
 async def ensure_workload_or_aim_service_exists(

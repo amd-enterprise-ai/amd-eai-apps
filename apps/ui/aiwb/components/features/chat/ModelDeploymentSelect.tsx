@@ -7,16 +7,13 @@ import { Select, SelectItem } from '@amdenterpriseai/components';
 
 import { IconCpu } from '@tabler/icons-react';
 
-import { WorkloadType } from '@amdenterpriseai/types';
-import { Workload } from '@/types/workloads';
-import { WorkloadStatus } from '@/types/enums/workloads';
+import type { Workload } from '@/types/workloads';
 
 interface Props {
   selectedModelId?: string;
   workloads: Workload[];
   onModelDeploymentChange: (modelId: string) => void;
   label?: string;
-  size?: 'sm' | 'md' | 'lg';
   isDisabled?: boolean;
   allowEmptySelection?: boolean;
   showOnlyRunningWorkloads?: boolean;
@@ -28,7 +25,6 @@ export function ModelDeploymentSelect({
   onModelDeploymentChange,
   workloads,
   label,
-  size,
   isDisabled,
   allowEmptySelection,
   showOnlyRunningWorkloads = true,
@@ -38,9 +34,8 @@ export function ModelDeploymentSelect({
     () =>
       workloads.filter(
         (workload) =>
-          (!showOnlyRunningWorkloads ||
-            workload.status === WorkloadStatus.RUNNING) &&
-          workload.type === WorkloadType.INFERENCE,
+          (!showOnlyRunningWorkloads || workload.status === 'Running') &&
+          workload.type === 'INFERENCE',
       ),
     [workloads, showOnlyRunningWorkloads],
   );
@@ -48,35 +43,16 @@ export function ModelDeploymentSelect({
   return (
     <Select
       className="select-wrapper w-full lg:min-w-72"
+      variant="primary"
       data-testid="model-deployment-select"
       aria-label={label}
       placeholder={label}
+      showDescriptionInTrigger
       disallowEmptySelection={!allowEmptySelection}
       selectedKeys={selectedModelId ? [selectedModelId] : []}
       onChange={(e) => onModelDeploymentChange(e.target.value)}
       isDisabled={workloads.length === 0 || isDisabled}
-      size={size || 'md'}
       startContent={<IconCpu size={16} />}
-      renderValue={(items) => {
-        return items.map((item) => {
-          const workload = filteredWorkloads.find((w) => w.id === item.key);
-          const workloadLabel = workload?.displayName ?? workload?.name;
-          const description = workload
-            ? workloadDescriptions?.[workload.id]
-            : undefined;
-
-          return (
-            <div key={item.key} className="flex flex-col">
-              <span>{workloadLabel}</span>
-              {description != null && description !== '' && (
-                <span className="text-default-500 text-tiny">
-                  {description}
-                </span>
-              )}
-            </div>
-          );
-        });
-      }}
     >
       {filteredWorkloads.map((workload) => (
         <SelectItem
@@ -84,9 +60,6 @@ export function ModelDeploymentSelect({
           key={workload.id}
           aria-label={workload.id}
           description={workloadDescriptions?.[workload.id]}
-          classNames={{
-            description: 'text-default-500',
-          }}
         >
           {workload.displayName ?? workload.name}
         </SelectItem>

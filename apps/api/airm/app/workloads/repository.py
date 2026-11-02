@@ -69,6 +69,15 @@ async def update_workload_status(
     await session.flush()
 
 
+async def update_workload_display_name(
+    session: AsyncSession, workload: Workload, display_name: str, updated_by: str
+) -> None:
+    workload.display_name = display_name
+    workload.updated_by = updated_by
+    # Workload.updated_at orders status events, so display-only updates must not advance it.
+    await session.flush()
+
+
 async def get_workloads_by_project(session: AsyncSession, project_id: UUID) -> list[Workload]:
     result = await session.execute(select(Workload).where(Workload.project_id == project_id))
     return result.scalars().all()

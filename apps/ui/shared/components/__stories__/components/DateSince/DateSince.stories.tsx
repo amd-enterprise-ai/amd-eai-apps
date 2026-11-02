@@ -34,14 +34,14 @@ const labels: Record<keyof typeof dates, string> = {
 
 export const AllStates: Story = () => (
   <div className="flex flex-col gap-4">
-    <p className="text-small text-default-500">
+    <p className="text-sm text-muted">
       Renders a relative time label (e.g. “5 minutes ago”) with an absolute
       date/time tooltip for today and yesterday.
     </p>
     <ul className="flex flex-col gap-3 list-none p-0 m-0">
       {(Object.keys(dates) as (keyof typeof dates)[]).map((key) => (
         <li key={key} className="flex gap-2 items-baseline">
-          <span className="text-small text-default-400 min-w-[200px]">
+          <span className="text-sm text-muted min-w-[200px]">
             {labels[key]}:
           </span>
           <DateSince date={dates[key]} />

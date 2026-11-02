@@ -18,12 +18,15 @@
     "./app": "./src/app/index.ts",
     "./data": "./src/data/index.ts",
     "./server": "./src/server/index.ts",
+    "./server/i18n": "./src/server/i18n.ts",
     "./server/proxy": "./src/server/proxy.ts"
   },
   "dependencies": {
     "@amdenterpriseai/types": "workspace:*"
   },
-  "peerDependencies": {},
+  "peerDependencies": {
+    "next-i18next": "*"
+  },
   "devDependencies": {
     "@testing-library/jest-dom": "*",
     "@testing-library/react": "*",

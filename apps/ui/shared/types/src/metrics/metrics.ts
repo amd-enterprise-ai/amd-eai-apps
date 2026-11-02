@@ -4,7 +4,7 @@
 
 export type TimeSeriesDataPoint = {
   timestamp: string;
-  value: number | null;
+  value?: number | null;
 };
 
 export type TimeSeriesData = {

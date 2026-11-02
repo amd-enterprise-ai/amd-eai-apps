@@ -8,30 +8,30 @@ import { vi } from 'vitest';
 
 import { FormPasswordInput } from '@amdenterpriseai/components';
 
-// Mock HeroUI components
-vi.mock('@heroui/react', async () => {
-  const actual = await vi.importActual('@heroui/react');
-  return {
-    ...actual,
-    Input: ({ type, endContent, startContent, ...props }: any) => (
-      <div data-testid="input-wrapper">
-        {startContent && <div data-testid="start-content">{startContent}</div>}
-        <input data-testid="form-password-input" type={type} {...props} />
-        {endContent && <div data-testid="end-content">{endContent}</div>}
-      </div>
-    ),
-    Button: ({ children, onPress, tabIndex, ...props }: any) => (
-      <button
-        data-testid="password-toggle-button"
-        onClick={onPress}
-        tabIndex={tabIndex}
-        {...props}
-      >
-        {children}
-      </button>
-    ),
-  };
-});
+// FormPasswordInput → PasswordInput composes the local Input/Button adapters
+// (not the raw HeroUI primitives); stub those to isolate the form wiring.
+vi.mock('../../../src/Input/InputPrimitive', () => ({
+  Input: ({ type, endContent, startContent, ...props }: any) => (
+    <div data-testid="input-wrapper">
+      {startContent && <div data-testid="start-content">{startContent}</div>}
+      <input data-testid="form-password-input" type={type} {...props} />
+      {endContent && <div data-testid="end-content">{endContent}</div>}
+    </div>
+  ),
+}));
+
+vi.mock('../../../src/Buttons/Button', () => ({
+  Button: ({ children, onPress, tabIndex, ...props }: any) => (
+    <button
+      data-testid="password-toggle-button"
+      onClick={onPress}
+      tabIndex={tabIndex}
+      {...props}
+    >
+      {children}
+    </button>
+  ),
+}));
 
 vi.mock('@tabler/icons-react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tabler/icons-react')>();
@@ -58,6 +58,14 @@ describe('FormPasswordInput', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // jsdom has no `CSS.supports`; simulate a browser that supports
+    // `-webkit-text-security` so the `preventPasswordManagerPrompt` masking
+    // path (exercised below) behaves as in Chrome/Safari.
+    vi.stubGlobal('CSS', { supports: vi.fn().mockReturnValue(true) });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   describe('Basic rendering', () => {
@@ -241,6 +249,43 @@ describe('FormPasswordInput', () => {
 
       const button = screen.getByTestId('password-toggle-button');
       expect(button).toHaveAttribute('tabIndex', '-1');
+    });
+  });
+
+  describe('preventPasswordManagerPrompt', () => {
+    it('renders type="text" instead of "password" when enabled', () => {
+      render(
+        <TestWrapper>
+          {(form: any) => (
+            <FormPasswordInput
+              form={form}
+              name="password"
+              preventPasswordManagerPrompt
+            />
+          )}
+        </TestWrapper>,
+      );
+      const input = screen.getByTestId('form-password-input');
+      expect(input).toHaveAttribute('type', 'text');
+    });
+
+    it('keeps type="text" after toggling reveal', () => {
+      render(
+        <TestWrapper>
+          {(form: any) => (
+            <FormPasswordInput
+              form={form}
+              name="password"
+              preventPasswordManagerPrompt
+            />
+          )}
+        </TestWrapper>,
+      );
+      const input = screen.getByTestId('form-password-input');
+      const toggleButton = screen.getByTestId('password-toggle-button');
+
+      fireEvent.click(toggleButton);
+      expect(input).toHaveAttribute('type', 'text');
     });
   });
 

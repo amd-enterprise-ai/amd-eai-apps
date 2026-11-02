@@ -201,6 +201,61 @@ Chat input should be enabled
     ${disabled}=    Get chat input disabled state
     Should Not Be True    ${disabled}    msg=Chat input should be enabled after model selection
 
+The chat model selector should offer the deployment labeled "${label}"
+    [Documentation]    Opens the model selector and verifies a deployment option includes
+    ...                the given label in its rendered text (name or description line).
+
+    Wait Until Keyword Succeeds    60s    3s    Open model selector and show its options
+    Wait Until Keyword Succeeds    15s    2s    Model selector should offer an option labeled    ${label}
+
+The chat model selector should show default model name when no custom deployment name is set
+    [Documentation]    Verifies the model's default name is shown when no custom
+    ...                deployment name is provided and, when that default differs
+    ...                from the catalog title, the title is not offered as the label.
+    ...                Requires: TEST_AIM_CANONICAL_NAME, TEST_AIM_DISPLAY_NAME.
+
+    Wait Until Keyword Succeeds    15s    2s    Open model selector and show its options
+    Wait Until Keyword Succeeds    15s    2s    Model selector should offer an option named exactly    ${TEST_AIM_CANONICAL_NAME}
+    IF    '${TEST_AIM_CANONICAL_NAME}' != '${TEST_AIM_DISPLAY_NAME}'
+        Model selector should not offer an option named exactly    ${TEST_AIM_DISPLAY_NAME}
+    END
+
+Open model selector and show its options
+    [Documentation]    Single-poll helper: opens the model selector and waits for its listbox.
+    ...                Retried while the deployment list is still loading.
+
+    Click model selector
+    Wait for listbox visible
+    ${option_count}=    Get listbox option count
+    Should Be True    ${option_count} > 0    msg=Model selector options have not loaded yet
+
+Model selector should offer an option labeled
+    [Documentation]    Single-poll helper: asserts the open model selector offers at least one
+    ...                option whose text includes the given label.
+    [Arguments]    ${label}
+
+    ${count}=    Get listbox option count for text "${label}"
+    Should Be True    ${count} > 0
+    ...    msg=Model selector offered no option labeled "${label}"
+
+Model selector should offer an option named exactly
+    [Documentation]    Single-poll helper: asserts the open model selector offers at least one
+    ...                option whose first text line exactly matches the given label.
+    [Arguments]    ${label}
+
+    ${name_lines}=    Get listbox option name lines
+    List Should Contain Value    ${name_lines}    ${label}
+    ...    msg=Expected an option name line exactly matching "${label}" (names: ${name_lines})
+
+Model selector should not offer an option named exactly
+    [Documentation]    Single-poll helper: asserts the open selector has no option whose
+    ...                first text line exactly matches the given label.
+    [Arguments]    ${label}
+
+    ${name_lines}=    Get listbox option name lines
+    List Should Not Contain Value    ${name_lines}    ${label}
+    ...    msg=Unexpected option name line "${label}" found in selector (names: ${name_lines})
+
 # =============================================================================
 # Internal helper keywords
 # =============================================================================

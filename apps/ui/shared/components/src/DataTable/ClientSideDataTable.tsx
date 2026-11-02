@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 import type { Selection } from '../Select/Select';
-import { SortDescriptor } from './TablePrimitive';
+import type { SortDescriptor } from '@heroui/react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { defaultComparator } from '@amdenterpriseai/utils/app';
@@ -211,7 +211,7 @@ interface Props<T, K extends keyof T, C> {
  *   table field enum as `columns`. Mixing enums from a different table can compile
  *   but silently breaks sorting.
  */
-export const ClientSideDataTable = <T, K extends keyof T, C>({
+export const ClientSideDataTable = <T extends object, K extends keyof T, C>({
   data,
   className,
   columns,

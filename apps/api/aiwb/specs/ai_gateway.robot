@@ -3,13 +3,13 @@
 # SPDX-License-Identifier: MIT
 
 *** Settings ***
-Documentation       E2E coverage for the unified Envoy AI Gateway (EAI-5889 / EAI-6040).
+Documentation       E2E coverage for the unified Envoy AI Gateway.
 ...                 Verifies the single OpenAI-compatible endpoint that serves all
 ...                 deployed AIMs: model discovery on /v1/models, inference happy
 ...                 path with API-key auth, auth enforcement, undeploy cleanup,
-...                 error mapping for unknown models, and (EAI-7128) correct
-...                 per-backend routing when two AIMs share a model name. After
-...                 EAI-6787 the AI Gateway becomes the only external entry point
+...                 error mapping for unknown models, and correct
+...                 per-backend routing when two AIMs share a model name. The
+...                 AI Gateway is the only external entry point
 ...                 for AIM inference (the per-AIM /workbench/{uuid} route is
 ...                 removed), so this suite is the canonical coverage for that
 ...                 contract.
@@ -35,9 +35,8 @@ Deployed AIM appears in the unified model listing
     [Tags]    ai-gateway    inference    api-keys    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the gateway project has GPU quota available
     And the AI Gateway endpoint is available
-    And the smallest deployable AIM is selected
     And a HuggingFace token is available for AIM deployment
     And an AIM model is running with api key
     When the unified /v1/models endpoint is queried with a valid API key
@@ -50,9 +49,8 @@ Inference works through the AI Gateway with a valid API key
     [Tags]    ai-gateway    inference    api-keys    positive    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the gateway project has GPU quota available
     And the AI Gateway endpoint is available
-    And the smallest deployable AIM is selected
     And a HuggingFace token is available for AIM deployment
     And an AIM model is running with api key
     When a chat completion request is sent to the AI Gateway for that model
@@ -61,19 +59,64 @@ Inference works through the AI Gateway with a valid API key
 Inference is rejected for an API key authorized for a different model
     [Documentation]    Verify that per-model authorization is enforced even when the API key
     ...    holds valid credentials for another model on the same gateway hostname. Regression
-    ...    test for EAI-6805: old cluster-auth matched HTTPRoutes by hostname only, so a key
+    ...    test: old cluster-auth matched HTTPRoutes by hostname only, so a key
     ...    authorized for model-A could reach model-B because the wrong route was selected.
     [Tags]    ai-gateway    inference    api-keys    negative    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the gateway project has GPU quota available
     And the AI Gateway endpoint is available
-    And the smallest deployable AIM is selected
     And a HuggingFace token is available for AIM deployment
     And an AIM model is running with api key
     And a valid API key authorized for this model exists
     And another model is available on the gateway
     When a chat completion request is sent to the AI Gateway for the other model with the authorized key
+    Then the request is rejected with an authentication error
+
+Multipart inference requests reach the backend instead of being rejected by the gateway
+    [Documentation]    Verify that an OpenAI-shaped audio request — multipart/form-data with the
+    ...    model as a form field and no routing headers — is parsed and authorized by the
+    ...    gateway rather than refused inside it.
+    ...
+    ...    Regression test for the audio path being unusable: two components on the request path
+    ...    JSON-decoded every body in order to read the model, and a multipart body fails that
+    ...    decode on the leading "--" of its boundary. The body-aware authorizer answered
+    ...    "invalid json body" and the endpoint picker answered "error unmarshaling request
+    ...    bodyMap", so no audio endpoint was reachable on any model.
+    ...
+    ...    The suite's AIM is a chat model, so the backend itself refuses an audio path with an
+    ...    OpenAI error saying it does not serve that API. That is the expected outcome: the
+    ...    assertion is that the model answered at all, which is what both regressions prevent.
+    [Tags]    ai-gateway    inference    api-keys    multipart    gpu
+
+    Given a ready project with user access exists
+    And the gateway project has GPU quota available
+    And the AI Gateway endpoint is available
+    And a HuggingFace token is available for AIM deployment
+    And an AIM model is running with api key
+    When a transcription request is sent to the AI Gateway without routing headers
+    Then the gateway does not reject the request as malformed
+
+Multipart inference is rejected for an API key authorized for a different model
+    [Documentation]    Verify that per-model authorization holds on the multipart path. The
+    ...    multipart body is read by different code than the JSON body, so the authorization
+    ...    decision has to be proved separately here.
+    ...
+    ...    Regression test for a cross-model bypass: an earlier revision inferred the multipart
+    ...    boundary from the body when Content-Type was unavailable. RFC 2046 makes a compliant
+    ...    reader discard everything before the first real boundary, so a body could open with a
+    ...    decoy document naming an allowed model and be authorized on it while every parser
+    ...    downstream read a second, forbidden one.
+    [Tags]    ai-gateway    inference    api-keys    multipart    negative    gpu
+
+    Given a ready project with user access exists
+    And the gateway project has GPU quota available
+    And the AI Gateway endpoint is available
+    And a HuggingFace token is available for AIM deployment
+    And an AIM model is running with api key
+    And a valid API key authorized for this model exists
+    And another model is available on the gateway
+    When a transcription request is sent to the AI Gateway for the other model with the authorized key
     Then the request is rejected with an authentication error
 
 Inference is rejected without an API key
@@ -83,9 +126,8 @@ Inference is rejected without an API key
     [Tags]    ai-gateway    inference    api-keys    negative    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the gateway project has GPU quota available
     And the AI Gateway endpoint is available
-    And the smallest deployable AIM is selected
     And a HuggingFace token is available for AIM deployment
     And an AIM model is running with api key
     When a chat completion request is sent to the AI Gateway without an API key
@@ -97,9 +139,8 @@ Inference is rejected with an invalid API key
     [Tags]    ai-gateway    inference    api-keys    negative    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the gateway project has GPU quota available
     And the AI Gateway endpoint is available
-    And the smallest deployable AIM is selected
     And a HuggingFace token is available for AIM deployment
     And an AIM model is running with api key
     When a chat completion request is sent to the AI Gateway with an invalid API key
@@ -111,16 +152,15 @@ Chat completion request for an unknown model is rejected
     [Tags]    ai-gateway    inference    api-keys    negative    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the gateway project has GPU quota available
     And the AI Gateway endpoint is available
-    And the smallest deployable AIM is selected
     And a HuggingFace token is available for AIM deployment
     And an AIM model is running with api key
     When a chat completion request is sent for a model name that does not exist
     Then the request fails with a client error
 
 Inference routes to the correct backend when two AIMs share a model name
-    [Documentation]    Regression test for EAI-7128 (Bug B): when two AIMs serve the same
+    [Documentation]    Regression test: when two AIMs serve the same
     ...    model name (deployed in two projects), a request that targets a backend by UUID
     ...    must reach that exact backend, not the co-hosted one. Without precise routing,
     ...    Envoy merges the per-AIM AIGatewayRoutes and an equal-specificity model-name rule
@@ -137,14 +177,9 @@ Inference routes to the correct backend when two AIMs share a model name
     ...    against routing collapsing onto a single backend.
     [Tags]    ai-gateway    inference    routing    metrics    gpu
 
-    # gpu_count=1 (not 2 like the single-project tests above): this scenario holds
-    # two projects with a live AIM each at the same time, so a 1-GPU footprint per
-    # project keeps total demand within shared-cluster quota headroom. The smallest
-    # deployable AIM is a 1-GPU model, so one GPU is sufficient to deploy it.
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=1    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the gateway project has GPU quota available
     And the AI Gateway endpoint is available
-    And the smallest deployable AIM is selected
     And a HuggingFace token is available for AIM deployment
     And an AIM model is running with api key
     And the same AIM model is deployed in a second project
@@ -152,6 +187,70 @@ Inference routes to the correct backend when two AIMs share a model name
     Then only backend B served the request
     When a chat completion is sent through the AI Gateway targeting backend A
     Then only backend A served the request
+
+Inference through the backend-UUID path without a model header authorizes the correct key
+    [Documentation]    Regression test: a request that targets a backend by UUID
+    ...    (x-ai-eg-backend) but omits the optional x-ai-eg-model header must still bind to that
+    ...    backend's apiKeyAuth and serve. Before the backend-only route rule was added, a
+    ...    model-less backend request matched no backend rule and the correct key was wrongly
+    ...    rejected on this path.
+    [Tags]    ai-gateway    inference    api-keys    routing    positive    gpu
+
+    Given a ready project with user access exists
+    And the gateway project has GPU quota available
+    And the AI Gateway endpoint is available
+    And a HuggingFace token is available for AIM deployment
+    And an AIM model is running with api key
+    When a chat completion is sent to the backend by UUID without the model header
+    Then the model returns a successful response
+
+Inference through the backend-UUID path without a model header is rejected for an unauthorized key
+    [Documentation]    Regression test for an auth bypass: a key not bound to the AIM
+    ...    must be rejected on the backend-UUID / no-model-header path. Before the fix this request
+    ...    matched no backend rule and was authorized against the wrong policy, letting an
+    ...    unauthorized key invoke the model.
+    [Tags]    ai-gateway    inference    api-keys    routing    negative    gpu
+
+    Given a ready project with user access exists
+    And the gateway project has GPU quota available
+    And the AI Gateway endpoint is available
+    And a HuggingFace token is available for AIM deployment
+    And an AIM model is running with api key
+    And an API key not authorized for this model exists
+    When a chat completion is sent to the backend by UUID without the model header using an unauthorized key
+    Then the request is rejected with an authentication error
+
+Inference targeting a backend by UUID is authorized against that backend, not a model named in the header
+    [Documentation]    Regression test: a request that targets backend A by
+    ...    UUID (x-ai-eg-backend) but names a different deployed model B in x-ai-eg-model must be
+    ...    authorized against A. A key valid only for B must be rejected — before the wildcard backend
+    ...    rule, the mismatched model header pulled the request onto B's route and B's SecurityPolicy
+    ...    wrongly authorized a request that x-ai-eg-backend still served from A (cross-model bypass).
+    [Tags]    ai-gateway    inference    api-keys    routing    negative    gpu
+
+    Given a ready project with user access exists
+    And the gateway project has GPU quota available
+    And the AI Gateway endpoint is available
+    And a HuggingFace token is available for AIM deployment
+    And an AIM model is running with api key
+    And a second model with its own key is available
+    When a chat completion targets backend A by UUID naming model B, using model B's key
+    Then the request is rejected with an authentication error
+
+Inference targeting a backend by UUID with the correct key is served despite a mismatched model header
+    [Documentation]    Backend-wins semantics: the same backend-A/UUID request
+    ...    naming model B in x-ai-eg-model, but carrying A's key, must be served by A — the backend
+    ...    header is authoritative and the mismatched model header is ignored.
+    [Tags]    ai-gateway    inference    api-keys    routing    positive    gpu
+
+    Given a ready project with user access exists
+    And the gateway project has GPU quota available
+    And the AI Gateway endpoint is available
+    And a HuggingFace token is available for AIM deployment
+    And an AIM model is running with api key
+    And a second model with its own key is available
+    When a chat completion targets backend A by UUID naming model B, using model A's key
+    Then the model returns a successful response
 
 # Destructive — runs last so it doesn't tear down state shared with earlier tests.
 Undeploying an AIM keeps workbench endpoints available and removes its route
@@ -165,9 +264,8 @@ Undeploying an AIM keeps workbench endpoints available and removes its route
     [Tags]    ai-gateway    undeploy    cleanup    regression    kubectl    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the gateway project has GPU quota available
     And the AI Gateway endpoint is available
-    And the smallest deployable AIM is selected
     And a HuggingFace token is available for AIM deployment
     And an AIM model is running with api key
     When AIM is undeployed

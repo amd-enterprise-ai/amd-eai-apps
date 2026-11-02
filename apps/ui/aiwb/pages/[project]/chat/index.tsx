@@ -6,9 +6,9 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
 
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import { useSystemToast } from '@amdenterpriseai/hooks';
+import { getPageTranslations } from '@/lib/server/i18n';
 
 import { useProject } from '@/contexts/ProjectContext';
 
@@ -64,12 +64,7 @@ export async function getServerSideProps(context: { locale: any }) {
 
   return {
     props: {
-      ...(await serverSideTranslations(locale, [
-        'common',
-        'chat',
-        'models',
-        'sharedComponents',
-      ])),
+      ...(await getPageTranslations(locale, ['chat', 'models'])),
     },
   };
 }

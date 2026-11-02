@@ -51,53 +51,54 @@ vi.mock('@amdenterpriseai/hooks', () => {
   };
 });
 
-vi.mock('@heroui/react', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@heroui/react')>();
-  return {
-    ...actual,
-    Accordion: ({
-      children,
-      selectedKeys,
-      onSelectionChange,
-    }: {
-      children: React.ReactNode;
-      selectedKeys: import('@heroui/react').Selection;
-      onSelectionChange: (keys: import('@heroui/react').Selection) => void;
-    }) => (
-      <div data-testid="accordion" data-selected={String(selectedKeys)}>
-        <button
-          data-testid="accordion-toggle"
-          onClick={() => {
-            const isCurrentlyOpen =
-              selectedKeys === 'all' ||
-              (selectedKeys instanceof Set &&
-                selectedKeys.has('relevantDocsAccordion'));
-            onSelectionChange(
-              isCurrentlyOpen
-                ? new Set<string>()
-                : new Set(['relevantDocsAccordion']),
-            );
-          }}
-        >
-          Toggle
-        </button>
-        {children}
-      </div>
-    ),
-    AccordionItem: ({
-      title,
-      children,
-    }: {
-      title: string;
-      children: React.ReactNode;
-    }) => (
-      <div data-testid="accordion-item">
-        <span data-testid="accordion-item-title">{title}</span>
-        {children}
-      </div>
-    ),
-  };
-});
+// RelevantDocs consumes the v2 Accordion surface (`selectedKeys` /
+// `onSelectionChange`) from the local adapter, so mock the adapter module
+// directly. (Mocking `@heroui/react` would break the v3 adapter, which relies on
+// the compound `Accordion.Item`/`.Heading`/`.Panel` subcomponents.)
+type AccordionSelection = 'all' | Set<string>;
+vi.mock('@/src/Accordion/Accordion', () => ({
+  Accordion: ({
+    children,
+    selectedKeys,
+    onSelectionChange,
+  }: {
+    children: React.ReactNode;
+    selectedKeys: AccordionSelection;
+    onSelectionChange: (keys: Set<string>) => void;
+  }) => (
+    <div data-testid="accordion" data-selected={String(selectedKeys)}>
+      <button
+        data-testid="accordion-toggle"
+        onClick={() => {
+          const isCurrentlyOpen =
+            selectedKeys === 'all' ||
+            (selectedKeys instanceof Set &&
+              selectedKeys.has('relevantDocsAccordion'));
+          onSelectionChange(
+            isCurrentlyOpen
+              ? new Set<string>()
+              : new Set(['relevantDocsAccordion']),
+          );
+        }}
+      >
+        Toggle
+      </button>
+      {children}
+    </div>
+  ),
+  AccordionItem: ({
+    title,
+    children,
+  }: {
+    title: string;
+    children: React.ReactNode;
+  }) => (
+    <div data-testid="accordion-item">
+      <span data-testid="accordion-item-title">{title}</span>
+      {children}
+    </div>
+  ),
+}));
 
 describe('RelevantDocs', () => {
   beforeEach(() => {

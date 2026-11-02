@@ -2,7 +2,9 @@
 //
 // SPDX-License-Identifier: MIT
 
+export * from './CPUCoreUsageCard';
 export * from './GPUDeviceUsageCard';
 export * from './GPUMemoryUsageCard';
 export * from './NamespaceWorkloadsTable';
 export * from './ProjectWorkloadsStatsCard';
+export * from './SystemMemoryUsageCard';

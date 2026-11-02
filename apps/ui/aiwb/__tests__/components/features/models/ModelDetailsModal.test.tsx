@@ -2,15 +2,15 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 
-import { AIMModel } from '@/types/aims';
+import type { components } from '@/types/api';
 
 import ModelDetailsModal from '@/components/features/models/ModelDetailsModal';
 
 import { describe, expect, it, vi } from 'vitest';
 
-const mockModel: AIMModel = {
+const mockModel: components['schemas']['AIMModelResource'] = {
   metadata: {
     name: 'test-model-resource',
     creationTimestamp: '2023-01-02T00:00:00Z',
@@ -19,6 +19,7 @@ const mockModel: AIMModel = {
     },
   },
   spec: {
+    image: '',
     profiles: {
       overrides: {
         modelSources: [
@@ -98,23 +99,32 @@ describe('ModelDetailsModal', () => {
     expect(screen.getByText('test-model-resource')).toBeInTheDocument();
   });
 
-  it('should call onOpenChange with false when close button is clicked', () => {
+  it('should display the description when the source-description annotation is present', () => {
+    const modelWithDescription: components['schemas']['AIMModelResource'] = {
+      ...mockModel,
+      metadata: {
+        ...mockModel.metadata,
+        annotations: {
+          'aiwb.apps.eai.amd.com/source-description': 'A helpful description',
+        },
+      },
+    };
+
     render(
       <ModelDetailsModal
         isOpen={true}
         onOpenChange={onOpenChangeMock}
-        model={mockModel}
+        model={modelWithDescription}
       />,
     );
 
-    const closeButton = screen.getByText('list.actions.details.modal.close');
-    fireEvent.click(closeButton);
-
-    expect(onOpenChangeMock).toHaveBeenCalledTimes(1);
-    expect(onOpenChangeMock).toHaveBeenCalledWith(false);
+    expect(
+      screen.getByText('list.actions.details.modal.fields.description'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('A helpful description')).toBeInTheDocument();
   });
 
-  it('should call onOpenChange with false when modal overlay is clicked (simulated via onClose)', () => {
+  it('should omit the description field when no description annotation is present', () => {
     render(
       <ModelDetailsModal
         isOpen={true}
@@ -123,10 +133,22 @@ describe('ModelDetailsModal', () => {
       />,
     );
 
-    const closeButton = screen.getByText('list.actions.details.modal.close');
-    fireEvent.click(closeButton);
+    expect(
+      screen.queryByText('list.actions.details.modal.fields.description'),
+    ).not.toBeInTheDocument();
+  });
 
-    expect(onOpenChangeMock).toHaveBeenCalledTimes(1);
-    expect(onOpenChangeMock).toHaveBeenCalledWith(false);
+  it('should not render a footer close button', () => {
+    render(
+      <ModelDetailsModal
+        isOpen={true}
+        onOpenChange={onOpenChangeMock}
+        model={mockModel}
+      />,
+    );
+
+    expect(
+      screen.queryByText('list.actions.details.modal.close'),
+    ).not.toBeInTheDocument();
   });
 });

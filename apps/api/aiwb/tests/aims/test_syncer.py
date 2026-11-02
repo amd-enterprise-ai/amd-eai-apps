@@ -184,7 +184,7 @@ async def test_sync_handles_empty_namespaces(kube_client: MagicMock) -> None:
 async def test_sync_skips_services_without_model_ref(kube_client: MagicMock) -> None:
     """Test sync skips K8s services without model ref."""
     k8s_svc = make_aim_service_k8s()
-    k8s_svc.spec.model = {}  # No ref
+    k8s_svc.spec.model.name = None  # No ref
 
     mock_session = AsyncMock()
 

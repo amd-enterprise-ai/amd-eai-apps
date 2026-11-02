@@ -8,8 +8,6 @@ SPDX-License-Identifier: MIT
 
 The frontend interface for AMD AI Resource Manager. This UI connects to the AIRM API and provides resource management features including cluster onboarding, quota allocation, project management, and job monitoring.
 
-> **Note:** If you are new to the project or new hired, please read the [LOCAL_SETUP](https://github.com/silogen/dev_helpers/blob/main/LOCAL_SETUP.md) before you continue.
-
 ## Settings
 
 ### Environment variables
@@ -18,9 +16,12 @@ The app has various settings and features that can be set or toggled using envir
 
 - NEXTAUTH_SECRET: the secret used by next-auth for authentication. See the `.env.local.example` file.
 - NEXTAUTH_URL: the url the app will run on. This is used by next-auth for authentication. See the `.env.local.example` file.
-- KEYCLOAK_ID: ID for the keycloak client used by next-auth for authentication
-- KEYCLOAK_SECRET: the secret for the keycloak authentication client used by next-auth for authentication
-- KEYCLOAK_ISSUER: the URL to the Keycloak issuer (e.g., `https://kc.<your-domain>/realms/airm`)
+- OIDC_CLIENT_ID: ID for the OIDC client used by next-auth for authentication
+- OIDC_CLIENT_SECRET: the secret for the OIDC authentication client used by next-auth for authentication
+- OIDC_ISSUER: the URL to the OIDC issuer (e.g., `https://kc.<your-domain>/realms/airm`)
+- OIDC_ISSUER_INTERNAL_URL: the issuer URL as the app reaches it, when it differs from `OIDC_ISSUER` (optional)
+
+The app also accepts the older `KEYCLOAK_ID`, `KEYCLOAK_SECRET`, `KEYCLOAK_ISSUER` and `KEYCLOAK_ISSUER_INTERNAL_URL` names as a fallback.
 - AIRM_API_SERVICE_URL: the URL for the AIRM SERVICE API (for local development set to `http://localhost:8001`)
 
 ## Running locally
@@ -28,7 +29,7 @@ The app has various settings and features that can be set or toggled using envir
 You will need all the values specified in the [environment variables section](#environment-variables) - If you are running the AIRM API locally, you can use the pre-populated values for all environment variables.
 However, if your UI is connecting to the AIRM API in a different environment (OCI for example), the following 3 variables need to correspond to the environment where the API is running (ask a colleague)
 
-- `KEYCLOAK_SECRET`, `KEYCLOAK_ID`, and `KEYCLOAK_ISSUER` for authentication.
+- `OIDC_CLIENT_SECRET`, `OIDC_CLIENT_ID`, and `OIDC_ISSUER` for authentication.
 
 Here are the instructions for running locally:
 
@@ -41,8 +42,8 @@ Here are the instructions for running locally:
     - `AIRM_API_SERVICE_URL=http://localhost:8001`
 
   - Configure authentication:
-    - Setup Keycloak authentication by configuring the environment variables `KEYCLOAK_SECRET`, `KEYCLOAK_ID`
-      and `KEYCLOAK_ISSUER` if you are not running the AIRM API locally.
+    - Setup OIDC authentication by configuring the environment variables `OIDC_CLIENT_SECRET`, `OIDC_CLIENT_ID`
+      and `OIDC_ISSUER` if you are not running the AIRM API locally.
       The easiest way is to get these values from someone in the team.
 
 - Run `pnpm dev`

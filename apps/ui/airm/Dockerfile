@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 # ---- Dependencies ----
-FROM node:24-alpine AS dependencies
+FROM node:26-alpine AS dependencies
 WORKDIR /app
 
 # Set-up corepack and pnpm
@@ -36,7 +36,7 @@ RUN export NEXT_PUBLIC_BUILD_VERSION="$(date +"%y%m%d")-${GITHUB_SHA_SHORT}" \
     && cd airm && pnpm build
 
 # ---- Production ----
-FROM node:24-alpine AS production
+FROM node:26-alpine AS production
 WORKDIR /app
 
 # Install dumb-init for proper signal handling
@@ -46,8 +46,9 @@ RUN apk add --no-cache --no-check-certificate dumb-init
 COPY --chown=node:node --from=build /app/airm/.next/standalone /app
 COPY --chown=node:node --from=build /app/airm/.next/static /app/airm/.next/static
 COPY --chown=node:node --from=build /app/airm/public /app/airm/public
-COPY --chown=node:node --from=build /app/airm/.env.local /app/airm/.env.local
 COPY --chown=node:node --from=build /app/airm/next-i18next.config.js /app/airm/next-i18next.config.js
+COPY --chown=node:node --from=build /app/shared/components/locales /app/shared/components/locales
+COPY --chown=node:node --from=build /app/shared/scripts /app/shared/scripts
 
 # Switch to non-root user
 USER node

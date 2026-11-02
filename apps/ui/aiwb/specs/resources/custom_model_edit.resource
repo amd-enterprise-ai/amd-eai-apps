@@ -100,6 +100,18 @@ User returns to the custom models list from the edit wizard header
 # Then keywords (verification)
 # =============================================================================
 
+The model source should be shown as read only
+    [Documentation]    Confirms the source cannot be retyped in the edit wizard because
+    ...                the onboarded model keeps its original source reference.
+
+    Import wizard source input should be read only
+
+The model source type should be shown as "${label}"
+    [Documentation]    Confirms the edit wizard names the family the model was imported from
+    ...                instead of offering the source-type choice again.
+
+    Import wizard source type field should read    ${label}
+
 The custom model edit page should show the edit title
     [Documentation]    Confirms the shell is in edit mode (not the import flow).
 

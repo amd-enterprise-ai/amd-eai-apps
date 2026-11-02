@@ -14,7 +14,7 @@ GOLANGCI_LINT_VERSION ?= v1.63.4
 
 .PHONY: build
 build:
-	go build ./cmd/controller
+	go build ./cmd/controller ./cmd/authz
 
 .PHONY: test
 test:

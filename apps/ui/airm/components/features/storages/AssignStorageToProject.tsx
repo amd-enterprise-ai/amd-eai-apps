@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 import {
-  Select,
+  FormSelect,
   SelectItem,
   DrawerForm,
   FormFieldComponent,
@@ -107,12 +107,7 @@ export const AssignStorageToProject: React.FC<Props> = ({
       placeholder: t('form.assignToProject.field.storageId.placeholder'),
       isRequired: true,
       component: (formElemProps) => (
-        <Select
-          labelPlacement="outside"
-          disabledKeys={disabledStorageIds}
-          variant="bordered"
-          {...formElemProps}
-        >
+        <FormSelect disabledKeys={disabledStorageIds} {...formElemProps}>
           {availableStorages.map((storage: Storage) => {
             return (
               <SelectItem key={storage.id} textValue={storage.name}>
@@ -120,7 +115,7 @@ export const AssignStorageToProject: React.FC<Props> = ({
               </SelectItem>
             );
           })}
-        </Select>
+        </FormSelect>
       ),
     },
   ];
@@ -154,7 +149,7 @@ export const AssignStorageToProject: React.FC<Props> = ({
                 key={field.name}
                 formField={field}
                 errorMessage={form.formState.errors[field.name]?.message}
-                register={form.register}
+                form={form}
               />
             ))
           )}

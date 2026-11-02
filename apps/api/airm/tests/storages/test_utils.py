@@ -30,6 +30,7 @@ def test_build_storage_info_configmap_manifest() -> None:
     """Test _build_storage_info_configmap_manifest returns a valid ConfigMap manifest."""
     storage = SimpleNamespace(
         name="my-s3-storage",
+        type="S3",
         bucket_url="https://s3.example.com/bucket",
         access_key_name="ACCESS_KEY_ID",
         secret_key_name="SECRET_ACCESS_KEY",
@@ -47,7 +48,12 @@ def test_build_storage_info_configmap_manifest() -> None:
     assert manifest.kind == "ConfigMap"
     assert manifest.metadata.name == "my-s3-storage-info-config-map"
     assert manifest.metadata.namespace == "test-project"
-    assert manifest.metadata.labels == {"airm.silogen.ai/project-storage-id": str(project_storage_id)}
+    assert manifest.metadata.labels == {
+        "airm.silogen.ai/project-storage-id": str(project_storage_id),
+        "airm.silogen.ai/storage": "true",
+        "airm.silogen.ai/storage-type": "S3",
+    }
+    assert manifest.metadata.annotations == {"aiwb.apps.eai.amd.com/storage-display-name": "my-s3-storage"}
     assert manifest.data["BUCKET_URL"] == "https://s3.example.com/bucket"
     assert manifest.data["ACCESS_KEY_NAME"] == "ACCESS_KEY_ID"
     assert manifest.data["SECRET_KEY_NAME"] == "SECRET_ACCESS_KEY"
@@ -58,6 +64,7 @@ def test_build_storage_info_configmap_manifest_serializes_to_valid_yaml() -> Non
     """Test that the manifest model_dump produces valid YAML with expected structure."""
     storage = SimpleNamespace(
         name="s3-bucket",
+        type="S3",
         bucket_url="https://minio.example/s3",
         access_key_name="AK",
         secret_key_name="SK",
@@ -78,6 +85,9 @@ def test_build_storage_info_configmap_manifest_serializes_to_valid_yaml() -> Non
     assert parsed["metadata"]["name"] == "s3-bucket-info-config-map"
     assert parsed["metadata"]["namespace"] == "my-project"
     assert parsed["metadata"]["labels"]["airm.silogen.ai/project-storage-id"] == str(project_storage_id)
+    assert parsed["metadata"]["labels"]["airm.silogen.ai/storage"] == "true"
+    assert parsed["metadata"]["labels"]["airm.silogen.ai/storage-type"] == "S3"
+    assert parsed["metadata"]["annotations"]["aiwb.apps.eai.amd.com/storage-display-name"] == "s3-bucket"
     assert parsed["data"]["BUCKET_URL"] == "https://minio.example/s3"
     assert parsed["data"]["SECRET_NAME"] == "my-org-secret"
 

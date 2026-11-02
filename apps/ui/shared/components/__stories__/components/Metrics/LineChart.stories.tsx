@@ -189,7 +189,6 @@ const GPUDeviceSelect: React.FC<GPUDeviceSelectProps> = ({
     aria-label="GPU Device"
     placeholder="GPU Device"
     selectionMode="multiple"
-    size="sm"
     variant="bordered"
     className="w-[200px]"
     startContent={<IconCpu size={16} className="text-gray-400 shrink-0" />}

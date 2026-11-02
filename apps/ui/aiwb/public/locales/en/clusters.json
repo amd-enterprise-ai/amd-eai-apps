@@ -14,7 +14,7 @@
       }
     },
     "script": {
-      "title": "Install Dispatcher",
+      "title": "Install dispatcher",
       "content": {
         "description": "Install AMD Resource Manager Dispatcher on the compute cluster by copying and executing the following script.",
         "note": "Note that this script will only be displayed once with the connection secret!",
@@ -41,7 +41,7 @@
   },
   "form": {
     "edit": {
-      "title": "Edit Cluster",
+      "title": "Edit cluster",
       "field": {
         "workbenchBaseUrl": {
           "label": "Workbench URL for the cluster.",
@@ -62,7 +62,7 @@
       },
       "action": {
         "cancel": "Cancel",
-        "save": "Save Changes"
+        "save": "Save changes"
       },
       "notification": {
         "success": "Cluster updated successfully.",
@@ -78,7 +78,7 @@
   },
   "list": {
     "pending": {
-      "title": "Pending Clusters Requests",
+      "title": "Pending cluster requests",
       "headers": {
         "requestedAt": {
           "title": "Request created at"
@@ -108,7 +108,7 @@
       }
     },
     "active": {
-      "title": "Active Clusters"
+      "title": "Active clusters"
     },
     "headers": {
       "name": {
@@ -122,13 +122,13 @@
         "description": "healthy / total"
       },
       "gpuAllocation": {
-        "title": "GPU Allocation"
+        "title": "GPU allocation"
       },
       "cpuAllocation": {
-        "title": "CPU Allocation"
+        "title": "CPU allocation"
       },
       "memoryAllocation": {
-        "title": "Memory Allocation"
+        "title": "Memory allocation"
       },
       "actions": {
         "title": ""
@@ -166,7 +166,7 @@
       "delete": {
         "label": "Delete",
         "confirmation": {
-          "title": "Confirm Deletion",
+          "title": "Confirm deletion",
           "description": "Are you sure you want to delete this cluster? This action is irreversible."
         },
         "notification": {
@@ -180,7 +180,7 @@
       "cancel": {
         "label": "Cancel",
         "confirmation": {
-          "title": "Confirm Cancellation",
+          "title": "Confirm cancellation",
           "description": "Are you sure you want to cancel this cluster connection request?"
         },
         "notification": {
@@ -252,19 +252,19 @@
           "title": "Status"
         },
         "cpuMilliCores": {
-          "title": "CPU Cores"
+          "title": "CPU cores"
         },
         "memoryBytes": {
-          "title": "CPU Memory"
+          "title": "CPU memory"
         },
         "gpuName": {
-          "title": "GPU Type"
+          "title": "GPU type"
         },
         "gpuCount": {
-          "title": "GPU Devices"
+          "title": "GPU devices"
         },
         "gpuMemory": {
-          "title": "GPU Memory"
+          "title": "GPU memory"
         }
       },
       "filter": {
@@ -345,7 +345,7 @@
   "workloads": {
     "title": "Workloads",
     "actions": {
-      "view": "View Workloads",
+      "view": "View workloads",
       "back": "Back to Cluster"
     }
   },

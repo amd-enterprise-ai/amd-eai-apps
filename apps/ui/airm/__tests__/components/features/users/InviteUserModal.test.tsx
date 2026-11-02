@@ -237,19 +237,19 @@ describe('InviteUserModal', () => {
       },
     );
 
-    const selectTrigger = screen.getAllByLabelText(
+    const roleSelectTrigger = screen.getByLabelText(
       'modal.addUser.form.roles.label',
     );
 
-    expect(selectTrigger[1]).toBeInTheDocument();
+    expect(roleSelectTrigger).toBeInTheDocument();
 
-    await fireEvent.click(selectTrigger[1]);
+    await fireEvent.click(roleSelectTrigger);
 
-    const selectOption = screen.getAllByText(
+    const teamMemberOption = screen.getByText(
       'modal.addUser.form.roles.options.teamMember',
     );
 
-    await fireEvent.click(selectOption[1]);
+    await fireEvent.click(teamMemberOption);
 
     const actionButton = screen.getByText('modal.addUser.actions.confirm');
     await fireEvent.click(actionButton);
@@ -331,20 +331,20 @@ describe('InviteUserModal', () => {
       },
     );
 
-    const selectTrigger = screen.getAllByLabelText(
-      'modal.addUser.form.roles.label',
-    );
-
     // wait for hook to be called or else select compnent will not be rendered with list of projects
     await waitFor(() => {
       expect(fetchProjects).toHaveBeenCalled();
     });
 
-    await fireEvent.click(screen.getByTestId('project-select'));
-
-    await waitFor(async () => {
-      await fireEvent.click(screen.getByTestId('project-project-1'));
+    const projectSelectTrigger = screen.getByRole('button', {
+      name: /modal\.addUser\.form\.projects/,
     });
+    await fireEvent.click(projectSelectTrigger);
+
+    const testProjectOption = await screen.findByRole('option', {
+      name: 'Test Project',
+    });
+    await fireEvent.click(testProjectOption);
 
     const actionButton = screen.getByText('modal.addUser.actions.confirm');
     await fireEvent.click(actionButton);
@@ -353,7 +353,7 @@ describe('InviteUserModal', () => {
       expect(inviteUser).toHaveBeenCalledWith(
         {
           email: 'newuser@example.com',
-          roles: ['Platform Administrator'],
+          roles: [UserRole.PLATFORM_ADMIN],
           projectIds: ['project-1'],
           temporaryPassword: undefined,
         },
@@ -390,8 +390,15 @@ describe('InviteUserModal', () => {
       expect(vi.mocked(fetchProjects)).toBeCalled();
     });
 
-    await fireEvent.click(screen.getByTestId('project-select'));
-    await fireEvent.click(screen.getByTestId('project-project-1'));
+    const projectSelectTrigger = screen.getByRole('button', {
+      name: /modal\.addUser\.form\.projects/,
+    });
+    await fireEvent.click(projectSelectTrigger);
+
+    const testProjectOption = await screen.findByRole('option', {
+      name: 'Test Project',
+    });
+    await fireEvent.click(testProjectOption);
 
     const actionButton = screen.getByText('modal.addUser.actions.confirm');
     await fireEvent.click(actionButton);
@@ -524,15 +531,15 @@ describe('InviteUserModal', () => {
         expect(vi.mocked(fetchProjects)).toBeCalled();
       });
 
-      const selectTrigger = screen.getAllByLabelText(
+      const roleSelectTrigger = screen.getByLabelText(
         'modal.addUser.form.roles.label',
       );
-      await fireEvent.click(selectTrigger[1]);
+      await fireEvent.click(roleSelectTrigger);
 
-      const selectOption = screen.getAllByText(
+      const teamMemberOption = screen.getByText(
         'modal.addUser.form.roles.options.teamMember',
       );
-      await fireEvent.click(selectOption[1]);
+      await fireEvent.click(teamMemberOption);
 
       const actionButton = screen.getByText('modal.addUser.actions.confirm');
       await fireEvent.click(actionButton);
@@ -576,8 +583,15 @@ describe('InviteUserModal', () => {
         expect(vi.mocked(fetchProjects)).toBeCalled();
       });
 
-      await fireEvent.click(screen.getByTestId('project-select'));
-      await fireEvent.click(screen.getByTestId('project-project-2'));
+      const projectSelectTrigger = screen.getByRole('button', {
+        name: /modal\.addUser\.form\.projects/,
+      });
+      await fireEvent.click(projectSelectTrigger);
+
+      const devProjectOption = await screen.findByRole('option', {
+        name: 'Dev Project',
+      });
+      await fireEvent.click(devProjectOption);
 
       const actionButton = screen.getByText('modal.addUser.actions.confirm');
       await fireEvent.click(actionButton);
@@ -976,15 +990,15 @@ describe('InviteUserModal', () => {
         },
       );
 
-      const selectTrigger = screen.getAllByLabelText(
+      const roleSelectTrigger = screen.getByLabelText(
         'modal.addUser.form.roles.label',
       );
-      await fireEvent.click(selectTrigger[1]);
+      await fireEvent.click(roleSelectTrigger);
 
-      const selectOption = screen.getAllByText(
+      const teamMemberOption = screen.getByText(
         'modal.addUser.form.roles.options.teamMember',
       );
-      await fireEvent.click(selectOption[1]);
+      await fireEvent.click(teamMemberOption);
 
       await fireEvent.change(
         screen.getByLabelText('modal.addUser.form.tempPassword.label'),

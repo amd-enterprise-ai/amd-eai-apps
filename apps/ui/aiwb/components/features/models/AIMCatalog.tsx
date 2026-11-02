@@ -18,7 +18,7 @@ import { ActionsToolbar } from '@amdenterpriseai/components';
 import { PageLoader } from '@/components/shared/PageLoader';
 
 import { AIMCard } from './AIMCard';
-import { DeployAIMDrawer } from './DeployAIMDrawer';
+import { DeployAIMWizard } from './DeployAIMWizard';
 import UndeployAIMModal from './UndeployAIMModal';
 import AIMConnectModal from './AIMConnectModal';
 
@@ -26,6 +26,8 @@ import { useProject } from '@/contexts/ProjectContext';
 import {
   buildFilteredCatalog,
   transformToAggregatedAIMs,
+  getModelCapability,
+  type InferenceCapability,
 } from '@/lib/app/aims';
 import {
   deleteInferenceDeployment,
@@ -63,6 +65,7 @@ const AIMCatalog: React.FC = () => {
         serviceId?: string;
         endpoints?: { internal?: string; external?: string };
         modelName?: string;
+        capability?: InferenceCapability;
       }
     | undefined
   >(undefined);
@@ -124,7 +127,7 @@ const AIMCatalog: React.FC = () => {
 
   const handleAimDeploy = useCallback(
     (aggregatedAim: AggregatedAIM) => {
-      // Always pass the unfiltered AggregatedAIM so the deploy drawer has the full
+      // Always pass the unfiltered AggregatedAIM so the deploy wizard has the full
       // parsedAIMs list including any Ready versions that the active filter hid.
       setAggregatedAimForDeployment(
         aggregatedAims.find((a) => a.repository === aggregatedAim.repository) ??
@@ -155,7 +158,8 @@ const AIMCatalog: React.FC = () => {
       setConnectInfo({
         serviceId: service?.id ?? undefined,
         endpoints: service?.endpoints,
-        modelName: service?.status?.resolvedModel?.name,
+        modelName: service?.status?.resolvedModel?.name ?? undefined,
+        capability: getModelCapability(aim.tags),
       });
       connectDisclosure.onOpen();
     },
@@ -329,9 +333,14 @@ const AIMCatalog: React.FC = () => {
       />
 
       {isListEmpty ? (
-        <p className="flex justify-center h-full items-center">
-          {t('list.empty.description')}
-        </p>
+        <div
+          data-testid="aim-catalog-empty"
+          className="flex flex-col items-center justify-center text-center gap-2 py-12"
+        >
+          <p className="text-sm text-foreground/60">
+            {t('list.empty.description')}
+          </p>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-6 mb-6">
           {filteredAggregatedAims.map((aggregatedAim) => (
@@ -348,9 +357,8 @@ const AIMCatalog: React.FC = () => {
         </div>
       )}
       <RequestSoftware variant="model" />
-      {aggregatedAimForDeployment && (
-        <DeployAIMDrawer
-          isOpen={deployDisclosure.isOpen}
+      {deployDisclosure.isOpen && aggregatedAimForDeployment && (
+        <DeployAIMWizard
           onClose={deployDisclosure.onClose}
           onDeploying={() => {
             queryClient.invalidateQueries({
@@ -372,6 +380,7 @@ const AIMCatalog: React.FC = () => {
         serviceId={connectInfo?.serviceId}
         endpoints={connectInfo?.endpoints}
         modelName={connectInfo?.modelName}
+        capability={connectInfo?.capability ?? 'chat'}
         onChatRequested={handleConnectConfirm}
       />
     </div>

@@ -2,13 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-import {
-  AIMServiceStatus,
-  AIMStatus,
-  AIMWorkloadStatus,
-  ParsedAIM,
-  AggregatedAIM,
-} from '@/types/aims';
+import { AIMWorkloadStatus, ParsedAIM, AggregatedAIM } from '@/types/aims';
 
 export const mockAims: ParsedAIM[] = [
   {
@@ -20,7 +14,7 @@ export const mockAims: ParsedAIM[] = [
     imageVersion: '2.0.1',
     canonicalName: 'meta-llama/llama-2-7b',
     tags: ['llm', 'text-generation', 'chat'],
-    status: AIMStatus.READY,
+    status: 'Ready',
     workloadStatuses: [AIMWorkloadStatus.DEPLOYED],
     isPreview: false,
     isHfTokenRequired: true,
@@ -49,22 +43,20 @@ export const mockAims: ParsedAIM[] = [
           name: 'aim-llama-2-7b-v2',
         },
         replicas: 1,
-        overrides: { metric: 'latency' },
-        cacheModel: true,
         routing: {
           annotations: {},
           enabled: true,
         },
         runtimeConfigName: 'default-runtime',
-        profile: { name: 'mock-profile' },
+        profile: { name: 'mock-profile', selector: { metric: 'latency' } },
       },
       status: {
-        status: AIMServiceStatus.RUNNING,
+        status: 'Running',
         routing: {
           path: '/test-namespace/service-1',
         },
       },
-      clusterAuthGroupId: null,
+      statusValue: '',
       endpoints: {
         internal: 'http://llama-2-7b-service.test-namespace.svc.cluster.local',
         external: 'https://api.example.com/test-namespace/service-1',
@@ -87,22 +79,20 @@ export const mockAims: ParsedAIM[] = [
             name: 'aim-llama-2-7b-v2',
           },
           replicas: 1,
-          overrides: { metric: 'latency' },
-          cacheModel: true,
           routing: {
             annotations: {},
             enabled: true,
           },
           runtimeConfigName: 'default-runtime',
-          profile: { name: 'mock-profile' },
+          profile: { name: 'mock-profile', selector: { metric: 'latency' } },
         },
         status: {
-          status: AIMServiceStatus.RUNNING,
+          status: 'Running',
           routing: {
             path: '/test-namespace/service-1',
           },
         },
-        clusterAuthGroupId: null,
+        statusValue: '',
         endpoints: {
           internal:
             'http://llama-2-7b-service.test-namespace.svc.cluster.local',
@@ -120,7 +110,7 @@ export const mockAims: ParsedAIM[] = [
     imageVersion: '1.5.0',
     canonicalName: 'meta-llama/llama-2-7b',
     tags: ['llm', 'text-generation', 'chat'],
-    status: AIMStatus.READY,
+    status: 'Ready',
     workloadStatuses: [],
     isPreview: false,
     isHfTokenRequired: true,
@@ -144,7 +134,7 @@ export const mockAims: ParsedAIM[] = [
     imageVersion: '1.0.0',
     canonicalName: 'stabilityai/stable-diffusion-xl',
     tags: ['image-generation', 'diffusion'],
-    status: AIMStatus.READY,
+    status: 'Ready',
     workloadStatuses: [],
     isPreview: false,
     isHfTokenRequired: false,
@@ -169,7 +159,7 @@ export const mockAims: ParsedAIM[] = [
     imageVersion: '2.0.0-preview',
     canonicalName: 'detection-model',
     tags: ['vision', 'object-detection'],
-    status: AIMStatus.READY,
+    status: 'Ready',
     workloadStatuses: [AIMWorkloadStatus.PENDING],
     isPreview: true,
     isHfTokenRequired: false,
@@ -199,8 +189,6 @@ export const mockAims: ParsedAIM[] = [
           name: 'aim-detection-model',
         },
         replicas: 1,
-        overrides: {},
-        cacheModel: true,
         routing: {
           annotations: {},
           enabled: true,
@@ -209,9 +197,9 @@ export const mockAims: ParsedAIM[] = [
         profile: { name: 'mock-profile' },
       },
       status: {
-        status: AIMServiceStatus.PENDING,
+        status: 'Pending',
       },
-      clusterAuthGroupId: null,
+      statusValue: '',
       endpoints: {
         internal: '',
         external: '',
@@ -234,8 +222,6 @@ export const mockAims: ParsedAIM[] = [
             name: 'aim-detection-model',
           },
           replicas: 1,
-          overrides: {},
-          cacheModel: true,
           routing: {
             annotations: {},
             enabled: true,
@@ -244,9 +230,9 @@ export const mockAims: ParsedAIM[] = [
           profile: { name: 'mock-profile' },
         },
         status: {
-          status: AIMServiceStatus.PENDING,
+          status: 'Pending',
         },
-        clusterAuthGroupId: null,
+        statusValue: '',
         endpoints: {
           internal: '',
           external: '',
@@ -352,7 +338,7 @@ export const mockAggregatedAims: AggregatedAIM[] = [
 ];
 
 // Mock with multiple deployments of the same model
-const mockMultiDeployParsedAims = [
+const mockMultiDeployParsedAims: ParsedAIM[] = [
   {
     ...mockAims[0],
     deployedServices: [
@@ -372,22 +358,20 @@ const mockMultiDeployParsedAims = [
             name: 'aim-llama-2-7b-v2',
           },
           replicas: 1,
-          overrides: { metric: 'latency' },
-          cacheModel: true,
           routing: {
             annotations: {},
             enabled: true,
           },
           runtimeConfigName: 'default-runtime',
-          profile: { name: 'mock-profile' },
+          profile: { name: 'mock-profile', selector: { metric: 'latency' } },
         },
         status: {
-          status: AIMServiceStatus.RUNNING,
+          status: 'Running',
           routing: {
             path: '/test-namespace/service-1',
           },
         },
-        clusterAuthGroupId: null,
+        statusValue: '',
         endpoints: {
           internal:
             'http://llama-deployment-1.test-namespace.svc.cluster.local',
@@ -410,22 +394,20 @@ const mockMultiDeployParsedAims = [
             name: 'aim-llama-2-7b-v2',
           },
           replicas: 1,
-          overrides: { metric: 'throughput' },
-          cacheModel: true,
           routing: {
             annotations: {},
             enabled: true,
           },
           runtimeConfigName: 'default-runtime',
-          profile: { name: 'mock-profile' },
+          profile: { name: 'mock-profile', selector: { metric: 'throughput' } },
         },
         status: {
-          status: AIMServiceStatus.PENDING,
+          status: 'Pending',
           routing: {
             path: '/test-namespace/service-2',
           },
         },
-        clusterAuthGroupId: null,
+        statusValue: '',
         endpoints: {
           internal:
             'http://llama-deployment-2.test-namespace.svc.cluster.local',
@@ -475,7 +457,7 @@ const mockUnsupportedParsedAims = [
     imageVersion: '1.0.0',
     canonicalName: 'unsupported/model',
     tags: ['llm'],
-    status: AIMStatus.NOT_AVAILABLE,
+    status: 'NotAvailable',
     workloadStatuses: [AIMWorkloadStatus.NOT_DEPLOYED],
     isPreview: false,
     isHfTokenRequired: false,
@@ -530,7 +512,7 @@ const mockMixedSupportParsedAims = [
     imageVersion: '2.0.0',
     canonicalName: 'mixed/model',
     tags: ['llm'],
-    status: AIMStatus.READY,
+    status: 'Ready',
     workloadStatuses: [AIMWorkloadStatus.NOT_DEPLOYED],
     isPreview: false,
     isHfTokenRequired: false,
@@ -555,7 +537,7 @@ const mockMixedSupportParsedAims = [
     imageVersion: '1.0.0',
     canonicalName: 'mixed/model',
     tags: ['llm'],
-    status: AIMStatus.NOT_AVAILABLE,
+    status: 'NotAvailable',
     workloadStatuses: [AIMWorkloadStatus.NOT_DEPLOYED],
     isPreview: false,
     isHfTokenRequired: false,
@@ -600,7 +582,7 @@ export const mockMixedSupportAggregatedAim: AggregatedAIM = {
   },
 };
 
-const mockStartingParsedAims = [
+const mockStartingParsedAims: ParsedAIM[] = [
   {
     description: {
       short: 'A starting model deployment',
@@ -610,7 +592,7 @@ const mockStartingParsedAims = [
     imageVersion: '1.0.0',
     canonicalName: 'test/starting-model',
     tags: ['llm'],
-    status: AIMStatus.READY,
+    status: 'Ready',
     workloadStatuses: [AIMWorkloadStatus.STARTING],
     isPreview: false,
     isHfTokenRequired: false,
@@ -638,8 +620,6 @@ const mockStartingParsedAims = [
           name: 'aim-starting-model',
         },
         replicas: 1,
-        overrides: {},
-        cacheModel: true,
         routing: {
           annotations: {},
           enabled: true,
@@ -648,9 +628,9 @@ const mockStartingParsedAims = [
         profile: { name: 'mock-profile' },
       },
       status: {
-        status: AIMServiceStatus.STARTING,
+        status: 'Starting',
       },
-      clusterAuthGroupId: null,
+      statusValue: '',
       endpoints: {
         internal: '',
         external: '',
@@ -673,8 +653,6 @@ const mockStartingParsedAims = [
             name: 'aim-starting-model',
           },
           replicas: 1,
-          overrides: {},
-          cacheModel: true,
           routing: {
             annotations: {},
             enabled: true,
@@ -683,9 +661,9 @@ const mockStartingParsedAims = [
           profile: { name: 'mock-profile' },
         },
         status: {
-          status: AIMServiceStatus.STARTING,
+          status: 'Starting',
         },
-        clusterAuthGroupId: null,
+        statusValue: '',
         endpoints: {
           internal: '',
           external: '',

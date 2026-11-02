@@ -42,7 +42,9 @@ describe('RefreshButton', () => {
 
   it('should render the button with the refresh icon', () => {
     render(<RefreshButton onPress={mockOnPress} />);
-    const button = screen.getByRole('button', { name: 'data.refresh' });
+    const button = screen.getByRole('button', {
+      name: 'actions.refresh.title',
+    });
     expect(button).toBeInTheDocument();
     // Check for refresh icon (SVG element should be present)
     expect(button.querySelector('svg')).toBeInTheDocument();
@@ -50,14 +52,18 @@ describe('RefreshButton', () => {
 
   it('should call onPress when clicked', () => {
     render(<RefreshButton onPress={mockOnPress} />);
-    const button = screen.getByRole('button', { name: 'data.refresh' });
+    const button = screen.getByRole('button', {
+      name: 'actions.refresh.title',
+    });
     fireEvent.click(button);
     expect(mockOnPress).toHaveBeenCalledTimes(1);
   });
 
   it('should be disabled when isDisabled is true', () => {
     render(<RefreshButton onPress={mockOnPress} isDisabled />);
-    const button = screen.getByRole('button', { name: 'data.refresh' });
+    const button = screen.getByRole('button', {
+      name: 'actions.refresh.title',
+    });
     expect(button).toBeDisabled();
   });
 
@@ -73,7 +79,9 @@ describe('RefreshButton', () => {
     act(() => {
       render(<RefreshButton onPress={mockOnPress} isDisabled />);
     });
-    const button = screen.getByRole('button', { name: 'data.refresh' });
+    const button = screen.getByRole('button', {
+      name: 'actions.refresh.title',
+    });
     fireEvent.click(button);
     expect(mockOnPress).not.toHaveBeenCalled();
   });
@@ -88,9 +96,13 @@ describe('RefreshButton', () => {
   describe('Compact mode (default)', () => {
     it('should render as icon-only button when compact is true', () => {
       render(<RefreshButton onPress={mockOnPress} compact />);
-      const button = screen.getByRole('button', { name: 'data.refresh' });
+      const button = screen.getByRole('button', {
+        name: 'actions.refresh.title',
+      });
       expect(button).toBeInTheDocument();
-      expect(screen.queryByText('data.refresh')).not.toBeInTheDocument();
+      expect(
+        screen.queryByText('actions.refresh.title'),
+      ).not.toBeInTheDocument();
     });
 
     it('should show tooltip with refresh title when no timestamp is provided', async () => {
@@ -99,7 +111,9 @@ describe('RefreshButton', () => {
       render(<RefreshButton onPress={mockOnPress} compact />);
 
       // Verify the component renders correctly - the tooltip content is determined by the logic
-      const button = screen.getByRole('button', { name: 'data.refresh' });
+      const button = screen.getByRole('button', {
+        name: 'actions.refresh.title',
+      });
       expect(button).toBeInTheDocument();
 
       // The tooltip should be enabled for compact mode without timestamp
@@ -119,7 +133,9 @@ describe('RefreshButton', () => {
       );
 
       // Verify the component renders and the date formatting is called
-      const button = screen.getByRole('button', { name: 'data.refresh' });
+      const button = screen.getByRole('button', {
+        name: 'actions.refresh.title',
+      });
       expect(button).toBeInTheDocument();
 
       // Verify that formatDistance was called when timestamp is provided
@@ -130,9 +146,11 @@ describe('RefreshButton', () => {
   describe('Non-compact mode', () => {
     it('should render with text when compact is false', () => {
       render(<RefreshButton onPress={mockOnPress} compact={false} />);
-      const button = screen.getByRole('button', { name: 'data.refresh' });
+      const button = screen.getByRole('button', {
+        name: 'actions.refresh.title',
+      });
       expect(button).toBeInTheDocument();
-      expect(screen.getByText('data.refresh')).toBeInTheDocument();
+      expect(screen.getByText('actions.refresh.title')).toBeInTheDocument();
     });
 
     it('should show loading text when isLoading is true and compact is false', () => {
@@ -143,7 +161,9 @@ describe('RefreshButton', () => {
     it('should disable tooltip when compact is false and no timestamp provided', () => {
       render(<RefreshButton onPress={mockOnPress} compact={false} />);
 
-      const button = screen.getByRole('button', { name: 'data.refresh' });
+      const button = screen.getByRole('button', {
+        name: 'actions.refresh.title',
+      });
       expect(button).toBeInTheDocument();
 
       // When compact=false and no timestamp, tooltip should be disabled
@@ -163,9 +183,11 @@ describe('RefreshButton', () => {
         />,
       );
 
-      const button = screen.getByRole('button', { name: 'data.refresh' });
+      const button = screen.getByRole('button', {
+        name: 'actions.refresh.title',
+      });
       expect(button).toBeInTheDocument();
-      expect(screen.getByText('data.refresh')).toBeInTheDocument(); // Non-compact shows text
+      expect(screen.getByText('actions.refresh.title')).toBeInTheDocument(); // Non-compact shows text
 
       // When compact=false but timestamp is provided, tooltip should be enabled
       // This is because: !timeSinceLastUpdate && !compact = false && true = false (tooltip is enabled)

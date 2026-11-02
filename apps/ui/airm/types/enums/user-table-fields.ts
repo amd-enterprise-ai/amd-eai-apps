@@ -6,6 +6,6 @@ export enum UserTableField {
   NAME = 'name',
   EMAIL = 'email',
   PROJECTS = 'projects',
-  LAST_SEEN_AT = 'lastSeenAt',
+  CREATED_AT = 'createdAt',
   ROLES = 'roles',
 }

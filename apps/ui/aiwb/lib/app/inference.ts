@@ -2,7 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { APIRequestError, getErrorMessage } from '@amdenterpriseai/utils/app';
+import { APIRequestError } from '@amdenterpriseai/utils/app';
+import type { QueryClient } from '@tanstack/react-query';
 
 import {
   AIMClusterModel,
@@ -10,24 +11,48 @@ import {
   AIMService,
   AIMServiceStatus,
   AIMStatus,
-  InferenceReplica,
+  AutoscalingPolicyConfig,
   ParsedAIM,
-  UpdateScalingPolicyPayload,
 } from '@/types/aims';
-import { PaginatedList } from '@/types/pagination';
+import type { components, operations } from '@/types/api';
 
+import { apiClient, getApiClientErrorMessage } from '@/lib/api-client';
 import { aimParser } from './aims';
 import { fetchAllPages } from './pagination';
 
-export interface ListInferenceDeploymentsOptions {
-  /**
-   * Capability filter. `chat` narrows the list to deployments whose model
-   * supports chat completions and whose serving stack is fully ready — the
-   * right filter for chat-target pickers.
-   */
-  capability?: 'chat';
-  statusFilter?: AIMServiceStatus[];
-}
+type ListInferenceDeploymentsQuery = NonNullable<
+  operations['list_inference_deployments_endpoint_v1_projects__project__inference_get']['parameters']['query']
+>;
+
+type InferencePatchRequest = components['schemas']['InferencePatchRequest'];
+
+/**
+ * Refreshes deployment data after an adapter attachment or replacement.
+ *
+ * Covers both the project-scoped deployment lists and the deployment-details
+ * query the AIM details page owns: that query disables `refetchOnMount`, so
+ * without an explicit invalidation it keeps serving the pre-attach adapter
+ * list for the lifetime of its cache entry.
+ */
+export const invalidateAdapterQueries = async (
+  queryClient: QueryClient,
+  project: string,
+): Promise<void> => {
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: ['project', project, 'inference'],
+    }),
+    queryClient.invalidateQueries({ queryKey: ['aimService', project] }),
+  ]);
+};
+
+type UpdateScalingPolicyPayload = {
+  [Key in 'minReplicas' | 'maxReplicas']-?: NonNullable<
+    InferencePatchRequest[Key]
+  >;
+} & {
+  autoScaling: AutoscalingPolicyConfig;
+};
 
 /**
  * Gets a single base inference model from the cluster catalog by resource name.
@@ -45,37 +70,19 @@ export const getInferenceModel = async (
     throw new APIRequestError('No inference model name provided', 422);
   }
 
-  const response = await fetch(
-    `/api/inference/models/${encodeURIComponent(name)}`,
-    {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    },
+  const { data, error, response } = await apiClient.GET(
+    '/api/inference/models/{name}',
+    { params: { path: { name } } },
   );
 
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to fetch inference model: ${errorMessage}`,
+      `Failed to fetch inference model: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 
-  return await response.json();
-};
-
-const buildInferenceModelsUrl = (
-  page: number,
-  pageSize: number,
-  statusFilter?: AIMStatus[],
-): string => {
-  const params = new URLSearchParams();
-  params.append('page', String(page));
-  params.append('pageSize', String(pageSize));
-  statusFilter?.forEach((s) => {
-    params.append('statusFilter', s);
-  });
-  return `/api/inference/models?${params}`;
+  return data;
 };
 
 /**
@@ -86,7 +93,7 @@ const buildInferenceModelsUrl = (
  * server-side.
  *
  * @param {object} [options] - Optional filters and pagination controls.
- * @returns {Promise<PaginatedList<AIMClusterModel>>} The requested page and pagination metadata.
+ * @returns The requested page and pagination metadata.
  * @throws {APIRequestError} If the API request fails.
  */
 export const listInferenceModels = async (
@@ -95,30 +102,25 @@ export const listInferenceModels = async (
     pageSize?: number;
     statusFilter?: AIMStatus[];
   } = {},
-): Promise<PaginatedList<AIMClusterModel>> => {
+): Promise<components['schemas']['InferenceModelsList']> => {
   const { page = 1, pageSize = 10, statusFilter } = options;
-  const response = await fetch(
-    buildInferenceModelsUrl(page, pageSize, statusFilter),
-    {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    },
+  const { data, error, response } = await apiClient.GET(
+    '/api/inference/models',
+    { params: { query: { page, pageSize, statusFilter } } },
   );
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to fetch inference models: ${errorMessage}`,
+      `Failed to fetch inference models: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-  return await response.json();
+  return data;
 };
 
 /**
  * Lists every inference base model in the cluster catalog by walking all pages.
  *
- * Thin wrapper around fetchAllPages — see `apps/ui/aiwb/AGENTS.md`
- * "Paginated list loaders". Returns `[]` on any failure so callers can
+ * Thin wrapper around fetchAllPages. Returns `[]` on any failure so callers can
  * render an empty state without an error boundary.
  *
  * @param {AIMStatus[]} [statusFilter] - Optional model statuses to filter by.
@@ -157,39 +159,19 @@ export const deployInference = async (
     throw new APIRequestError('No project selected', 422);
   }
 
-  const response = await fetch(`/api/projects/${project}/inference`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  const { data, error, response } = await apiClient.POST(
+    '/api/projects/{project}/inference',
+    { params: { path: { project } }, body: payload },
+  );
 
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to deploy inference: ${errorMessage}`,
+      `Failed to deploy inference: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 
-  return response.json();
-};
-
-const buildInferenceListUrl = (
-  project: string,
-  page: number,
-  pageSize: number,
-  options: ListInferenceDeploymentsOptions,
-) => {
-  const params = new URLSearchParams();
-  params.append('pageSize', String(pageSize));
-  params.append('page', String(page));
-  if (options.capability) {
-    params.append('capability', options.capability);
-  }
-  options.statusFilter?.forEach((status) => {
-    params.append('statusFilter', status);
-  });
-  return `/api/projects/${project}/inference?${params}`;
+  return data;
 };
 
 /**
@@ -203,50 +185,47 @@ const buildInferenceListUrl = (
  *
  * @param {string} project - The project (1:1 with namespace) to list in.
  * @param {object} [options] - Optional capability/status filters and pagination controls.
- * @returns {Promise<PaginatedList<AIMService>>} The requested page and pagination metadata.
+ * @returns The requested page and pagination metadata.
  * @throws {APIRequestError} If the API request fails.
  */
 export const listInferenceDeployments = async (
   project: string,
-  options: ListInferenceDeploymentsOptions & {
-    page?: number;
-    pageSize?: number;
-  } = {},
-): Promise<PaginatedList<AIMService>> => {
+  options: ListInferenceDeploymentsQuery = {},
+): Promise<components['schemas']['InferenceDeploymentsList']> => {
   const { page = 1, pageSize = 10, ...filters } = options;
-  const response = await fetch(
-    buildInferenceListUrl(project, page, pageSize, filters),
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/inference',
     {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
+      params: {
+        path: { project },
+        query: { page, pageSize, ...filters },
+      },
     },
   );
-
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to fetch inference deployments: ${errorMessage}`,
+      `Failed to fetch inference deployments: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-
-  return await response.json();
+  return data;
 };
 
 /**
  * Lists every inference deployment for a project by walking all pages.
  *
- * Thin wrapper around fetchAllPages — see `apps/ui/aiwb/AGENTS.md`
- * "Paginated list loaders". Returns `[]` on any failure so callers can
+ * Thin wrapper around fetchAllPages. Returns `[]` on any failure so callers can
  * render an empty state without an error boundary.
  *
  * @param {string} project - The project (1:1 with namespace) to list in.
- * @param {ListInferenceDeploymentsOptions} [options] - Optional capability and status filters.
+ * @param {object} [options] - Optional capability and status filters.
  * @returns {Promise<AIMService[]>} All inference deployments matching the filters.
  */
 export const listAllInferenceDeployments = async (
   project: string,
-  options: ListInferenceDeploymentsOptions = {},
+  options: Partial<
+    Pick<ListInferenceDeploymentsQuery, 'capability' | 'statusFilter'>
+  > = {},
 ): Promise<AIMService[]> => {
   try {
     return await fetchAllPages<AIMService>((page, pageSize) =>
@@ -272,20 +251,17 @@ export const getInferenceDeployment = async (
   project: string,
   id: string,
 ): Promise<AIMService> => {
-  const response = await fetch(`/api/projects/${project}/inference/${id}`, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  });
-
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/inference/{id}',
+    { params: { path: { project, id } } },
+  );
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to fetch inference deployment: ${errorMessage}`,
+      `Failed to fetch inference deployment: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-
-  return await response.json();
+  return data;
 };
 
 /**
@@ -297,28 +273,24 @@ export const getInferenceDeployment = async (
  *
  * @param {string} project - The project (1:1 with namespace).
  * @param {string} id - The UUID of the inference deployment.
- * @returns {Promise<InferenceReplica[]>} List of per-pod replica info.
+ * @returns {Promise<components['schemas']['InferenceReplicaResponse'][]>} List of per-pod replica info.
  * @throws {APIRequestError} If the API request fails.
  */
 export const getInferenceReplicas = async (
   project: string,
   id: string,
-): Promise<InferenceReplica[]> => {
-  const response = await fetch(
-    `/api/projects/${project}/inference/${id}/replicas`,
-    {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    },
+): Promise<components['schemas']['InferenceReplicaResponse'][]> => {
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/inference/{id}/replicas',
+    { params: { path: { project, id } } },
   );
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to fetch inference replicas: ${errorMessage}`,
+      `Failed to fetch inference replicas: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-  return (await response.json()).data ?? [];
+  return data.data ?? [];
 };
 
 /**
@@ -338,26 +310,62 @@ export const updateInferenceScaling = async (
   id: string,
   payload: UpdateScalingPolicyPayload,
 ): Promise<void> => {
-  const response = await fetch(`/api/projects/${project}/inference/${id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  const { error, response } = await apiClient.PATCH(
+    '/api/projects/{project}/inference/{id}',
+    { params: { path: { project, id } }, body: payload },
+  );
+  if (error) {
     throw new APIRequestError(
-      `Failed to update inference scaling: ${errorMessage}`,
+      `Failed to update inference scaling: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 };
 
+/** Replaces the complete adapter set served by a dynamic deployment. */
+export const updateInferenceAdapters = async (
+  project: string,
+  id: string,
+  adapters: string[],
+): Promise<void> => {
+  const { error, response } = await apiClient.PATCH(
+    '/api/projects/{project}/inference/{id}',
+    {
+      params: { path: { project, id } },
+      body: { adapters },
+    },
+  );
+  if (!response.ok) {
+    throw new APIRequestError(
+      `Failed to update inference adapters: ${getApiClientErrorMessage(error, response)}`,
+      response.status,
+    );
+  }
+};
+
+/** Attaches an adapter without removing adapters already on the deployment. */
+export const attachAdapterToDeployment = async (
+  project: string,
+  deployment: AIMService,
+  adapterName: string,
+): Promise<void> => {
+  if (!deployment.id) {
+    throw new APIRequestError('No inference deployment ID provided', 422);
+  }
+
+  // TODO: this read-then-replace can drop a concurrent attach made
+  // between the read and the PATCH; revisit once the API supports merging.
+  const latestDeployment = await getInferenceDeployment(project, deployment.id);
+  const existingAdapters =
+    latestDeployment.spec?.adapters?.map((adapter) => adapter.name) ?? [];
+  const adapters = Array.from(new Set([...existingAdapters, adapterName]));
+  await updateInferenceAdapters(project, deployment.id, adapters);
+};
+
 /**
  * Undeploys an inference deployment.
  *
- * Backed by DELETE /v1/projects/{project}/inference/{id}. Tears down
- * associated cluster-auth groups when present.
+ * Backed by DELETE /v1/projects/{project}/inference/{id}.
  *
  * @param {string} project - The project (1:1 with namespace).
  * @param {string} id - The UUID of the inference deployment to undeploy.
@@ -373,16 +381,13 @@ export const deleteInferenceDeployment = async (
   if (!id) {
     throw new APIRequestError('No deployment ID provided', 422);
   }
-
-  const response = await fetch(`/api/projects/${project}/inference/${id}`, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-  });
-
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  const { error, response } = await apiClient.DELETE(
+    '/api/projects/{project}/inference/{id}',
+    { params: { path: { project, id } } },
+  );
+  if (error) {
     throw new APIRequestError(
-      `Failed to undeploy inference deployment: ${errorMessage}`,
+      `Failed to undeploy inference deployment: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
@@ -412,7 +417,7 @@ export const getInferenceCatalog = async (
 
   const servicesByAimRef = new Map<string, AIMService[]>();
   services.forEach((service) => {
-    const key = service.spec.model?.name;
+    const key = service.spec?.model?.name;
     if (!key) return;
     const existing = servicesByAimRef.get(key) ?? [];
     servicesByAimRef.set(key, [...existing, service]);

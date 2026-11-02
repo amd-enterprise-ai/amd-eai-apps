@@ -54,6 +54,46 @@ Finetunable models include GPU hardware compatibility information
     When finetunable models list is requested
     Then each finetunable model should include GPU hardware compatibility details
 
+Finetunable models report Hugging Face token gating
+    [Documentation]    Verify every model offered for fine-tuning reports whether pulling its base
+    ...    weights needs a Hugging Face token, so a user is asked for one before starting a gated job.
+    ...    A model whose gating cannot be determined is reported as gated, never as open.
+    [Tags]    models    finetunable    smoke
+
+    Given Project exists in system
+    When finetunable models list is requested
+    Then each finetunable model should report Hugging Face token gating
+
+Finetunable models report the training settings their recipe defines
+    [Documentation]    Verify a user choosing a base model is shown the batch size, epoch count and
+    ...    learning-rate multiplier that model's own recipe trains with, rather than blank fields
+    ...    they have to fill in blind. A setting the recipe never defines is reported as null, not
+    ...    invented, so nobody unknowingly trains on a made-up value for hours.
+    [Tags]    models    finetunable    smoke
+
+    Given Project exists in system
+    When finetunable models list is requested
+    Then each finetunable model should report the training settings its recipe defines
+
+Base models that train with LoRA report their LoRA settings
+    [Documentation]    Verify a base model whose run tunes LoRA tells the user the rank, alpha and
+    ...    dropout it will use, so those controls start from the recipe instead of a guess.
+    [Tags]    models    finetunable    smoke
+
+    Given Project exists in system
+    When finetunable models list is requested
+    Then each model that trains with LoRA should report its LoRA settings
+
+Base models that train full-parameter offer no LoRA settings
+    [Documentation]    Verify a base model that trains every weight offers no LoRA settings at all.
+    ...    Such a run has no LoRA to tune and a job asking it to is refused, so showing the controls
+    ...    would hand the user a knob the platform will not accept.
+    [Tags]    models    finetunable    smoke
+
+    Given Project exists in system
+    When finetunable models list is requested
+    Then each model that trains full-parameter should report no LoRA settings
+
 Deleting a non-existent model returns not-found error
     [Documentation]    Verify the API returns a not-found error when attempting to delete
     ...    a model that does not exist.

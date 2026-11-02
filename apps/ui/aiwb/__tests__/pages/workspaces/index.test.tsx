@@ -7,23 +7,18 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { SessionProvider } from 'next-auth/react';
 
 import {
-  mockCatalogItems,
-  mockProjectScopedCatalogItems,
-} from '@/__mocks__/services/app/catalogs.data';
-import {
-  getCatalogItems,
-  listAllWorkloads,
-  deleteWorkspace,
-} from '@/lib/app/workloads';
+  mockWorkspaceCatalogItems,
+  mockProjectScopedWorkspaceCatalogItems,
+} from '@/__mocks__/services/app/workspaces.data';
+import { listAllWorkloads, deleteWorkspace } from '@/lib/app/workloads';
+import { listCharts } from '@/lib/app/charts';
 
 import { generateMockWorkspaceWorkloads } from '@/__mocks__/utils/workloads-mock';
-
-import { WorkloadType } from '@amdenterpriseai/types';
-import { WorkloadStatus } from '@/types/enums/workloads';
 
 import WorkspacesPage from '@/pages/[project]/workspaces';
 
@@ -32,14 +27,39 @@ import { Mock, vi } from 'vitest';
 
 vi.mock('@/lib/app/workloads', async (importOriginal) => ({
   ...(await importOriginal()),
-  getCatalogItems: vi.fn(),
   listAllWorkloads: vi.fn(),
   deleteWorkspace: vi.fn(),
+}));
+
+vi.mock('@/lib/app/charts', async (importOriginal) => ({
+  ...(await importOriginal()),
+  listCharts: vi.fn(),
 }));
 
 // Mock RequestSoftware to avoid loading its bg.svg asset in jsdom
 vi.mock('@/components/shared/RequestSoftware/RequestSoftware', () => ({
   RequestSoftware: () => <div data-testid="request-software" />,
+}));
+
+vi.mock('@amdenterpriseai/components', async (importOriginal) => ({
+  ...(await importOriginal()),
+  ActionsDropdown: ({ children, actions }: any) => (
+    <div data-testid="nested-dropdown">
+      {children}
+      <div data-testid="dropdown-content">
+        {actions?.map((action: any) => (
+          <button
+            key={action.key}
+            type="button"
+            disabled={action.isDisabled}
+            onClick={() => action.onPress?.()}
+          >
+            {action.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  ),
 }));
 
 // Mock next/image: the real component rejects relative srcs and requires a
@@ -57,12 +77,33 @@ vi.mock('next/image', () => ({
   ),
 }));
 
+// The global setup mock drops interpolation options, so the undeploy copy would
+// render identically for every workspace. Echo the name to keep it observable.
+vi.mock('next-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: { name?: string }) =>
+      options?.name ? `${key}:${options.name}` : key,
+    i18n: {
+      language: 'en',
+      changeLanguage: vi.fn(),
+    },
+  }),
+  Trans: ({
+    children,
+    i18nKey,
+  }: {
+    children?: React.ReactNode;
+    i18nKey?: string;
+  }) => children ?? i18nKey ?? null,
+  appWithTranslation: (Component: React.ComponentType) => Component,
+}));
+
 const mockSession = {
   error: null as any,
   expires: '2125-01-01T00:00:00',
   user: {
     id: 'test',
-    email: 'user@amd.com',
+    email: 'user@example.com',
     roles: [],
   },
 };
@@ -70,7 +111,7 @@ const mockSession = {
 describe('Catalog Page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (getCatalogItems as Mock).mockResolvedValue(mockCatalogItems);
+    (listCharts as Mock).mockResolvedValue(mockWorkspaceCatalogItems);
     (listAllWorkloads as Mock).mockResolvedValue([]);
   });
 
@@ -147,7 +188,7 @@ describe('Catalog Page', () => {
 
     // Wait for the initial query to complete
     await waitFor(() => {
-      expect(getCatalogItems).toHaveBeenCalledTimes(1);
+      expect(listCharts).toHaveBeenCalledTimes(1);
     });
 
     // Reset the mock to clearly track the second call
@@ -158,12 +199,12 @@ describe('Catalog Page', () => {
     });
 
     await waitFor(() => {
-      expect(getCatalogItems).toHaveBeenCalledTimes(1);
+      expect(listCharts).toHaveBeenCalledTimes(1);
     });
   });
 
   it('renders the catalog page with user scope without running workloads', async () => {
-    (getCatalogItems as Mock).mockResolvedValue([mockCatalogItems[0]]);
+    (listCharts as Mock).mockResolvedValue([mockWorkspaceCatalogItems[0]]);
     (listAllWorkloads as Mock).mockResolvedValue([]);
 
     await act(async () => {
@@ -182,14 +223,14 @@ describe('Catalog Page', () => {
   });
 
   it('renders the catalog page with user scope with running workloads', async () => {
-    (getCatalogItems as Mock).mockResolvedValue([mockCatalogItems[0]]);
+    (listCharts as Mock).mockResolvedValue([mockWorkspaceCatalogItems[0]]);
 
     (listAllWorkloads as Mock).mockResolvedValue(
       generateMockWorkspaceWorkloads(
         1,
-        mockCatalogItems[0].name,
-        WorkloadStatus.RUNNING,
-        WorkloadType.WORKSPACE,
+        mockWorkspaceCatalogItems[0].name,
+        'Running',
+        'WORKSPACE',
       ),
     );
 
@@ -211,7 +252,9 @@ describe('Catalog Page', () => {
   });
 
   it('renders the catalog page with project scope without running workloads', async () => {
-    (getCatalogItems as Mock).mockResolvedValue(mockProjectScopedCatalogItems);
+    (listCharts as Mock).mockResolvedValue(
+      mockProjectScopedWorkspaceCatalogItems,
+    );
     (listAllWorkloads as Mock).mockResolvedValue([]);
 
     await act(async () => {
@@ -232,14 +275,16 @@ describe('Catalog Page', () => {
   });
 
   it('renders the catalog page with project scope with running workloads', async () => {
-    (getCatalogItems as Mock).mockResolvedValue(mockProjectScopedCatalogItems);
+    (listCharts as Mock).mockResolvedValue(
+      mockProjectScopedWorkspaceCatalogItems,
+    );
 
     (listAllWorkloads as Mock).mockResolvedValue(
       generateMockWorkspaceWorkloads(
         1,
-        mockProjectScopedCatalogItems[0].name,
-        WorkloadStatus.RUNNING,
-        WorkloadType.WORKSPACE,
+        mockProjectScopedWorkspaceCatalogItems[0].name,
+        'Running',
+        'WORKSPACE',
       ),
     );
 
@@ -273,24 +318,20 @@ describe('Catalog Page', () => {
     });
 
     expect(listAllWorkloads).toHaveBeenCalledWith('project1', {
-      type: [WorkloadType.WORKSPACE],
-      status: [
-        WorkloadStatus.RUNNING,
-        WorkloadStatus.PENDING,
-        WorkloadStatus.FAILED,
-      ],
+      workloadType: ['WORKSPACE'],
+      statusFilter: ['Running', 'Pending', 'Failed'],
     });
   });
 
-  it('displays pending label on catalog item card when workload is pending', async () => {
-    (getCatalogItems as Mock).mockResolvedValue([mockCatalogItems[0]]);
+  it('shows disabled launch button when workload is pending', async () => {
+    (listCharts as Mock).mockResolvedValue([mockWorkspaceCatalogItems[0]]);
 
     (listAllWorkloads as Mock).mockResolvedValue(
       generateMockWorkspaceWorkloads(
         1,
-        mockCatalogItems[0].name,
-        WorkloadStatus.PENDING,
-        WorkloadType.WORKSPACE,
+        mockWorkspaceCatalogItems[0].name,
+        'Pending',
+        'WORKSPACE',
       ),
     );
 
@@ -305,19 +346,21 @@ describe('Catalog Page', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Test workload 1')).toBeInTheDocument();
-      expect(screen.getByText('list.actions.pending')).toBeInTheDocument();
-      expect(screen.queryByText('list.actions.launch')).not.toBeInTheDocument();
+      expect(screen.getByText('list.actions.launch')).toBeDisabled();
+      expect(
+        screen.queryByText('list.actions.pending'),
+      ).not.toBeInTheDocument();
     });
   });
 
   it('shows Failed chip and Delete failed workload when a workload has FAILED status', async () => {
-    (getCatalogItems as Mock).mockResolvedValue([mockCatalogItems[0]]);
+    (listCharts as Mock).mockResolvedValue([mockWorkspaceCatalogItems[0]]);
 
     const failedWorkloadsResponse = generateMockWorkspaceWorkloads(
       1,
-      mockCatalogItems[0].name,
-      WorkloadStatus.FAILED,
-      WorkloadType.WORKSPACE,
+      mockWorkspaceCatalogItems[0].name,
+      'Failed',
+      'WORKSPACE',
     );
     (listAllWorkloads as Mock).mockResolvedValue(failedWorkloadsResponse);
 
@@ -343,14 +386,62 @@ describe('Catalog Page', () => {
     });
   });
 
+  it('names the workspace in the undeploy confirmation and undeploys the running workload', async () => {
+    (listCharts as Mock).mockResolvedValue([mockWorkspaceCatalogItems[0]]);
+
+    const runningWorkloads = generateMockWorkspaceWorkloads(
+      1,
+      mockWorkspaceCatalogItems[0].name,
+      'Running',
+      'WORKSPACE',
+    );
+    (listAllWorkloads as Mock).mockResolvedValue(runningWorkloads);
+    (deleteWorkspace as Mock).mockResolvedValue(undefined);
+
+    await act(async () => {
+      render(
+        <SessionProvider session={mockSession}>
+          <WorkspacesPage />
+        </SessionProvider>,
+        { wrapper },
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('list.actions.undeploy')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('list.actions.undeploy'));
+    });
+
+    await waitFor(() => {
+      const modal = screen.getByTestId('confirmation-modal');
+      expect(
+        within(modal).getByText('description:Test workload 1'),
+      ).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('actions.confirm.title'));
+    });
+
+    await waitFor(() => {
+      expect(deleteWorkspace).toHaveBeenCalledWith(
+        'project1',
+        runningWorkloads[0].id,
+      );
+    });
+  });
+
   it('calls deleteWorkspace with failed workspace id when Delete failed workload is confirmed', async () => {
-    (getCatalogItems as Mock).mockResolvedValue([mockCatalogItems[0]]);
+    (listCharts as Mock).mockResolvedValue([mockWorkspaceCatalogItems[0]]);
 
     const failedWorkloadsResponse = generateMockWorkspaceWorkloads(
       1,
-      mockCatalogItems[0].name,
-      WorkloadStatus.FAILED,
-      WorkloadType.WORKSPACE,
+      mockWorkspaceCatalogItems[0].name,
+      'Failed',
+      'WORKSPACE',
     );
     const failedWorkloadId = failedWorkloadsResponse[0].id;
     (listAllWorkloads as Mock).mockResolvedValue(failedWorkloadsResponse);
@@ -376,7 +467,11 @@ describe('Catalog Page', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('undeployModal.title')).toBeInTheDocument();
+      const modal = screen.getByTestId('confirmation-modal');
+      expect(within(modal).getByText('title')).toBeInTheDocument();
+      expect(
+        within(modal).getByText('description:Test workload 1'),
+      ).toBeInTheDocument();
     });
 
     const confirmButton = screen.getByText('actions.confirm.title');

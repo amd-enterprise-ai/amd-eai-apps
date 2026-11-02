@@ -151,10 +151,10 @@ export const ChatMessage: FC<Props> = memo(
               {message.role === 'assistant' && (
                 <div className="flex w-full">
                   <div className="flex min-w-full w-full flex-row items-center">
-                    <div className="bg-primary text-white rounded-full p-1 mr-2">
+                    <div className="bg-accent text-white rounded-full p-1 mr-2">
                       <IconRobot size={16} stroke="1.5" />
                     </div>
-                    <div className="text-default-800">
+                    <div className="text-foreground">
                       {t('roles.assistant')}
                     </div>
                   </div>
@@ -165,11 +165,11 @@ export const ChatMessage: FC<Props> = memo(
                           <IconCircleCheck
                             size={16}
                             stroke={2}
-                            className="text-white bg-secondary p-1 rounded-full"
+                            className="text-white bg-accent p-1 rounded-full"
                           />
                         ) : (
                           <button
-                            className="invisible group-hover:visible focus:visible text-primary hover:text-primary-800"
+                            className="invisible group-hover:visible focus:visible text-accent hover:text-accent-soft-hover"
                             onClick={copyOnClick}
                           >
                             <IconCopy stroke={2} size={16} />
@@ -187,7 +187,7 @@ export const ChatMessage: FC<Props> = memo(
 
                         <button
                           onClick={toggleDebugPanel}
-                          className="invisible group-hover:visible focus:visible text-primary hover:text-primary-800"
+                          className="invisible group-hover:visible focus:visible text-accent hover:text-accent-soft-hover"
                           aria-label="debug-info"
                         >
                           <IconBug size={16} stroke="1.5" />
@@ -200,21 +200,21 @@ export const ChatMessage: FC<Props> = memo(
               {message.role === 'user' && (
                 <div className="flex justify-start w-full">
                   <div className="flex items-center">
-                    <div className="bg-secondary text-white rounded-full p-1 mr-2">
+                    <div className="bg-accent text-white rounded-full p-1 mr-2">
                       <IconUserBolt size={16} stroke="1.5" />
                     </div>
-                    <div className="text-default-800">{t('roles.user')}</div>
+                    <div className="text-foreground">{t('roles.user')}</div>
                   </div>
                   {allowEdit && !isEditing && (
                     <div className="h-6 pt-0.5 ml-4">
                       <button
-                        className="invisible group-hover:visible focus:visible text-primary hover:text-primary-800 "
+                        className="invisible group-hover:visible focus:visible text-accent hover:text-accent-soft-hover "
                         onClick={toggleEditing}
                       >
                         <IconEdit size={16} stroke="1.5" />
                       </button>
                       <button
-                        className="ml-2 invisible group-hover:visible focus:visible text-primary hover:text-primary-800 "
+                        className="ml-2 invisible group-hover:visible focus:visible text-accent hover:text-accent-soft-hover "
                         onClick={handleDeleteMessage}
                       >
                         <IconTrash size={16} stroke="1.5" />
@@ -226,10 +226,10 @@ export const ChatMessage: FC<Props> = memo(
               {message.role === 'system' && (
                 <div className="flex justify-start w-full">
                   <div className="flex items-center">
-                    <div className="bg-primary rounded-full p-1 mr-2">
+                    <div className="bg-accent rounded-full p-1 mr-2">
                       <IconTerminal2 size={16} stroke="1.5" />
                     </div>
-                    <div className="text-default-800">{t('roles.system')}</div>
+                    <div className="text-foreground">{t('roles.system')}</div>
                   </div>
                 </div>
               )}
@@ -243,7 +243,7 @@ export const ChatMessage: FC<Props> = memo(
                   <div className="flex w-full flex-col ">
                     <textarea
                       ref={textareaRef}
-                      className="w-full focus:ring-0 focus:border-secondary shadow-lg focus:outline-2 outline-none border-2 border-default-200/75 dark:bg-zinc-600 light:bg-zinc-200 text-default-800 dark:focus:border-secondary rounded-md resize-none"
+                      className="w-full focus:ring-0 focus:border-accent shadow-lg focus:outline-2 outline-none border-2 border-default/75 dark:bg-zinc-600 light:bg-zinc-200 text-foreground dark:focus:border-accent rounded-md resize-none"
                       value={messageContent}
                       onChange={handleInputChange}
                       onKeyDown={handlePressEnter}
@@ -261,14 +261,14 @@ export const ChatMessage: FC<Props> = memo(
 
                     <div className="my-4 flex justify-start space-x-4">
                       <button
-                        className="h-10 rounded-md bg-primary px-4 py-1 text-sm font-medium text-white enabled:hover:bg-primary-800 disabled:opacity-50"
+                        className="h-10 rounded-md bg-accent px-4 py-1 text-sm font-medium text-white enabled:hover:bg-accent-soft-hover disabled:opacity-50"
                         onClick={handleEditMessage}
                         disabled={messageContent.trim().length <= 0}
                       >
                         {t('edit.saveAndSubmit')}
                       </button>
                       <button
-                        className="h-10 rounded-md border border-default-300 px-4 py-1 text-sm font-medium text-default-800 hover:bg-default-100 dark:border-default-700 dark:hover:bg-default-800"
+                        className="h-10 rounded-md border border-default px-4 py-1 text-sm font-medium text-foreground hover:bg-default dark:border-muted dark:hover:bg-default-hover"
                         onClick={() => {
                           setMessageContent(
                             extractTextContent(message.content),
@@ -284,7 +284,7 @@ export const ChatMessage: FC<Props> = memo(
                   <div className="flex-1">
                     {/* Display text content */}
                     {typeof message.content === 'string' ? (
-                      <div className="whitespace-pre-wrap user-message text-default-700">
+                      <div className="whitespace-pre-wrap user-message text-foreground">
                         {message.content}
                       </div>
                     ) : (
@@ -295,7 +295,7 @@ export const ChatMessage: FC<Props> = memo(
                             return (
                               <div
                                 key={index}
-                                className="whitespace-pre-wrap user-message text-default-700 mb-4"
+                                className="whitespace-pre-wrap user-message text-foreground mb-4"
                               >
                                 {item.text}
                               </div>
@@ -315,7 +315,7 @@ export const ChatMessage: FC<Props> = memo(
                                   return (
                                     <div
                                       key={index}
-                                      className="relative rounded-lg overflow-hidden border border-default-200"
+                                      className="relative rounded-lg overflow-hidden border border-default"
                                     >
                                       <Image
                                         src={item.image_url.url}
@@ -398,7 +398,7 @@ export const ChatMessage: FC<Props> = memo(
                           return (
                             <a
                               href={href}
-                              className="text-primary dark:text-primary font-semibold"
+                              className="text-accent dark:text-accent font-semibold"
                             >
                               {children}
                             </a>
@@ -420,14 +420,14 @@ export const ChatMessage: FC<Props> = memo(
                         },
                         p({ children }) {
                           return (
-                            <div className="text-default-700 mb-4 leading-8">
+                            <div className="text-foreground mb-4 leading-8">
                               {children}
                             </div>
                           );
                         },
                         li({ children }) {
                           return (
-                            <li className="text-default-700 mb-4 leading-8">
+                            <li className="text-foreground mb-4 leading-8">
                               {children}
                             </li>
                           );

@@ -10,6 +10,9 @@ import { defineConfig as defineVitestConfig } from 'vitest/config';
 
 const viteConfig = defineViteConfig({
   plugins: [react()],
+  // Load-bearing for the test run, not just bundling: vitest hoists `process.env.*` define keys
+  // into the real process.env, so this also pins NODE_ENV. Removing it lets a shell's
+  // NODE_ENV=production load a React build with no `act` export, failing every render test.
   define: {
     'process.env.NODE_ENV': '"development"',
   },
@@ -32,7 +35,19 @@ const vitestConfig = defineVitestConfig({
     mockReset: true,
     globals: true,
     environment: 'jsdom',
-    ...(process.env.CI ? { testTimeout: 15_000, hookTimeout: 15_000 } : {}),
+    // The test budget must exceed the RTL asyncUtilTimeout (15s, see __tests__/setup.ts):
+    // otherwise a single waitFor can consume the whole budget, and a slow CI runner kills
+    // the test at the budget before that waitFor finishes.
+    //
+    // maxWorkers trades suite wall-time against contention on the shared self-hosted
+    // runners. Vitest otherwise sizes its pool from availableParallelism, so every
+    // co-located job slot on one machine claims nearly all of its cores. 25% takes a
+    // 16-core runner from ~15 workers to ~4, so a fully occupied machine is ~4x
+    // oversubscribed rather than ~15x, at the cost of a slower suite when the machine is
+    // idle. Revisit if the slot count per machine or the runner hardware changes.
+    ...(process.env.CI
+      ? { testTimeout: 20_000, hookTimeout: 20_000, maxWorkers: '25%' }
+      : {}),
     alias: {
       '\\.(gif|ttf|eot|svg|png)$': '<rootDir>/__mocks__/fileMock.js',
     },

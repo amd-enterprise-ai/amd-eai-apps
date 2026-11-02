@@ -2,16 +2,13 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { cn } from '@heroui/react';
-
 import {
-  FormFieldComponent,
-  SliderInput,
+  cn,
+  FormSliderNumberInput,
   Table,
   TableBody,
   TableCell,
   TableColumn,
-  TableHeader,
   TableRow,
 } from '@amdenterpriseai/components';
 import { useMemo } from 'react';
@@ -42,7 +39,6 @@ type SettingField = {
   label: string;
   availableToAllocate: number;
   displayCapacityUnit?: boolean;
-  step?: number;
   disabled?: boolean;
 };
 
@@ -119,72 +115,84 @@ export const AllocationSettings: React.FC<Props> = ({
     ];
   }, [quota, cluster, t]);
 
+  const columns = [
+    {
+      id: 'resource',
+      label: t('settings.form.guaranteedQuota.groups.resource'),
+      className: 'w-36',
+      isRowHeader: true,
+    },
+    {
+      id: 'allocation',
+      label: t('settings.form.guaranteedQuota.groups.allocation'),
+    },
+    {
+      id: 'available',
+      label: t('settings.form.guaranteedQuota.groups.available'),
+      className: 'w-36 whitespace-normal',
+    },
+  ];
+
   return (
-    <Table
-      aria-label={t('settings.form.guaranteedQuota.title') || ''}
-      classNames={{
-        wrapper: 'shadow-none p-0',
-        table: 'table-fixed w-full',
-        th: 'uppercase',
-      }}
-    >
-      <TableHeader>
-        <TableColumn className="w-36">
-          {t('settings.form.guaranteedQuota.groups.resource')}
-        </TableColumn>
-        <TableColumn>
-          {t('settings.form.guaranteedQuota.groups.allocation')}
-        </TableColumn>
-        <TableColumn className="w-36 whitespace-normal">
-          {t('settings.form.guaranteedQuota.groups.available')}
-        </TableColumn>
-      </TableHeader>
-      <TableBody items={settings}>
-        {(item: SettingField) => (
-          <TableRow
-            key={item.id}
-            className={cn({
-              'text-foreground': item.disabled,
-              'text-opacity-disabled': item.disabled,
-            })}
-          >
-            <TableCell className="max-w-1/4">{item.label}</TableCell>
-            <TableCell>
-              {isReadonly ? (
-                <span>
-                  {`${displayFixedNumber(form.watch(item.name) ?? 0)} ${
+    <Table.Root className="shadow-none p-0">
+      <Table.ScrollContainer>
+        <Table.Content
+          aria-label={t('settings.form.guaranteedQuota.title') || ''}
+          className="table-fixed w-full"
+        >
+          <Table.Header columns={columns}>
+            {(column) => (
+              <TableColumn
+                className={cn('text-sm', column.className)}
+                id={column.id}
+                isRowHeader={column.isRowHeader}
+              >
+                {column.label}
+              </TableColumn>
+            )}
+          </Table.Header>
+          <TableBody items={settings}>
+            {(item: SettingField) => (
+              <TableRow
+                className={cn({
+                  'text-foreground': item.disabled,
+                  'text-opacity-disabled': item.disabled,
+                })}
+                id={item.id}
+              >
+                <TableCell className="max-w-1/4">{item.label}</TableCell>
+                <TableCell className="min-w-0">
+                  {isReadonly ? (
+                    <span>
+                      {`${displayFixedNumber(form.watch(item.name) ?? 0)} ${
+                        item.displayCapacityUnit ? 'GB' : ''
+                      }`}
+                    </span>
+                  ) : (
+                    <FormSliderNumberInput
+                      form={form}
+                      name={item.name}
+                      aria-label={item.label}
+                      minValue={0}
+                      maxValue={item.availableToAllocate}
+                      step={1}
+                      isDisabled={
+                        item.disabled || item.availableToAllocate === 0
+                      }
+                    />
+                  )}
+                </TableCell>
+                <TableCell>
+                  {`${displayFixedNumber(item.availableToAllocate)} ${
                     item.displayCapacityUnit ? 'GB' : ''
                   }`}
-                </span>
-              ) : (
-                <FormFieldComponent<ProjectQuotaFormData>
-                  formField={{
-                    name: item.name,
-                    label: item.label,
-                    component: SliderInput,
-                    props: {
-                      min: 0,
-                      max: item.availableToAllocate,
-                      ariaLabel: item.label,
-                      step: item.step,
-                      disabled: item.disabled,
-                      id: item.name,
-                    },
-                  }}
-                  register={form.register}
-                  defaultValue={form?.formState?.defaultValues?.[item.name]}
-                />
-              )}
-            </TableCell>
-            <TableCell>
-              {`${displayFixedNumber(item.availableToAllocate)} ${
-                item.displayCapacityUnit ? 'GB' : ''
-              }`}
-            </TableCell>
-          </TableRow>
-        )}
-      </TableBody>
-    </Table>
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table.Content>
+      </Table.ScrollContainer>
+    </Table.Root>
   );
 };
 

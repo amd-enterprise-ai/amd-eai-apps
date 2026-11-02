@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 import {
-  Select,
+  FormSelect,
   SelectItem,
   DrawerForm,
   FormFieldComponent,
@@ -91,6 +91,11 @@ export const AssignStorage: React.FC<Props> = ({
     [updateAssignment],
   );
 
+  const assignDrawerDefaultValues = useMemo(
+    () => ({ projectIds: selectedProjectIds }),
+    [selectedProjectIds],
+  );
+
   const formContent: FormField<AssignStorageFormData>[] = [
     {
       name: 'projectIds',
@@ -98,26 +103,27 @@ export const AssignStorage: React.FC<Props> = ({
       placeholder: t('form.assign.field.projectIds.placeholder'),
       isRequired: false,
       component: (formElemProps) => (
-        <Select
-          labelPlacement="outside"
+        <FormSelect
           selectionMode="multiple"
-          defaultSelectedKeys={selectedProjectIds || []}
           disabledKeys={disabledProjectIds}
-          variant="bordered"
           {...formElemProps}
         >
-          {projects.map((project: Project) => {
-            return <SelectItem key={project.id}>{project.name}</SelectItem>;
-          })}
-        </Select>
+          {projects.map((project: Project) => (
+            <SelectItem key={project.id} textValue={project.name}>
+              {project.name}
+            </SelectItem>
+          ))}
+        </FormSelect>
       ),
     },
   ];
 
   return (
     <DrawerForm<AssignStorageFormData>
+      key={storage.id}
       isOpen={isOpen}
       isActioning={isPending}
+      defaultValues={assignDrawerDefaultValues}
       onFormSuccess={(values) => {
         handleFormSubmit({
           projectIds: values.projectIds,
@@ -137,7 +143,7 @@ export const AssignStorage: React.FC<Props> = ({
               key={field.name}
               formField={field}
               errorMessage={form.formState.errors[field.name]?.message}
-              register={form.register}
+              form={form}
             />
           ))}
         </div>

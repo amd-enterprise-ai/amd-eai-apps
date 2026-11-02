@@ -7,10 +7,10 @@ import { useMemo } from 'react';
 
 import { getServerSession } from 'next-auth';
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import { useRouter } from 'next/router';
 
 import { useSystemToast } from '@amdenterpriseai/hooks';
+import { getPageTranslations } from '@/utils/i18n';
 
 import { fetchUser, updateUser } from '@/services/app';
 import { getProjects } from '@/services/server';
@@ -107,12 +107,7 @@ const UserPage: React.FC<Props> & WithDocumentationLink = ({
     <div className="flex flex-col gap-8 mt-8 ">
       <div className="flex flex-row gap-6">
         <div className="flex flex-col gap-4 w-full">
-          <Card
-            shadow="sm"
-            classNames={{
-              base: 'border-1 border-default-200 rounded-sm	',
-            }}
-          >
+          <Card>
             <CardHeader>
               <h2>{t('detail.title')}</h2>
             </CardHeader>
@@ -212,11 +207,7 @@ export const getServerSideProps = async (context: any) => {
 
     const projectsResponse = await getProjects(session?.accessToken as string);
 
-    const translations = await serverSideTranslations(locale, [
-      'common',
-      'users',
-      'sharedComponents',
-    ]);
+    const translations = await getPageTranslations(locale, ['users']);
 
     const breadcrumb = [
       {

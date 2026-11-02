@@ -11,6 +11,9 @@
       "description": {
         "title": "Description"
       },
+      "sizeBytes": {
+        "title": "Size"
+      },
       "organization": {
         "title": "Organization"
       },
@@ -63,8 +66,7 @@
       "done": {
         "title": "Download ready",
         "subtitle": "Your browser has started the download process."
-      },
-      "dismiss": "Dismiss"
+      }
     }
   },
   "actions": {

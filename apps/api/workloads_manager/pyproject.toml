@@ -11,9 +11,6 @@ name = "workloads_manager"
 version = "0.1.0"
 description = "A package to manage AI workloads, patches, and registering"
 readme = "README.md"
-authors = [
-    { name = "Lorenzo Andraghetti", email = "lorenzo.andraghetti@amd.com" },
-]
 requires-python = ">=3.13"
 dependencies = [
     "click>=8.4.0",

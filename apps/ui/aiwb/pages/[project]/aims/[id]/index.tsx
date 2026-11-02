@@ -14,7 +14,7 @@ import {
   HeroMessage,
   Status,
   StatusDisplay,
-  Input,
+  CopySnippet,
   Accordion,
   AccordionItem,
   Tooltip,
@@ -23,8 +23,6 @@ import {
 import {
   IconAlertTriangle,
   IconArrowLeft,
-  IconCircleCheck,
-  IconCopy,
   IconCpu,
   IconDashboard,
   IconDatabase,
@@ -39,7 +37,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
 
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import {
   DOCS_WORKBENCH_BASE,
@@ -47,6 +44,7 @@ import {
 } from '@amdenterpriseai/utils/app';
 
 import { useSystemToast } from '@amdenterpriseai/hooks';
+import { getPageTranslations } from '@/lib/server/i18n';
 
 import {
   aiWorkbenchMenuItems,
@@ -54,12 +52,13 @@ import {
 } from '@amdenterpriseai/utils/app';
 import { get } from 'lodash';
 import {
-  getAimClusterProfileByName,
-  getProjectAimProfileByName,
   getProjectFineTunedModel,
   aimParser,
   getAIMServiceStatusVariants,
+  getMaxSupportedLoraRank,
   getMetricTranslationKey,
+  getModelCapability,
+  getInferenceApiPath,
 } from '@/lib/app/aims';
 import {
   deleteInferenceDeployment,
@@ -70,33 +69,36 @@ import {
 } from '@/lib/app/inference';
 import { getCustomModel } from '@/lib/app/custom-models';
 import type { AutoscalingFieldValues } from '@/lib/app/aims';
-import type { AIMService, InferenceReplica } from '@/types/aims';
+import type { AIMService, AIMServiceCondition } from '@/types/aims';
 import {
+  AIM_DISPLAY_NAME_ANNOTATION,
   AIM_PROFILE_TYPE_OPTIMIZED,
   AIMClusterModel,
   AIMModel,
-  AIMProfileSpec,
   FINE_TUNED_LABEL,
   NAMESPACE_AIM_MODEL_LABEL,
 } from '@/types/aims';
+import type { components } from '@/types/api';
 import { useState, useCallback } from 'react';
 import AIMConnectModal from '@/components/features/models/AIMConnectModal';
 import DeleteWorkloadModal from '@/components/features/workloads/DeleteWorkloadModal';
 import WorkloadLogsModal from '@/components/features/workloads/WorkloadLogsModal';
 import InferenceMetrics from '@/components/features/workloads/InferenceMetrics';
-import { Intent, WorkloadType } from '@amdenterpriseai/types';
-import { ResourceType } from '@/types/enums/workloads';
-import { AIMServiceStatus } from '@/types/aims';
-import { WorkloadStatus } from '@/types/enums/workloads';
-import type { ResourceMetrics } from '@/types/projects';
+import { Intent } from '@amdenterpriseai/types';
+import type { EnrichedWorkloadMetrics } from '@/types/projects';
 import { useProject } from '@/contexts/ProjectContext';
 import { ScalingStatusCard } from '@/components/features/workloads/ScalingStatusCard';
+import { LoraAdaptersCard } from '@/components/features/workloads/LoraAdaptersCard';
+import { resolvedProfileQuery } from '@/hooks/useProfileSpecsForServices';
 import { SUBMITTER_ANNOTATION_KEY } from '@/components/features/secrets/constants';
 import {
   useScalingConvergence,
   CONVERGENCE_POLL_INTERVAL_MS,
 } from '@/hooks/useScalingConvergence';
 import AIMConditionsList from '@/components/shared/AIMConditionsList';
+import { resolveModelDeploymentName } from '@/lib/app/modelDeploymentDisplay';
+
+type CustomModelResponse = components['schemas']['CustomModelResponse'];
 
 interface AimDetailsPageProps {
   /** Optional breadcrumb navigation items */
@@ -174,7 +176,6 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isPollingForConvergence, setIsPollingForConvergence] = useState(false);
   const [selectedReplica, setSelectedReplica] = useState<string>('all');
@@ -235,7 +236,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
       queryKey: ['aimServiceHistory', namespace, id],
       queryFn: () =>
         listAllInferenceDeployments(namespace as string, {
-          statusFilter: [AIMServiceStatus.DELETED],
+          statusFilter: ['Deleted'],
         }),
       enabled: !!namespace && !!id && !isDeleting && liveQuery404,
       refetchOnWindowFocus: false,
@@ -278,7 +279,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
     data: aimClusterModel,
     isLoading: isLoadingAim,
     isError: isAimError,
-  } = useQuery<AIMClusterModel | AIMModel>({
+  } = useQuery<AIMClusterModel | AIMModel | CustomModelResponse>({
     queryKey:
       isFinetunedModel || _isHistorical
         ? finetunedQueryKey
@@ -295,10 +296,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
       if (isCustomModel) {
         // Custom (BYOM) models are namespace-scoped AIMModels; their detail
         // data lives on the custom-models endpoint, not the cluster catalog.
-        return getCustomModel(
-          namespace as string,
-          resourceName as string,
-        ) as unknown as AIMModel;
+        return getCustomModel(namespace as string, resourceName as string);
       }
       // For historical services isFinetunedModel is always false (aimService is gone).
       // Try cluster-scoped first; if it 404s, the model was namespace-scoped (finetuned or custom).
@@ -320,35 +318,37 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
     refetchOnMount: false,
   });
 
-  const { data: replicas } = useQuery<InferenceReplica[]>({
+  const { data: replicas } = useQuery({
     queryKey: ['inferenceReplicas', namespace, id],
     queryFn: () => getInferenceReplicas(namespace as string, id as string),
     enabled:
       !!namespace &&
       !!id &&
       !isDeleting &&
-      [AIMServiceStatus.RUNNING, AIMServiceStatus.DEGRADED].includes(
-        aimService?.status?.status as AIMServiceStatus,
-      ),
+      (aimService?.status?.status === 'Running' ||
+        aimService?.status?.status === 'Degraded'),
     refetchOnWindowFocus: false,
   });
 
   const resolvedProfile = aimService?.status?.resolvedProfile;
   const resolvedProfileName = resolvedProfile?.name ?? null;
-  const isNamespaceScoped = resolvedProfile?.scope === 'Namespace';
-  const { data: resolvedProfileResource } = useQuery({
-    queryKey: isNamespaceScoped
-      ? (['aim-profile', 'project', namespace, resolvedProfileName] as const)
-      : (['aim-profile', 'cluster', resolvedProfileName] as const),
-    queryFn: () =>
-      isNamespaceScoped
-        ? getProjectAimProfileByName(namespace as string, resolvedProfileName!)
-        : getAimClusterProfileByName(resolvedProfileName!),
-    enabled: !!resolvedProfileName && (!isNamespaceScoped || !!namespace),
-    staleTime: Infinity,
-  });
-  const resolvedProfileSpec: AIMProfileSpec | null =
-    resolvedProfileResource?.spec ?? null;
+  // Resolved through the same rule the adapter picker's own lookup uses, rather
+  // than a second copy of it: treating everything that is not exactly
+  // `Namespace` as cluster-wide sent `Merged`, `Unknown` and absent-scope
+  // references past every namespace-only overlay, and reached LoraAdaptersCard
+  // with the wrong modelId and capabilities.
+  const {
+    data: resolvedProfileResource,
+    isLoading: isResolvedProfileLoading,
+    isError: isResolvedProfileError,
+  } = useQuery(
+    resolvedProfileQuery({
+      project: typeof namespace === 'string' ? namespace : null,
+      name: resolvedProfileName,
+      scope: resolvedProfile?.scope,
+    }),
+  );
+  const resolvedProfileSpec = resolvedProfileResource?.spec;
 
   const isMetricUnoptimized =
     !!resolvedProfileSpec &&
@@ -440,17 +440,6 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
     );
   }
 
-  const handleCopyToClipboard = (text: string, fieldName: string) => {
-    if (!navigator.clipboard) return;
-
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedField(fieldName);
-      setTimeout(() => {
-        setCopiedField(null);
-      }, 2000);
-    });
-  };
-
   // Deleted/historical entries arrive as standard AIMServiceResponse shapes
   // (synthesized from the DB row), so the regular aimParser handles both live
   // and historical services uniformly.
@@ -463,6 +452,18 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
         : undefined,
   );
   const deployedService = parsedAim.deployedService;
+  const detailsTitle = resolveModelDeploymentName({
+    displayName:
+      deployedService?.metadata?.annotations?.[AIM_DISPLAY_NAME_ANNOTATION],
+    resourceName: deployedService?.metadata?.name,
+    canonicalName: isFinetunedModel ? parsedAim.title : parsedAim.canonicalName,
+  });
+
+  // Speech-to-text deployments advertise transcription tags; the Connect snippet
+  // and chat-playground affordances key off this so STT users get the audio
+  // endpoint instead of chat completions.
+  const capability = getModelCapability(parsedAim.tags);
+  const isTranscription = capability === 'transcription';
 
   const specOverrides = deployedService?.spec?.profileOverrides as
     | Record<string, unknown>
@@ -478,15 +479,17 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
   } = profileOverrides;
 
   const profileSpec = resolvedProfileSpec;
-  const profileGpuDisplay = overrideGpuModel ?? profileSpec?.acceleratorModel;
+  const profileGpuDisplay =
+    overrideGpuModel ?? profileSpec?.acceleratorModel ?? undefined;
   const profileGpuCountDisplay =
     toGpuCountLabel(overrideGpuRequestsNum) ??
-    toGpuCountLabel(profileSpec?.acceleratorCount);
+    toGpuCountLabel(profileSpec?.acceleratorCount ?? undefined);
   const profileMetricKey = overrideMetricRaw ?? profileSpec?.metric;
   const profileMetricDisplay = profileMetricKey
     ? t(getMetricTranslationKey(String(profileMetricKey)), { ns: 'models' })
     : undefined;
-  const profilePrecisionDisplay = overridePrecision ?? profileSpec?.precision;
+  const profilePrecisionDisplay =
+    overridePrecision ?? profileSpec?.precision ?? undefined;
 
   const isMetricOverride = Boolean(overrideMetricRaw);
   const isGpuOverride = Boolean(overrideGpuModel);
@@ -495,17 +498,23 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
 
   const profileAutomaticLabel = t('details.profile.automatic');
 
-  const aimConditions = deployedService?.status?.conditions;
+  // Backend types conditions as a loose map; read them via the FE-known shape.
+  const aimConditions = deployedService?.status?.conditions as
+    | AIMServiceCondition[]
+    | undefined;
   const { external, internal } = deployedService?.endpoints || {};
-  const externalHost = external ? `${external}/v1/chat/completions` : '';
-  const internalHost = internal ? `${internal}/v1/chat/completions` : '';
+  // Share the path selection with the Connect modal so the copyable host URLs in
+  // the Output card never contradict the snippet the modal generates.
+  const inferencePath = getInferenceApiPath(capability);
+  const externalHost = external ? `${external}${inferencePath}` : '';
+  const internalHost = internal ? `${internal}${inferencePath}` : '';
 
-  // When the unified Envoy AI Gateway is enabled and configured, inference goes
-  // through a single endpoint (the model is selected via the OpenAI `model`
-  // field), shown in place of the per-service external host.
+  // The unified Envoy AI Gateway serves JSON chat completions; speech-to-text is
+  // a multipart upload, so transcription deployments use the per-service host
+  // instead of the gateway (matching the Connect modal).
   const gatewayHost =
-    aiGatewayEnabled && aiGatewayUrl
-      ? `${aiGatewayUrl.replace(/\/$/, '')}/v1/chat/completions`
+    !isTranscription && aiGatewayEnabled && aiGatewayUrl
+      ? `${aiGatewayUrl.replace(/\/$/, '')}${inferencePath}`
       : '';
   const useGateway = !!gatewayHost;
 
@@ -513,14 +522,12 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
     deployedService?.metadata?.annotations?.[SUBMITTER_ANNOTATION_KEY] || null;
 
   // Construct workload object for WorkloadLogsModal
-  const aimWorkload: ResourceMetrics = {
+  const aimWorkload: EnrichedWorkloadMetrics = {
     id,
     name: parsedAim.model,
-    displayName: parsedAim.title || parsedAim.model,
-    type: WorkloadType.INFERENCE,
-    status:
-      (deployedService?.status.status as unknown as WorkloadStatus) ??
-      WorkloadStatus.UNKNOWN,
+    displayName: detailsTitle,
+    type: 'INFERENCE',
+    status: deployedService?.status?.status ?? 'Unknown',
     gpuCount: null,
     templateGpuCount: null,
     gpu: null,
@@ -530,7 +537,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
     vram: null,
     createdAt: deployedService?.metadata?.creationTimestamp ?? null,
     createdBy: workloadCreatedBy,
-    resourceType: ResourceType.AIM_SERVICE,
+    resourceType: 'AIMService',
   };
 
   // Show only "{*}Ready" conditions, filter out anything else.
@@ -550,11 +557,9 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
             icon={<IconArrowLeft size={16} />}
           />
           <div className="flex items-center space-x-3 pr-2">
-            <h2>
-              {isFinetunedModel ? parsedAim.title : parsedAim.canonicalName}
-            </h2>
+            <h2>{detailsTitle}</h2>
             <StatusDisplay
-              type={deployedService?.status.status as string}
+              type={deployedService?.status?.status as string}
               variants={getAIMServiceStatusVariants(t)}
               additionalProps={{ isShowBackground: true, isTextColored: true }}
             />
@@ -565,7 +570,6 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
         <div className="flex items-center space-x-2">
           {replicas && replicas.length > 1 && (
             <Select
-              size="sm"
               className="w-48"
               selectedKeys={[selectedReplica]}
               onSelectionChange={(keys) => {
@@ -588,7 +592,10 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
                 <SelectItem key={opt.key} textValue={opt.label}>
                   {'fullName' in opt ? (
                     <Tooltip content={opt.fullName} placement="right">
-                      <span>{opt.label}</span>
+                      {/* biome-ignore lint/a11y/useSemanticElements: the element reveals the full label rather than performing an action. */}
+                      <span role="button" tabIndex={0}>
+                        {opt.label}
+                      </span>
                     </Tooltip>
                   ) : (
                     opt.label
@@ -597,21 +604,21 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
               ))}
             </Select>
           )}
-          <ActionButton
-            secondary
-            onPress={() =>
-              router.push({
-                pathname: projectPath('/chat'),
-                query: { workload: id },
-              })
-            }
-            icon={<IconMessage size={16} />}
-            isDisabled={
-              deployedService?.status.status !== AIMServiceStatus.RUNNING
-            }
-          >
-            {t('list.actions.chat.label')}
-          </ActionButton>
+          {!isTranscription && (
+            <ActionButton
+              secondary
+              onPress={() =>
+                router.push({
+                  pathname: projectPath('/chat'),
+                  query: { workload: id },
+                })
+              }
+              icon={<IconMessage size={16} />}
+              isDisabled={deployedService?.status?.status !== 'Running'}
+            >
+              {t('list.actions.chat.label')}
+            </ActionButton>
+          )}
 
           <ActionButton
             secondary
@@ -626,9 +633,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
             color="danger"
             onPress={() => setIsDeleteModalOpen(true)}
             icon={<IconTrash size={16} />}
-            isDisabled={
-              deployedService?.status.status === AIMServiceStatus.DELETED
-            }
+            isDisabled={deployedService?.status?.status === 'Deleted'}
           >
             {t('list.actions.delete.label')}
           </ActionButton>
@@ -636,13 +641,10 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
       </div>
 
       {/* Inference metrics */}
-      {deployedService?.status.status &&
-        !_isHistorical &&
-        [
-          AIMServiceStatus.STARTING,
-          AIMServiceStatus.RUNNING,
-          AIMServiceStatus.DEGRADED,
-        ].includes(deployedService.status.status) && (
+      {!_isHistorical &&
+        (deployedService?.status?.status === 'Starting' ||
+          deployedService?.status?.status === 'Running' ||
+          deployedService?.status?.status === 'Degraded') && (
           <InferenceMetrics
             workloadId={id}
             podName={selectedReplica === 'all' ? undefined : selectedReplica}
@@ -658,7 +660,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
         <div className="w-full xl:w-[calc((200%_-_1.5rem)_/_3)]">
           <ScalingStatusCard
             spec={aimService.spec}
-            runtime={aimService.status.runtime}
+            runtime={aimService.status?.runtime}
             namespace={namespace ?? undefined}
             id={id}
             onSettingsSaved={handleSettingsSaved}
@@ -671,14 +673,14 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
         {/* AIM Information + Profile (stacked under basic information) */}
         {(aimClusterModel || isLoadingAim) && (
           <div className="break-inside-avoid mb-6 flex flex-col gap-6">
-            <Card className="border-1 border-default-200 shadow-sm">
-              <CardHeader className="flex items-center px-4 py-3">
-                <h3 className="text-base font-semibold flex items-center space-x-2">
-                  <IconDatabase size={16} className="text-default-500" />
-                  <span>{t('details.sections.basicInformation')}</span>
-                </h3>
+            <Card>
+              <CardHeader>
+                <h4 className="flex items-center gap-2 font-semibold">
+                  <IconDatabase size={16} className="text-muted" />
+                  {t('details.sections.basicInformation')}
+                </h4>
               </CardHeader>
-              <CardBody className="space-y-3 px-4 pb-4 pt-0">
+              <CardBody>
                 {isLoadingAim ? (
                   <div className="flex flex-col space-y-3">
                     <Skeleton className="w-full h-6 rounded-lg" />
@@ -688,14 +690,14 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
                   </div>
                 ) : (
                   <div className="flex flex-col space-y-3">
-                    {aimClusterModel!.spec.image && (
+                    {aimClusterModel!.spec?.image && (
                       <div className="flex items-center space-x-3">
                         <div>
-                          <h5 className="text-sm text-default-700">
+                          <h5 className="text-sm text-foreground">
                             {t('list.headers.aim.image')}
                           </h5>
                           <p className="font-mono text-sm">
-                            {aimClusterModel!.spec.image}
+                            {aimClusterModel!.spec?.image}
                           </p>
                         </div>
                       </div>
@@ -704,7 +706,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
                     {parsedAim.imageVersion && (
                       <div className="flex items-center space-x-3">
                         <div>
-                          <h5 className="text-sm text-default-700">
+                          <h5 className="text-sm text-foreground">
                             {t('list.headers.aim.containerVersion')}
                           </h5>
                           <p className="font-mono text-sm">
@@ -716,7 +718,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
 
                     <div className="flex items-center space-x-3">
                       <div>
-                        <h5 className="text-sm text-default-700">
+                        <h5 className="text-sm text-foreground">
                           {t('list.headers.aim.resourceName')}
                         </h5>
                         <p className="font-mono text-sm">
@@ -728,7 +730,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
                     {parsedAim.canonicalName && (
                       <div className="flex items-center space-x-3">
                         <div>
-                          <h5 className="text-sm text-default-700">
+                          <h5 className="text-sm text-foreground">
                             {t(
                               isFinetunedModel
                                 ? 'list.headers.aim.baseModel'
@@ -746,7 +748,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
                       ?.description && (
                       <div className="flex items-center space-x-3">
                         <div>
-                          <h5 className="text-sm text-default-700">
+                          <h5 className="text-sm text-foreground">
                             {t('list.headers.aim.description')}
                           </h5>
                           <p className="text-sm">
@@ -761,7 +763,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
 
                     <div className="flex items-center space-x-3">
                       <div>
-                        <h5 className="text-sm text-default-700">
+                        <h5 className="text-sm text-foreground">
                           {t('list.headers.aim.id')}
                         </h5>
                         <p className="font-mono text-sm">{id}</p>
@@ -772,18 +774,14 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
               </CardBody>
             </Card>
 
-            <Card className="border-1 border-default-200 shadow-sm">
-              <CardHeader className="flex items-center gap-3 px-4 py-3">
-                <IconCpu
-                  size={18}
-                  className="shrink-0 text-default-500"
-                  aria-hidden
-                />
-                <h3 className="text-base font-semibold">
+            <Card>
+              <CardHeader>
+                <h4 className="flex items-center gap-2 font-semibold">
+                  <IconCpu size={16} className="text-muted" />
                   {t('details.profile.title')}
-                </h3>
+                </h4>
               </CardHeader>
-              <CardBody className="space-y-4 px-4 pb-4 pt-0">
+              <CardBody className="space-y-4">
                 {isLoadingAim ? (
                   <div className="flex flex-col space-y-3">
                     <Skeleton className="h-4 w-full rounded-lg" />
@@ -795,7 +793,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
                   <>
                     <div className="space-y-3">
                       <div>
-                        <h5 className="text-sm text-default-700">
+                        <h5 className="text-sm text-foreground">
                           {t('details.profile.performanceMetric')}
                         </h5>
                         <p className="font-mono text-sm">
@@ -807,7 +805,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
                         </p>
                       </div>
                       <div>
-                        <h5 className="text-sm text-default-700">
+                        <h5 className="text-sm text-foreground">
                           {t('details.profile.accelerator')}
                         </h5>
                         <p className="font-mono text-sm">
@@ -819,7 +817,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
                         </p>
                       </div>
                       <div>
-                        <h5 className="text-sm text-default-700">
+                        <h5 className="text-sm text-foreground">
                           {t('details.profile.acceleratorCount')}
                         </h5>
                         <p className="font-mono text-sm">
@@ -831,7 +829,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
                         </p>
                       </div>
                       <div>
-                        <h5 className="text-sm text-default-700">
+                        <h5 className="text-sm text-foreground">
                           {t('details.profile.precision')}
                         </h5>
                         <p className="font-mono text-sm">
@@ -844,14 +842,14 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
                       </div>
                     </div>
                     {isMetricUnoptimized && (
-                      <div className="border-t border-default-100 pt-4">
+                      <div className="border-t border-default pt-4">
                         <div className="flex items-start gap-1.5">
                           <IconAlertTriangle
                             size={14}
                             className="mt-0.5 shrink-0 text-warning"
                             aria-hidden
                           />
-                          <p className="text-tiny text-default-500">
+                          <p className="text-xs text-muted">
                             {t('details.profile.unoptimizedNotice')}
                           </p>
                         </div>
@@ -863,19 +861,31 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
             </Card>
           </div>
         )}
+        {deployedService &&
+          ((deployedService.spec?.adapters?.length ?? 0) > 0 ||
+            getMaxSupportedLoraRank(deployedService.spec) != null) && (
+            <LoraAdaptersCard
+              namespace={namespace!}
+              deployment={deployedService}
+              resolvedProfileSpec={resolvedProfileSpec}
+              isResolvedProfileLoading={isResolvedProfileLoading}
+              isResolvedProfileError={isResolvedProfileError}
+              onAdaptersUpdated={refetchAimService}
+            />
+          )}
         {/* Status */}
-        <Card className="break-inside-avoid mb-6 border-1 border-default-200 shadow-sm">
-          <CardHeader className="flex items-center px-4 py-3">
-            <h3 className="text-base font-semibold flex items-center space-x-2">
-              <IconDashboard size={16} className="text-default-500" />
-              <span>{t('details.sections.status')}</span>
-            </h3>
+        <Card className="break-inside-avoid mb-6">
+          <CardHeader>
+            <h4 className="flex items-center gap-2 font-semibold">
+              <IconDashboard size={16} className="text-muted" />
+              {t('details.sections.status')}
+            </h4>
           </CardHeader>
-          <CardBody className="px-4 pb-4 pt-0">
-            <div className="mb-4 space-y-3 border-b border-default-100 pb-4">
+          <CardBody>
+            <div className="mb-4 space-y-3 border-b border-default pb-4">
               <div className="flex items-center space-x-3">
                 <div>
-                  <h5 className="text-sm text-default-700">
+                  <h5 className="text-sm text-foreground">
                     {t('list.headers.createdBy.title')}
                   </h5>
                   <p className="text-sm">{workloadCreatedBy ?? '—'}</p>
@@ -883,7 +893,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
               </div>
               <div className="flex items-center space-x-3">
                 <div>
-                  <h5 className="text-sm text-default-700">
+                  <h5 className="text-sm text-foreground">
                     {t('list.headers.createdAt.title')}
                   </h5>
                   {deployedService?.metadata?.creationTimestamp ? (
@@ -902,7 +912,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
                 <AccordionItem
                   title={
                     <StatusDisplay
-                      type={deployedService?.status.status as string}
+                      type={deployedService?.status?.status as string}
                       variants={getAIMServiceStatusVariants(t)}
                     />
                   }
@@ -916,7 +926,7 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
               </Accordion>
             ) : (
               <StatusDisplay
-                type={deployedService?.status.status as string}
+                type={deployedService?.status?.status as string}
                 variants={getAIMServiceStatusVariants(t)}
               />
             )}
@@ -924,126 +934,49 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
         </Card>
         {/* Output Information */}
         {(useGateway || externalHost || internalHost) && (
-          <Card className="break-inside-avoid mb-6 border-1 border-default-200 shadow-sm">
-            <CardHeader className="flex items-center justify-between px-4 py-3">
-              <h3 className="text-base font-semibold flex items-center space-x-2">
-                <IconWorld size={16} className="text-default-500" />
-                <span>{t('details.sections.output')}</span>
-              </h3>
-              <Button
-                data-testid="connect-to-model-button"
-                size="sm"
-                variant="light"
-                startContent={<IconLink size={14} />}
-                onPress={() => setIsConnectModalOpen(true)}
-              >
-                {t('models:aimCatalog.actions.connect.label')}
-              </Button>
+          <Card className="break-inside-avoid mb-6">
+            <CardHeader>
+              <div className="flex w-full items-center justify-between gap-2">
+                <h4 className="flex items-center gap-2 font-semibold">
+                  <IconWorld size={16} className="text-muted" />
+                  {t('details.sections.output')}
+                </h4>
+                <Button
+                  data-testid="connect-to-model-button"
+                  size="sm"
+                  variant="light"
+                  startContent={<IconLink size={14} />}
+                  onPress={() => setIsConnectModalOpen(true)}
+                >
+                  {t('models:aimCatalog.actions.connect.label')}
+                </Button>
+              </div>
             </CardHeader>
-            <CardBody className="space-y-2 px-4 pb-4 pt-0">
+            <CardBody className="space-y-2">
               {useGateway ? (
-                <div className="space-y-2">
-                  <h5 className="text-sm text-default-700">
-                    {t('models:aimCatalog.actions.connect.modal.inferenceUrl')}
-                  </h5>
-                  <Input
-                    value={gatewayHost}
-                    readOnly
-                    variant="bordered"
-                    classNames={{
-                      input: 'font-mono text-sm',
-                    }}
-                    endContent={
-                      <ActionButton
-                        tertiary
-                        size="sm"
-                        onPress={() =>
-                          handleCopyToClipboard(gatewayHost, 'inferenceUrl')
-                        }
-                        icon={
-                          copiedField === 'inferenceUrl' ? (
-                            <IconCircleCheck
-                              size={16}
-                              className="text-success"
-                            />
-                          ) : (
-                            <IconCopy size={16} />
-                          )
-                        }
-                      />
-                    }
-                  />
-                </div>
+                <CopySnippet
+                  label={t(
+                    'models:aimCatalog.actions.connect.modal.inferenceUrl',
+                  )}
+                  value={gatewayHost}
+                  className="w-full"
+                />
               ) : (
                 externalHost && (
-                  <div className="space-y-2">
-                    <h5 className="text-sm text-default-700">
-                      {t('details.fields.externalHost')}
-                    </h5>
-                    <Input
-                      value={externalHost}
-                      readOnly
-                      variant="bordered"
-                      classNames={{
-                        input: 'font-mono text-sm',
-                      }}
-                      endContent={
-                        <ActionButton
-                          tertiary
-                          size="sm"
-                          onPress={() =>
-                            handleCopyToClipboard(externalHost, 'externalHost')
-                          }
-                          icon={
-                            copiedField === 'externalHost' ? (
-                              <IconCircleCheck
-                                size={16}
-                                className="text-success"
-                              />
-                            ) : (
-                              <IconCopy size={16} />
-                            )
-                          }
-                        />
-                      }
-                    />
-                  </div>
+                  <CopySnippet
+                    label={t('details.fields.externalHost')}
+                    value={externalHost}
+                    className="w-full"
+                  />
                 )
               )}
 
               {internalHost && (
-                <div className="space-y-2">
-                  <h5 className="text-sm text-default-700">
-                    {t('details.fields.internalHost')}
-                  </h5>
-                  <Input
-                    value={internalHost}
-                    readOnly
-                    variant="bordered"
-                    classNames={{
-                      input: 'font-mono text-sm',
-                    }}
-                    endContent={
-                      <ActionButton
-                        tertiary
-                        size="sm"
-                        onPress={() =>
-                          handleCopyToClipboard(internalHost, 'internalHost')
-                        }
-                        icon={
-                          copiedField === 'internalHost' ? (
-                            <IconCircleCheck
-                              size={16}
-                              className="text-success"
-                            />
-                          ) : (
-                            <IconCopy size={16} />
-                          )
-                        }
-                      />
-                    }
-                  />
-                </div>
+                <CopySnippet
+                  label={t('details.fields.internalHost')}
+                  value={internalHost}
+                  className="w-full"
+                />
               )}
             </CardBody>
           </Card>
@@ -1072,8 +1005,9 @@ const AimDetailsPage: React.FC<AimDetailsPageProps> & WithDocumentationLink = ({
           isOpen={isConnectModalOpen}
           onOpenChange={setIsConnectModalOpen}
           endpoints={deployedService?.endpoints}
-          modelName={deployedService?.status?.resolvedModel?.name}
+          modelName={deployedService?.status?.resolvedModel?.name ?? undefined}
           serviceId={deployedService?.id ?? undefined}
+          capability={capability}
           onChatRequested={(serviceId) => {
             router.push({
               pathname: projectPath('/chat'),
@@ -1105,9 +1039,9 @@ export async function getServerSideProps(context: {
     };
   }
 
-  const translations = await serverSideTranslations(locale, [
-    'common',
+  const translations = await getPageTranslations(locale, [
     'workloads',
+    'loras',
     'models',
     'autoscaling',
     'projects',

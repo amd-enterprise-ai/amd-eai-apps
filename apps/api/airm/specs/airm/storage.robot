@@ -11,6 +11,7 @@ Resource            ../resources/airm_projects.resource
 Resource            ../resources/airm_secrets.resource
 Library             Collections
 Test teardown       Run keywords
+...                 Clean Up S3 Test Objects    AND
 ...                 Clean up all created storage    AND
 ...                 Clean up all created secrets    AND
 ...                 Clean up all created projects
@@ -98,8 +99,8 @@ Remove project assignment
 
     When storage project assignment is removed
 
-    Then storage should have "0" project assignment
-    And storage status should be "Unassigned"
+    Then storage transitions to "Unassigned"
+    And storage should have "0" project assignment
 
 Delete unassigned storage
     [Documentation]    Verify that unassigned storage can be deleted immediately

@@ -73,7 +73,7 @@ describe('StepModal', () => {
 
     expect(screen.getByText('Step 2 Content')).toBeInTheDocument();
 
-    await fireEvent.click(screen.getByLabelText('actions.previous'));
+    await fireEvent.click(screen.getByLabelText('Previous'));
 
     expect(screen.getByText('Step 1 Content')).toBeInTheDocument();
   });
@@ -83,7 +83,7 @@ describe('StepModal', () => {
       renderComponent();
     });
 
-    await fireEvent.click(screen.getByLabelText('actions.close.title'));
+    await fireEvent.click(screen.getByRole('button', { name: /close/i }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
@@ -91,7 +91,7 @@ describe('StepModal', () => {
     await act(() => {
       renderComponent();
     });
-    await fireEvent.click(screen.getByLabelText('actions.close.title'));
+    await fireEvent.click(screen.getByRole('button', { name: /close/i }));
     expect(onCancel).toHaveBeenCalled();
   });
 
@@ -100,7 +100,7 @@ describe('StepModal', () => {
       renderComponent({ initialStep: 1, resetOnClose: true });
     });
 
-    await fireEvent.click(screen.getByLabelText('actions.close.title'));
+    await fireEvent.click(screen.getByRole('button', { name: /close/i }));
     expect(screen.getByText('Step 1 Content')).toBeInTheDocument();
   });
 
@@ -202,7 +202,7 @@ describe('StepModal', () => {
       });
     });
 
-    expect(screen.queryByLabelText('actions.previous')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Previous')).not.toBeInTheDocument();
   });
 
   it('hides the next button if hideNext is true', async () => {

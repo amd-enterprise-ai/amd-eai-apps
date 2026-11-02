@@ -2,10 +2,9 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { cn } from '@heroui/react';
-import { Switch } from '@amdenterpriseai/components';
+import { Switch as HeroUISwitch } from '@heroui/react';
 import {
-  Dropdown,
+  DropdownRoot as Dropdown,
   DropdownItem,
   DropdownMenu,
   DropdownSection,
@@ -35,7 +34,7 @@ interface UserMenuProps {
 export const UserMenu: React.FC<UserMenuProps> = ({ additionalMenuItems }) => {
   const { data: session } = useSession();
   const { theme, setTheme } = useTheme();
-  const { t } = useTranslation('common');
+  const { t: tShared } = useTranslation('sharedComponents');
   const getSystemInfo = useSystemInfo();
 
   const handleLogout = async () => {
@@ -54,72 +53,73 @@ export const UserMenu: React.FC<UserMenuProps> = ({ additionalMenuItems }) => {
   });
 
   return (
-    <div>
+    <div data-testid="user-menu">
       <Dropdown>
         <DropdownTrigger>
-          <div className="flex items-center cursor-pointer gap-3 capitalize outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-lg">
+          <div className="flex items-center cursor-pointer gap-3 capitalize outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-lg">
             <div className="hidden md:flex flex-col justify-start text-right">
-              <span className="font-semibold text-sm text-default-800">
+              <span className="font-semibold text-sm text-foreground">
                 {session?.user?.name}
               </span>
-              <span className="text-nowrap text-xs lowercase text-default-500 font-normal">
+              <span className="text-nowrap text-xs lowercase text-muted font-normal">
                 {session?.user?.email}
               </span>
             </div>
-            <div className="border border-default-300 text-default-900 rounded-full min-w-8 h-8 flex justify-center items-center">
+            <div className="border border-default text-foreground rounded-full min-w-8 h-8 flex justify-center items-center">
               <IconUser stroke="2" size={14} />
             </div>
           </div>
         </DropdownTrigger>
-        <DropdownMenu aria-label={t('list.actions.label')}>
+        <DropdownMenu aria-label={tShared('list.actions.label')}>
           <DropdownSection
-            aria-label={t('menu.actions.themeToggle') as string}
+            aria-label={tShared('menu.actions.themeToggle')}
             showDivider
           >
             <DropdownItem
-              isReadOnly
-              className="cursor-default w-full"
-              endContent={
-                <Switch
-                  defaultSelected
-                  size="md"
-                  color="primary"
+              key="menu-theme-toggle"
+              shouldCloseOnSelect={false}
+              onPress={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+              startContent={
+                <HeroUISwitch
+                  size="lg"
                   isSelected={theme === 'light'}
-                  startContent={<IconSun />}
-                  endContent={<IconMoon />}
-                  onValueChange={() =>
-                    setTheme(theme === 'light' ? 'dark' : 'light')
-                  }
-                  classNames={{
-                    base: cn(
-                      'inline-flex m-0 justify-between flex-row-reverse w-full items-center',
-                    ),
-                    wrapper: 'm-0',
-                  }}
-                ></Switch>
+                  className="pointer-events-none shrink-0"
+                >
+                  <HeroUISwitch.Control>
+                    <HeroUISwitch.Thumb>
+                      <HeroUISwitch.Icon>
+                        {theme === 'light' ? (
+                          <IconSun className="size-3 text-inherit" />
+                        ) : (
+                          <IconMoon className="size-3 text-inherit" />
+                        )}
+                      </HeroUISwitch.Icon>
+                    </HeroUISwitch.Thumb>
+                  </HeroUISwitch.Control>
+                </HeroUISwitch>
               }
-              key={''}
             >
-              {t('menu.actions.theme', {
-                theme: t(`theme.${theme}` as any) as string,
+              {tShared('menu.actions.theme', {
+                theme: tShared(
+                  theme === 'light' ? 'theme.light' : 'theme.dark',
+                ),
               })}
             </DropdownItem>
           </DropdownSection>
           {additionalMenuItems ?? null}
           <DropdownItem
-            as="a"
             href={reportIssueHref}
-            endContent={<IconFlag size={16} stroke={2} />}
-            key={'menu-report-issue'}
+            startContent={<IconFlag size={16} stroke={2} />}
+            key="menu-report-issue"
           >
-            {t('menu.actions.reportIssue')}
+            {tShared('menu.actions.reportIssue')}
           </DropdownItem>
           <DropdownItem
             onPress={handleLogout}
-            endContent={<IconLogout size={16} stroke={2} />}
-            key={'menu-logout'}
+            startContent={<IconLogout size={16} stroke={2} />}
+            key="menu-logout"
           >
-            {t('menu.actions.logout')}
+            {tShared('menu.actions.logout')}
           </DropdownItem>
         </DropdownMenu>
       </Dropdown>

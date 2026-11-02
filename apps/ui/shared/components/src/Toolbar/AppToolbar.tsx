@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { IconExternalLink } from '@tabler/icons-react';
+import { IconExternalLink, IconMenu, IconX } from '@tabler/icons-react';
 
 import { BreadcrumbItem, Breadcrumbs } from '../Breadcrumbs';
 
@@ -14,31 +14,31 @@ import { useRouter } from 'next/router';
 import { toCamelCase } from '@amdenterpriseai/utils/app';
 import { CollectionElement } from '@react-types/shared';
 
-import { PageBreadcrumbs, SidebarItem } from '@amdenterpriseai/types';
+import { PageBreadcrumbs } from '@amdenterpriseai/types';
 
 import { UserMenu } from '../Navigation/UserMenu';
-import { MobileMenu } from '../Navigation/MobileMenu';
 
 interface AppBarProps {
   pageBreadcrumb?: PageBreadcrumbs;
-  menuItems: SidebarItem[];
   endContent?: React.ReactNode;
   additionalMenuItems?: CollectionElement<object>;
   documentationHref?: string;
-  projectPrefix?: string;
+  isMobileMenuOpen: boolean;
+  onMobileMenuOpenChange: () => void;
 }
 
 export const AppBar: React.FC<AppBarProps> = ({
   pageBreadcrumb,
-  menuItems,
   endContent,
   additionalMenuItems,
   documentationHref,
-  projectPrefix,
+  isMobileMenuOpen,
+  onMobileMenuOpenChange,
 }) => {
   const router = useRouter();
   const { pathname } = router;
   const { t } = useTranslation();
+  const { t: tShared } = useTranslation('sharedComponents');
   const path = pathname.split('/').pop()?.replace(/^_/, '');
   const title = path
     ? (t(`pages.${toCamelCase(path)}.title` as any) as string)
@@ -47,20 +47,40 @@ export const AppBar: React.FC<AppBarProps> = ({
     router.locale && router.locale !== router.defaultLocale
       ? `/${router.locale}`
       : '';
+  const mobileMenuLabel = isMobileMenuOpen
+    ? tShared('menu.actions.close')
+    : tShared('menu.actions.open');
 
   return (
-    <div className="md:py-4 px-4 md:px-8 flex items-center justify-between w-full border-b border-default-200 dark:border-default-100">
+    <div className="md:py-4 px-4 md:px-8 flex items-center justify-between w-full border-b border-default dark:border-default">
       <div className="flex items-center">
-        <MobileMenu menuItems={menuItems} projectPrefix={projectPrefix} />
+        <Button
+          isIconOnly
+          variant="light"
+          radius="sm"
+          aria-label={mobileMenuLabel}
+          aria-expanded={isMobileMenuOpen}
+          aria-controls="mobile-nav-overlay"
+          aria-haspopup="dialog"
+          onPress={onMobileMenuOpenChange}
+          className="h-16 w-11 min-w-11 bg-transparent px-0 data-[hover=true]:bg-transparent data-[pressed=true]:bg-transparent md:hidden"
+        >
+          {isMobileMenuOpen ? (
+            <IconX aria-hidden="true" />
+          ) : (
+            <IconMenu aria-hidden="true" />
+          )}
+        </Button>
         {pageBreadcrumb ? (
-          <Breadcrumbs size="lg">
+          <Breadcrumbs
+            size="lg"
+            aria-label={tShared('breadcrumbs.label') as string}
+          >
             {pageBreadcrumb.map((breadcrumb, idx) => (
               <BreadcrumbItem
-                href={
-                  breadcrumb.href
-                    ? `${localePrefix}${breadcrumb.href}`
-                    : undefined
-                }
+                {...(breadcrumb.href
+                  ? { href: `${localePrefix}${breadcrumb.href}` }
+                  : {})}
                 key={`page-breadcrumb-${idx}`}
               >
                 {breadcrumb.title}
@@ -68,7 +88,7 @@ export const AppBar: React.FC<AppBarProps> = ({
             ))}
           </Breadcrumbs>
         ) : (
-          <div className="text-md font-semibold text-default-800 capitalize ml-6 sm:ml-3">
+          <div className="text-md font-semibold text-foreground capitalize ml-6 sm:ml-3">
             {title}
           </div>
         )}
@@ -78,15 +98,13 @@ export const AppBar: React.FC<AppBarProps> = ({
 
         {documentationHref && (
           <Button
-            as={Link}
             isExternal
-            variant="bordered"
-            className="w-max border-1 border-default-200"
+            variant="outline"
             size="sm"
             href={documentationHref}
+            endContent={<IconExternalLink size="14" stroke="2" />}
           >
-            {t('links.documentation')}
-            <IconExternalLink size="14" stroke="2" />
+            {tShared('links.documentation')}
           </Button>
         )}
         <UserMenu additionalMenuItems={additionalMenuItems} />

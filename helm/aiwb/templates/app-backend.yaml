@@ -146,26 +146,24 @@ spec:
               name: {{ .Values.postgresql.userSecretName }}
               key: password
 
-        # Keycloak/OIDC configuration
+        # OIDC configuration. OPENID_* serve the Swagger UI login, OIDC_* the
+        # token check.
         - name: OPENID_CLIENT_ID
-          value: {{ .Values.keycloak.clientId | quote }}
-        - name: KEYCLOAK_PUBLIC_URL
-          value: {{ include "aiwb.keycloakPublicUrl" . | quote }}
-        - name: KEYCLOAK_INTERNAL_URL
-          value: {{ .Values.keycloak.internalUrl | quote }}
-        - name: KEYCLOAK_REALM
-          value: {{ .Values.keycloak.realm | quote }}
-        - name: KEYCLOAK_CLIENT_ID
-          value: {{ .Values.keycloak.clientId | quote }}
-        - name: KEYCLOAK_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Values.keycloak.secretName }}
-              key: value
+          value: {{ include "aiwb.oidcClientId" . | quote }}
+        - name: OPENID_CONFIGURATION_URL
+          value: "{{ include "aiwb.oidcIssuer" . }}/.well-known/openid-configuration"
+        - name: OIDC_JWKS_URL
+          value: {{ include "aiwb.oidcJwksUrl" . | quote }}
+        - name: OIDC_ISSUER
+          value: {{ include "aiwb.oidcIssuer" . | quote }}
+        - name: OIDC_AUDIENCE
+          value: {{ .Values.oidc.audience | quote }}
 
         # MinIO configuration
         - name: MINIO_URL
           value: {{ .Values.minio.url | quote }}
+        - name: MINIO_EXTERNAL_URL
+          value: {{ .Values.minio.externalUrl | default (printf "https://seaweed.%s" .Values.appDomain) | quote }}
         - name: MINIO_BUCKET
           value: {{ .Values.minio.bucket | quote }}
         - name: MINIO_ACCESS_KEY
@@ -178,6 +176,14 @@ spec:
             secretKeyRef:
               name: {{ .Values.minio.credentialsSecretName }}
               key: {{ .Values.minio.secretKeyKey }}
+        # The backend emits this Secret name and these key names into AIMArtifact/AIMModel
+        # secretKeyRefs, so they must match the Secret the env vars above bind from.
+        - name: MINIO_CREDENTIALS_SECRET_NAME
+          value: {{ .Values.minio.credentialsSecretName | quote }}
+        - name: MINIO_CREDENTIALS_ACCESS_KEY_KEY
+          value: {{ .Values.minio.accessKeyKey | quote }}
+        - name: MINIO_CREDENTIALS_SECRET_KEY_KEY
+          value: {{ .Values.minio.secretKeyKey | quote }}
         - name: MINIO_MAX_ATTEMPTS
           value: "3"
         - name: MINIO_MIN_WAIT
@@ -185,16 +191,28 @@ spec:
         - name: MINIO_MAX_WAIT
           value: "60"
 
-        # ClusterAuth configuration
-        - name: CLUSTER_AUTH_ENABLED
-          value: {{ .Values.clusterAuth.enabled | quote }}
-        - name: CLUSTER_AUTH_URL
-          value: {{ .Values.clusterAuth.url | quote }}
-        - name: CLUSTER_AUTH_ADMIN_TOKEN
+        # OpenBao/ESO store — the sole API-key path. OPENBAO_TOKEN is the
+        # scoped apikeys-write-policy token materialized by the aiwb-external-secrets chart.
+        # Without OpenBao the API gets an empty address and no token, so it builds no client.
+        # With OpenBao enabled the token reference is deliberately not optional: a missing
+        # Secret means openbaoToken.enabled in the aiwb-external-secrets release disagrees with
+        # this value, and the Pod must fail at start rather than run without its key store.
+        {{- if .Values.openBao.enabled }}
+        - name: OPENBAO_ADDR
+          value: {{ .Values.openBao.url | quote }}
+        - name: OPENBAO_KV_MOUNT
+          value: {{ .Values.openBao.kvMount | quote }}
+        - name: OPENBAO_SECRET_STORE_REF
+          value: {{ .Values.openBao.secretStoreRef | quote }}
+        - name: OPENBAO_TOKEN
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.clusterAuth.secretName }}
-              key: value
+              name: {{ .Values.openBao.secretName }}
+              key: {{ .Values.openBao.secretKey }}
+        {{- else }}
+        - name: OPENBAO_ADDR
+          value: ""
+        {{- end }}
 
         # Prometheus configuration
         - name: PROMETHEUS_URL
@@ -217,6 +235,15 @@ spec:
           value: {{ .Values.backend.polling.syncerPollingIntervalSeconds | quote }}
         - name: SYNCER_PENDING_TIMEOUT_SECONDS
           value: {{ .Values.backend.polling.syncerPendingTimeoutSeconds | quote }}
+
+        # Reclaiming data left behind by deleted projects. Off unless an operator turns it on:
+        # what it deletes cannot be restored. Disabled, nothing is scheduled.
+        - name: DELETED_PROJECT_CLEANUP_ENABLED
+          value: {{ .Values.backend.deletedProjectCleanup.enabled | quote }}
+        - name: DELETED_PROJECT_CLEANUP_INTERVAL_SECONDS
+          value: {{ .Values.backend.deletedProjectCleanup.intervalSeconds | quote }}
+        - name: DELETED_PROJECT_CLEANUP_SKEW_MARGIN_SECONDS
+          value: {{ .Values.backend.deletedProjectCleanup.skewMarginSeconds | quote }}
 
         # Dataset Configuration
         - name: MAX_FILE_SIZE_MB

@@ -119,9 +119,8 @@ describe('ActiveUsersTab', () => {
     });
   });
 
-  // SDA-2328: Tests for Last Seen At column replacement
-  describe('SDA-2328: Last Seen At column', () => {
-    it('should display Last Seen At column header', () => {
+  describe('Created column', () => {
+    it('should display Created column header', () => {
       render(
         <ActiveUsersTab
           initialData={mockUsersResponse}
@@ -130,13 +129,12 @@ describe('ActiveUsersTab', () => {
         { wrapper },
       );
 
-      // Verify Last Seen At header is present
       expect(
-        screen.getByText('list.headers.lastSeenAt.title'),
+        screen.getByText('list.headers.createdAt.title'),
       ).toBeInTheDocument();
     });
 
-    it('should display formatted date and time for users with lastActiveAt', () => {
+    it('should display formatted date and time for users with createdAt', () => {
       render(
         <ActiveUsersTab
           initialData={mockUsersResponse}
@@ -148,17 +146,16 @@ describe('ActiveUsersTab', () => {
       // DateDisplay uses DateSince: relative time ("X mins ago", "Yesterday at …") or absolute date
       const dateOrRelativeElements = screen.getAllByText((content) => {
         const text = content.trim();
-        if (text === 'Never') return false;
         if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(text)) return true;
-        if (/Yesterday at/.test(text)) return true;
-        if (/\d+\s*(min|hr)s? ago/.test(text)) return true;
-        if (/Just now/.test(text)) return true;
+        if (/yesterday at/i.test(text)) return true;
+        if (/\d+\s*(min|hr|hour|minute|day)s?\s*ago/i.test(text)) return true;
+        if (/just now/i.test(text)) return true;
         return false;
       });
       expect(dateOrRelativeElements.length).toBeGreaterThan(0);
     });
 
-    it('should display Never for users without lastActiveAt', () => {
+    it('should have correct column order: Name, Email, Created, Roles', () => {
       render(
         <ActiveUsersTab
           initialData={mockUsersResponse}
@@ -167,26 +164,11 @@ describe('ActiveUsersTab', () => {
         { wrapper },
       );
 
-      // First user has no lastActiveAt, should show "Never"
-      expect(screen.getByText('list.lastSeenAt.never')).toBeInTheDocument();
-    });
-
-    it('should have correct column order: Name, Email, Last Seen At, Roles', () => {
-      render(
-        <ActiveUsersTab
-          initialData={mockUsersResponse}
-          onInviteUserClick={mockOnInviteUserClick}
-        />,
-        { wrapper },
-      );
-
-      // Get all column headers
       const headers = screen.getAllByRole('columnheader');
 
-      // Verify the expected headers are present in order
       expect(headers[0]).toHaveTextContent('list.headers.name.title');
       expect(headers[1]).toHaveTextContent('list.headers.email.title');
-      expect(headers[2]).toHaveTextContent('list.headers.lastSeenAt.title');
+      expect(headers[2]).toHaveTextContent('list.headers.createdAt.title');
       expect(headers[3]).toHaveTextContent('list.headers.roles.title');
     });
   });

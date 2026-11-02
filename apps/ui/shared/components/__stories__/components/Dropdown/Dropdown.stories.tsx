@@ -3,11 +3,15 @@
 // SPDX-License-Identifier: MIT
 
 import type { Story, StoryDefault } from '@ladle/react';
+import { IconFile, IconLink, IconPencil, IconTrash } from '@tabler/icons-react';
+import { ActionButton } from '../../../src/Buttons';
 import {
-  Dropdown,
+  DropdownRoot,
   DropdownItem,
   DropdownMenu,
   DropdownSection,
+  DropdownSubmenuIndicator,
+  DropdownSubmenuTrigger,
   DropdownTrigger,
 } from '../../../src/Dropdown/DropdownPrimitive';
 
@@ -20,21 +24,37 @@ export default {
 // ============================================================================
 
 export const Basic: Story = () => (
-  <Dropdown>
+  <DropdownRoot>
     <DropdownTrigger>
-      <button className="px-4 py-2 bg-primary text-white rounded-md text-sm">
-        Open Dropdown
-      </button>
+      <ActionButton primary>Open Dropdown</ActionButton>
     </DropdownTrigger>
     <DropdownMenu aria-label="Actions">
-      <DropdownItem key="new">New file</DropdownItem>
-      <DropdownItem key="copy">Copy link</DropdownItem>
-      <DropdownItem key="edit">Edit file</DropdownItem>
-      <DropdownItem key="delete" className="text-danger" color="danger">
+      <DropdownItem
+        key="new"
+        startContent={<IconFile size={16} />}
+        description="Create a blank document"
+      >
+        New file
+      </DropdownItem>
+      <DropdownItem key="copy" startContent={<IconLink size={16} />}>
+        Copy link
+      </DropdownItem>
+      <DropdownItem
+        key="edit"
+        startContent={<IconPencil size={16} />}
+        description="Open in editor"
+      >
+        Edit file
+      </DropdownItem>
+      <DropdownItem
+        key="delete"
+        variant="danger"
+        startContent={<IconTrash size={16} />}
+      >
         Delete file
       </DropdownItem>
     </DropdownMenu>
-  </Dropdown>
+  </DropdownRoot>
 );
 
 // ============================================================================
@@ -42,20 +62,18 @@ export const Basic: Story = () => (
 // ============================================================================
 
 export const CompoundForm: Story = () => (
-  <Dropdown>
-    <Dropdown.Trigger>
-      <button className="px-4 py-2 bg-primary text-white rounded-md text-sm">
-        Compound Dropdown
-      </button>
-    </Dropdown.Trigger>
-    <Dropdown.Menu aria-label="Actions">
-      <Dropdown.Item key="new">New file</Dropdown.Item>
-      <Dropdown.Item key="copy">Copy link</Dropdown.Item>
-      <Dropdown.Item key="delete" className="text-danger" color="danger">
+  <DropdownRoot>
+    <DropdownRoot.Trigger>
+      <ActionButton primary>Compound Dropdown</ActionButton>
+    </DropdownRoot.Trigger>
+    <DropdownRoot.Menu aria-label="Actions">
+      <DropdownRoot.Item key="new">New file</DropdownRoot.Item>
+      <DropdownRoot.Item key="copy">Copy link</DropdownRoot.Item>
+      <DropdownRoot.Item key="delete" variant="danger">
         Delete
-      </Dropdown.Item>
-    </Dropdown.Menu>
-  </Dropdown>
+      </DropdownRoot.Item>
+    </DropdownRoot.Menu>
+  </DropdownRoot>
 );
 
 // ============================================================================
@@ -63,11 +81,9 @@ export const CompoundForm: Story = () => (
 // ============================================================================
 
 export const WithSections: Story = () => (
-  <Dropdown>
+  <DropdownRoot>
     <DropdownTrigger>
-      <button className="px-4 py-2 bg-primary text-white rounded-md text-sm">
-        With Sections
-      </button>
+      <ActionButton primary>With Sections</ActionButton>
     </DropdownTrigger>
     <DropdownMenu aria-label="Actions with sections">
       <DropdownSection title="Actions">
@@ -75,12 +91,12 @@ export const WithSections: Story = () => (
         <DropdownItem key="copy">Copy link</DropdownItem>
       </DropdownSection>
       <DropdownSection title="Danger Zone">
-        <DropdownItem key="delete" className="text-danger" color="danger">
+        <DropdownItem key="delete" variant="danger">
           Delete file
         </DropdownItem>
       </DropdownSection>
     </DropdownMenu>
-  </Dropdown>
+  </DropdownRoot>
 );
 
 // ============================================================================
@@ -88,11 +104,9 @@ export const WithSections: Story = () => (
 // ============================================================================
 
 export const DisabledKeys: Story = () => (
-  <Dropdown>
+  <DropdownRoot>
     <DropdownTrigger>
-      <button className="px-4 py-2 bg-primary text-white rounded-md text-sm">
-        With Disabled Keys
-      </button>
+      <ActionButton primary>With Disabled Keys</ActionButton>
     </DropdownTrigger>
     <DropdownMenu aria-label="Actions" disabledKeys={['edit', 'delete']}>
       <DropdownItem key="new">New file</DropdownItem>
@@ -100,5 +114,37 @@ export const DisabledKeys: Story = () => (
       <DropdownItem key="edit">Edit file (disabled)</DropdownItem>
       <DropdownItem key="delete">Delete file (disabled)</DropdownItem>
     </DropdownMenu>
-  </Dropdown>
+  </DropdownRoot>
+);
+
+// ============================================================================
+// With submenus
+// ============================================================================
+
+export const WithSubmenus: Story = () => (
+  <DropdownRoot>
+    <DropdownTrigger>
+      <ActionButton primary>With Submenus</ActionButton>
+    </DropdownTrigger>
+    <DropdownMenu aria-label="Actions with submenus">
+      <DropdownItem key="new" startContent={<IconFile size={16} />}>
+        New file
+      </DropdownItem>
+      <DropdownItem key="copy" startContent={<IconLink size={16} />}>
+        Copy link
+      </DropdownItem>
+      <DropdownSubmenuTrigger>
+        <DropdownItem key="share" endContent={<DropdownSubmenuIndicator />}>
+          Share
+        </DropdownItem>
+        <DropdownMenu aria-label="Share targets">
+          <DropdownItem key="email">Email</DropdownItem>
+          <DropdownItem key="link">Copy share link</DropdownItem>
+        </DropdownMenu>
+      </DropdownSubmenuTrigger>
+      <DropdownItem key="delete" variant="danger">
+        Delete file
+      </DropdownItem>
+    </DropdownMenu>
+  </DropdownRoot>
 );

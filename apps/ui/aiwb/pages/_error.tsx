@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: MIT
 
 import { NextPageContext } from 'next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import { ErrorMessage } from '@/components/shared/PageErrorHandler/ErrorMessage';
+import { getPageTranslations } from '@/lib/server/i18n';
 import { ErrorCodes } from '@amdenterpriseai/types';
 
 interface Props {
@@ -19,7 +19,7 @@ function Error({ error }: Props) {
 export async function getStaticProps({ locale, err }: NextPageContext) {
   return {
     props: {
-      ...(await serverSideTranslations(locale ?? 'en', ['common'])),
+      ...(await getPageTranslations(locale ?? 'en')),
       error: err?.message || 'An unknown error occurred',
     },
   };

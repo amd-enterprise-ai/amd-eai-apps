@@ -283,6 +283,34 @@ Discard changes button should be visible
     VAR    ${discard_btn}    css=button:has-text("Discard changes")
     Wait For Elements State    ${discard_btn}    visible    timeout=10s
 
+Note current CPU guaranteed allocation on quota tab
+    [Documentation]    Stores the numeric value shown for CPU guaranteed allocation
+    ...                in a test-scoped variable for later comparison after discard.
+    VAR    ${cpu_input}    css=#guaranteed-quota [role="row"]:has-text("CPU Cores") [role="textbox"]
+    Wait For Elements State    ${cpu_input}    visible    timeout=10s
+    ${val}=    Get Attribute    ${cpu_input}    value
+    VAR    ${NOTED_CPU_QUOTA}    ${val}    scope=TEST
+
+Increase CPU guaranteed allocation once without saving
+    [Documentation]    Clicks the increment control once for the CPU allocation row.
+    VAR    ${inc_btn}    css=#guaranteed-quota [role="row"]:has-text("CPU Cores") button[aria-label="Increase"]
+    Wait For Elements State    ${inc_btn}    visible    timeout=10s
+    Wait For Elements State    ${inc_btn}    enabled    timeout=10s
+    Click    ${inc_btn}
+
+Click discard changes on project settings
+    [Documentation]    Clicks the Discard changes button for the project settings form.
+    VAR    ${discard_btn}    css=button:has-text("Discard changes")
+    Wait For Elements State    ${discard_btn}    visible    timeout=10s
+    Click    ${discard_btn}
+
+CPU guaranteed allocation should match noted value
+    [Documentation]    Asserts the CPU allocation input matches the value stored earlier.
+    VAR    ${cpu_input}    css=#guaranteed-quota [role="row"]:has-text("CPU Cores") [role="textbox"]
+    Wait For Elements State    ${cpu_input}    visible    timeout=10s
+    ${current}=    Get Attribute    ${cpu_input}    value
+    Should Be Equal    ${current}    ${NOTED_CPU_QUOTA}
+
 # =============================================================================
 # Members/Users tab
 # =============================================================================

@@ -14,7 +14,7 @@ describe('DataRefresher', () => {
     expect(
       screen.getByRole('button', { name: /refresh/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText('data.refresh')).toBeInTheDocument();
+    expect(screen.getByText('Refresh')).toBeInTheDocument();
   });
 
   it('calls onRefresh when button is clicked', () => {
@@ -32,7 +32,7 @@ describe('DataRefresher', () => {
       render(<DataRefresher onRefresh={vi.fn()} lastFetchedTimestamp={date} />);
     });
 
-    expect(screen.getByText('data.lastUpdated')).toBeInTheDocument();
+    expect(screen.getByText(/^Last update:/)).toBeInTheDocument();
   });
 
   it('shows refreshing state when isRefreshing is true', () => {

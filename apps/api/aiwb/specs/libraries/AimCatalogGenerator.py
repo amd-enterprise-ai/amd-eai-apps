@@ -61,6 +61,7 @@ class AimCatalogGenerator:
 
     ROBOT_LIBRARY_SCOPE = "GLOBAL"
     ROBOT_LISTENER_API_VERSION = 3
+    TEST_TIMEOUT = "100 minutes"
 
     def __init__(self, model_config_file="api", test_mode="full"):
         """
@@ -264,7 +265,7 @@ class AimCatalogGenerator:
         Get a bearer token for API authentication.
 
         Delegates to KubeconfigAuth, which already understands every credential
-        source the rest of the suite uses: silodev user passthrough, in-cluster
+        source the rest of the suite uses: in-cluster
         KEYCLOAK_* env vars, or password grant from the local kubeconfig.
 
         ``AIWB_API_TOKEN`` still takes precedence as a manual override.
@@ -285,6 +286,92 @@ class AimCatalogGenerator:
             logger.debug(f"Could not acquire auth token via KubeconfigAuth: {e}")
             return None
 
+    def _fetch_ready_aim_records(self):
+        """Fetch every Ready AIM record from the paginated catalog endpoint."""
+        import requests  # noqa: PLC0415
+
+        base_url = self._resolve_api_url()
+        url = f"{base_url}/v1/inference/models"
+        headers = {}
+        token = self._get_auth_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        verify_ssl = os.environ.get("VERIFY_SSL", "FALSE").upper() != "FALSE"
+        aims = []
+        page = 1
+        page_size = 100
+        while True:
+            try:
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    params={"page": page, "pageSize": page_size, "statusFilter": "Ready"},
+                    timeout=90,
+                    verify=verify_ssl,
+                )
+                response.raise_for_status()
+            except requests.RequestException as e:
+                raise RuntimeError(f"Failed to fetch AIMs from cluster API ({url}): {e}") from e
+
+            try:
+                data = response.json()
+            except ValueError as e:
+                raise RuntimeError(f"API returned non-JSON response from {url}: {response.text[:200]}") from e
+
+            page_aims = data.get("data", [])
+            aims.extend(page_aims)
+            pagination = data.get("pagination") or {}
+            total = pagination.get("total")
+            if (
+                not pagination
+                or not page_aims
+                or (total is not None and len(aims) >= total)
+                or len(page_aims) < page_size
+            ):
+                break
+            page += 1
+
+        logger.info(f"API returned {len(aims)} Ready AIMs across {page} page(s)")
+        return aims
+
+    def resolve_ready_aim(self, image_name):
+        """
+        Return the exact Ready AIM and normalized model metadata for an image name.
+
+        The selector is matched on the tag/digest-free basename, so a short name can
+        never resolve to a different image that merely shares its prefix. A selector
+        that pins a version resolves to exactly that version; a bare name follows the
+        catalog's highest-version rule, matching how discovery deduplicates models.
+        """
+        selected_basename = self._extract_image_name(image_name, image_name)
+        selected_version = self._extract_version(image_name)
+
+        matches = []
+        for aim in self._fetch_ready_aim_records():
+            docker_image = aim.get("image_reference", aim.get("spec", {}).get("image", ""))
+            resource_name = aim.get("resource_name", aim.get("metadata", {}).get("name", ""))
+            if self._extract_image_name(docker_image, resource_name) != selected_basename:
+                continue
+            model = self._map_aim_to_model(aim)
+            if selected_version and model["version"] != selected_version:
+                continue
+            matches.append((aim, model))
+
+        if not matches:
+            raise RuntimeError(f"Selected AIM catalog image '{image_name}' is not Ready or does not exist")
+
+        aim, model = max(matches, key=lambda match: self._parse_version_key(match[1].get("version")))
+        if len(matches) > 1:
+            logger.info(f"Selected highest Ready version for '{selected_basename}': {model['docker_image']}")
+        return {
+            "aim": aim,
+            "image_name": model["image_name"],
+            "docker_image": model["docker_image"],
+            "gpu_count": model["gpu_count"],
+            "requires_hf_token": model["requires_hf_token"],
+        }
+
     def _load_models_from_api(self, name_filter=None):
         """
         Discover AIM models from the cluster API.
@@ -301,35 +388,8 @@ class AimCatalogGenerator:
         Returns:
             List of model dicts
         """
-        import requests  # noqa: PLC0415
-
-        base_url = self._resolve_api_url()
-        url = f"{base_url}/v1/inference/models"
-
-        logger.info(f"Discovering AIMs from cluster API: {url}")
-
-        headers = {}
-        token = self._get_auth_token()
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-            logger.debug("Using OIDC bearer token for API authentication")
-
-        # Respect VERIFY_SSL env var (shared with Robot Framework resources via endpoints.resource).
-        # Defaults to False to handle MITM proxies common in corporate dev environments.
-        verify_ssl = os.environ.get("VERIFY_SSL", "FALSE").upper() != "FALSE"
-
-        try:
-            response = requests.get(url, headers=headers, timeout=90, verify=verify_ssl)
-            response.raise_for_status()
-        except requests.RequestException as e:
-            raise RuntimeError(f"Failed to fetch AIMs from cluster API ({url}): {e}") from e
-
-        try:
-            data = response.json()
-        except ValueError as e:
-            raise RuntimeError(f"API returned non-JSON response from {url}: {response.text[:200]}") from e
-        aims = data.get("data", [])
-        logger.info(f"API returned {len(aims)} AIMs total")
+        logger.info("Discovering AIMs from cluster API")
+        aims = self._fetch_ready_aim_records()
 
         models = []
         for aim in aims:
@@ -665,6 +725,36 @@ class AimCatalogGenerator:
         logger.info(f"Version filter '{version_filter}': {len(models)} models -> {len(filtered)} models")
         return filtered
 
+    @staticmethod
+    def _remove_tests_with_tag(suite, tag):
+        """Remove every suite test carrying the given control tag."""
+        for test in list(suite.tests):
+            if tag in [str(test_tag) for test_tag in test.tags]:
+                suite.tests.remove(test)
+
+    def _apply_tag_filters(self, suite):
+        """Apply INCLUDE_TAGS and EXCLUDE_TAGS variables to the suite."""
+        include_tags = self._get_variable(suite, "INCLUDE_TAGS")
+        exclude_tags = self._get_variable(suite, "EXCLUDE_TAGS")
+
+        def is_valid_tag_filter(tag_value):
+            return tag_value and tag_value not in [None, "None", "${None}", ""]
+
+        has_include = is_valid_tag_filter(include_tags)
+        has_exclude = is_valid_tag_filter(exclude_tags)
+        if not has_include and not has_exclude:
+            logger.debug("No tag filtering applied (INCLUDE_TAGS and EXCLUDE_TAGS not set)")
+            return
+
+        tests_before = len(suite.tests)
+        if has_include:
+            logger.info(f"Applying INCLUDE_TAGS filter: {include_tags}")
+            suite.filter(included_tags=include_tags)
+        if has_exclude:
+            logger.info(f"Applying EXCLUDE_TAGS filter: {exclude_tags}")
+            suite.filter(excluded_tags=exclude_tags)
+        logger.info(f"Tag filtering: {tests_before} tests -> {len(suite.tests)} tests")
+
     def start_suite(self, data, result):
         """
         Listener method called when suite starts (Listener API v3).
@@ -682,16 +772,84 @@ class AimCatalogGenerator:
         """
         self.current_suite = data
 
-        # Only generate tests for the aim_catalog suite
-        # This allows arguments.txt to be safely used for all test runs
+        # Only generate tests for the aim_catalog suite itself.
+        # This allows arguments.txt to be safely used for all test runs.
+        # Matched exactly rather than by substring: a substring test also claims sibling suites
+        # whose names merely start with the same words (aim_catalog_cleanup.robot), which would
+        # inject the whole generated model-deploy catalog into a suite that only regression-tests
+        # the cleanup keywords.
         suite_name = data.name.lower() if data.name else ""
-        is_aim_catalog = "aim_catalog" in suite_name or "aim catalog" in suite_name
+        is_aim_catalog = suite_name in ("aim_catalog", "aim catalog")
 
         logger.debug(f"AimCatalogGenerator.start_suite called for: '{data.name}' (parent: {data.parent is not None})")
 
         if not is_aim_catalog:
             logger.debug(f"Skipping test generation for suite '{data.name}' (not aim_catalog)")
             return
+
+        # There are two ways to opt out of the catalog, and they work at different times:
+        #
+        #   --exclude aim-catalog        RF prunes the suite at build time, because every
+        #                                static test in it — placeholder included — carries
+        #                                that tag. This listener is never called at all.
+        #   --variable EXCLUDE_TAGS:...  The suite did get built, so it lands here.
+        #
+        # Short-circuit before the cluster API discovery below, so an opted-out run neither
+        # generates model-deploy tests nor hits the "no Ready AIMs" RuntimeError on clusters
+        # without them. Clearing the suite leaves it genuinely empty rather than reporting
+        # passing static tests for a catalog that was never exercised. Robot does not report
+        # that as a skipped suite: run as part of a directory, the cleared suite contributes
+        # nothing at all while the run stays green off its siblings; run as the sole
+        # datasource, Robot exits 252 ("suite contains no tests"). The workflow's executed-test
+        # assertion is what keeps the first case from passing as a green lane that ran nothing.
+        #
+        # The `aim-catalog` tag stamped on each *generated* test (see `common_tags`) plays no
+        # part in either path. Generated tests are created here, in start_suite, after RF has
+        # already applied CLI tag filters, so their tags can never suppress anything from the
+        # command line; their only consumer is the `_apply_tag_filters` call further down.
+        # Keep both the static tests' tags and this short-circuit: neither covers for the other.
+        exclude_tags = self._get_variable(data, "EXCLUDE_TAGS")
+        if exclude_tags and exclude_tags not in ("None", "${None}") and "aim-catalog" in exclude_tags:
+            data.tests.clear()
+            logger.info(f"EXCLUDE_TAGS='{exclude_tags}' excludes aim-catalog — skipping AIM catalog generation")
+            return
+
+        selected_image = self._get_variable(data, "AIM_CATALOG_MODEL")
+        selected_image = selected_image if selected_image not in (None, "", "None", "${None}") else None
+        if selected_image:
+            # The authored BDD scenario is the executable specification for the
+            # workflow's one-model path. Resolve it now so the scenario carries the
+            # same model-derived tags as generated tests before variable filtering.
+            selected = self.resolve_ready_aim(selected_image)
+            try:
+                from robot.libraries.BuiltIn import BuiltIn  # noqa: PLC0415
+
+                builtin = BuiltIn()
+                builtin.set_suite_variable("${SELECTED_AIM_RECORD}", selected["aim"])
+                builtin.set_suite_variable("${SELECTED_AIM_IMAGE}", selected["docker_image"])
+                builtin.set_suite_variable("${SELECTED_AIM_HF}", selected["requires_hf_token"])
+                builtin.set_suite_variable("${MAX_GPU_COUNT}", selected["gpu_count"])
+            except Exception:
+                logger.warn("Could not publish selected AIM suite variables")
+
+            self._remove_tests_with_tag(data, "DYNAMIC_TEST_PLACEHOLDER")
+            for test in data.tests:
+                if "SELECTED_AIM_LIFECYCLE" not in [str(tag) for tag in test.tags]:
+                    continue
+                test.tags.add(f"model:{selected['image_name']}")
+                test.tags.add(f"gpus:{selected['gpu_count']}")
+                version = self._extract_version(selected["docker_image"])
+                if version:
+                    test.tags.add(f"version:{version}")
+                if selected["requires_hf_token"]:
+                    test.tags.add("requires-hf-token")
+            self._apply_tag_filters(data)
+            logger.info(f"Running the authored lifecycle scenario for selected AIM: {selected_image}")
+            return
+
+        # The authored lifecycle is opt-in. Full-catalog runs keep their established
+        # generated per-model tests and must not execute an unconfigured selector test.
+        self._remove_tests_with_tag(data, "SELECTED_AIM_LIFECYCLE")
 
         # Allow --variable AIM_CATALOG_FILTER and TEST_MODE to override constructor args.
         # This lets arguments.txt carry a safe default listener while callers switch
@@ -719,8 +877,8 @@ class AimCatalogGenerator:
 
         logger.info(f"Generating test cases for {len(self.models)} AIM models")
 
-        # Compute max GPU count across all models so the project quota
-        # can be set once to cover the largest model in the catalog.
+        # Compute max GPU count across discovered models so the project quota
+        # can be set once to cover the largest model being tested.
         # Quota is a minimum guarantee — other workloads get preempted.
         max_gpu_count = max((m["gpu_count"] for m in self.models), default=1)
         logger.info(f"Max GPU count across catalog: {max_gpu_count}")
@@ -737,39 +895,9 @@ class AimCatalogGenerator:
         self._generate_test_cases(data)
         logger.info(f"Generated {len(data.tests)} test cases")
 
-        # Remove the placeholder test (it's no longer needed)
-        for test in list(data.tests):  # Create a copy to iterate safely
-            if "DYNAMIC_TEST_PLACEHOLDER" in [str(tag) for tag in test.tags]:
-                data.tests.remove(test)
-                logger.debug("Removed placeholder test")
-                break
+        self._remove_tests_with_tag(data, "DYNAMIC_TEST_PLACEHOLDER")
 
-        # Apply tag filtering from Robot Framework variables
-        include_tags = self._get_variable(data, "INCLUDE_TAGS")
-        exclude_tags = self._get_variable(data, "EXCLUDE_TAGS")
-
-        # Check if tags need filtering (ignore None, ${None}, empty strings)
-        def is_valid_tag_filter(tag_value):
-            return tag_value and tag_value not in [None, "None", "${None}", ""]
-
-        has_include = is_valid_tag_filter(include_tags)
-        has_exclude = is_valid_tag_filter(exclude_tags)
-
-        if has_include or has_exclude:
-            tests_before = len(data.tests)
-
-            if has_include:
-                logger.info(f"Applying INCLUDE_TAGS filter: {include_tags}")
-                data.filter(included_tags=include_tags)
-
-            if has_exclude:
-                logger.info(f"Applying EXCLUDE_TAGS filter: {exclude_tags}")
-                data.filter(excluded_tags=exclude_tags)
-
-            tests_after = len(data.tests)
-            logger.info(f"Tag filtering: {tests_before} tests -> {tests_after} tests")
-        else:
-            logger.debug("No tag filtering applied (INCLUDE_TAGS and EXCLUDE_TAGS not set)")
+        self._apply_tag_filters(data)
 
     def _get_variable(self, suite_data, var_name):
         """
@@ -870,6 +998,7 @@ class AimCatalogGenerator:
         tc = suite.tests.create(
             name=f"Deploy {model_name}",
             tags=common_tags + ["deploy", "deployment"],
+            timeout=self.TEST_TIMEOUT,
         )
 
         # Set documentation
@@ -889,6 +1018,7 @@ class AimCatalogGenerator:
         tc = suite.tests.create(
             name=f"Verify {model_name} reaches Running state",
             tags=common_tags + ["deploy", "status"],
+            timeout=self.TEST_TIMEOUT,
         )
 
         tc.doc = f"Verify that deployed {model_name} reaches Running status"
@@ -906,6 +1036,7 @@ class AimCatalogGenerator:
         tc = suite.tests.create(
             name=f"Run inference with {model_name}",
             tags=common_tags + ["inference", "external"],
+            timeout=self.TEST_TIMEOUT,
         )
 
         tc.doc = f"Test inference capability of {model_name} via external endpoint"
@@ -923,6 +1054,7 @@ class AimCatalogGenerator:
         tc = suite.tests.create(
             name=f"Verify metrics for {model_name}",
             tags=common_tags + ["metrics", "analytics"],
+            timeout=self.TEST_TIMEOUT,
         )
 
         tc.doc = f"Verify that inference metrics are available for {model_name}"
@@ -940,6 +1072,7 @@ class AimCatalogGenerator:
         tc = suite.tests.create(
             name=f"Undeploy {model_name}",
             tags=common_tags + ["undeploy", "cleanup"],
+            timeout=self.TEST_TIMEOUT,
         )
 
         tc.doc = f"Undeploy {model_name} and verify cleanup"

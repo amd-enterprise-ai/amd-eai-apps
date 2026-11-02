@@ -1,0 +1,9 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+[project]
+name = "cluster-environment-check-e2e"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = ["robotframework==7.4.1"]

@@ -8,13 +8,13 @@ import { useQuery } from '@tanstack/react-query';
 
 import { getServerSession } from 'next-auth';
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import { useRouter } from 'next/router';
 
 import {
   getCluster as fetchCluster,
   fetchClusterWorkloadsStatusStats,
 } from '@/services/app';
+import { getPageTranslations } from '@/utils/i18n';
 import { getCluster, getClusterWorkloadsStatusStats } from '@/services/server';
 
 import { authOptions } from '@amdenterpriseai/utils/server';
@@ -113,11 +113,9 @@ export async function getServerSideProps(context: any) {
       ),
     ]);
 
-    const translations = await serverSideTranslations(locale, [
-      'common',
+    const translations = await getPageTranslations(locale, [
       'clusters',
       'workloads',
-      'sharedComponents',
     ]);
 
     const breadcrumb = [

@@ -1,0 +1,156 @@
+{
+  "title": "LoRAs",
+  "list": {
+    "headers": {
+      "displayName": {
+        "title": "Name"
+      },
+      "rank": {
+        "title": "Rank"
+      },
+      "status": {
+        "title": "Status"
+      },
+      "deploymentCount": {
+        "title": "Deployments"
+      },
+      "createdAt": {
+        "title": "Created at"
+      },
+      "createdBy": {
+        "title": "Created by"
+      },
+      "actions": {
+        "title": ""
+      }
+    },
+    "filters": {
+      "search": {
+        "placeholder": "Search"
+      },
+      "baseModels": {
+        "label": "Base models",
+        "placeholder": "All base models"
+      }
+    },
+    "compatibleWithMoreCount": "+{{count}} more",
+    "pagination": {
+      "showing": "Showing {{from}} to {{to}} of {{total}} LoRAs",
+      "pageSize": {
+        "label": "Show",
+        "entities": "LoRAs"
+      }
+    },
+    "empty": {
+      "description": "This project has no LoRA adapters or active LoRA fine-tuning jobs."
+    }
+  },
+  "notifications": {
+    "refresh": {
+      "adaptersError": "Failed to load LoRA adapters. {{error, default='Please try again'}}.",
+      "workloadsError": "Failed to load fine-tuning jobs. {{error, default='Please try again'}}.",
+      "deploymentsError": "Failed to load deployment usage. {{error, default='Please try again'}}.",
+      "loadErrorTitle": "Some data failed to load",
+      "loadErrorDescription": "The list below may be incomplete. Try refreshing."
+    }
+  },
+  "selection": {
+    "count": "{{selected}} of {{count}} LoRAs selected",
+    "limitReached": "You can select up to {{count}} LoRAs.",
+    "notReady": "Weights are still being imported",
+    "readinessUnknown": "Weights could not be checked \u2014 try again shortly",
+    "unservable": "Not servable by the current performance selection"
+  },
+  "readiness": {
+    "ready": "Ready",
+    "notReady": "Not ready",
+    "unknown": "Could not be checked"
+  },
+  "actions": {
+    "finetune": {
+      "title": "Fine-tune model"
+    },
+    "details": "View details",
+    "attach": {
+      "label": "Attach to deployment"
+    },
+    "delete": {
+      "label": "Delete",
+      "confirmation": {
+        "title": "Confirm deletion",
+        "description": "Are you sure you want to delete the <strong>{{name}}</strong> LoRA adapter?"
+      },
+      "notification": {
+        "success": "LoRA adapter successfully deleted.",
+        "error": "Failed to delete the LoRA adapter. Please try again."
+      },
+      "workloadNotification": {
+        "success": "Fine-tuning job canceled successfully.",
+        "error": "Failed to cancel the fine-tuning job. Please try again."
+      }
+    }
+  },
+  "attachLora": {
+    "title": "Attach to deployment",
+    "description": "The <strong>{{name}}</strong> LoRA adapter can be attached to <strong>{{models}}</strong> deployments with dynamic adapter support enabled and a maximum LoRA rank <strong>≥{{rank}}</strong>.",
+    "durationNotice": "Attaching a LoRA adapter usually takes about a minute. The deployment stays fully functional during this time.",
+    "actions": {
+      "attach": "Attach",
+      "retry": "Retry"
+    },
+    "deployment": {
+      "label": "Deployment",
+      "placeholder": "Select deployment"
+    },
+    "sections": {
+      "compatible": "Compatible",
+      "incompatible": "Incompatible — Redeploy models to attach the LoRA to them"
+    },
+    "empty": {
+      "title": "No deployments available",
+      "description": "Deploy {{models}} with dynamic adapter support enabled and a maximum LoRA rank of at least {{rank}}."
+    },
+    "error": {
+      "title": "Unable to load deployments",
+      "description": "Check your connection and try again."
+    },
+    "incompatibility": {
+      "dynamicDisabled": "dynamic adapters disabled",
+      "maxRankUnavailable": "maximum LoRA rank unavailable",
+      "adapterRankUnavailable": "adapter rank unavailable",
+      "maxRank": "max rank {{rank}}"
+    },
+    "status": {
+      "attached": "Already attached"
+    },
+    "notifications": {
+      "attaching": "Attaching {{adapter}} to {{deployment}}.",
+      "error": "Failed to attach LoRA to deployment."
+    },
+    "fallbacks": {
+      "compatibleModel": "a compatible model",
+      "adapterRank": "the adapter's rank"
+    }
+  },
+  "details": {
+    "error": "Failed to load the LoRA adapter details.",
+    "modal": {
+      "title": "{{name}} details",
+      "notFound": "LoRA adapter not found.",
+      "fields": {
+        "name": "Name",
+        "resourceName": "Resource name",
+        "adapterModelId": "Adapter model ID",
+        "compatibleWith": "Compatible base models",
+        "rank": "Rank",
+        "description": "Description",
+        "createdBy": "Created by",
+        "createdAt": "Created at",
+        "readiness": "Readiness",
+        "storageUri": "Storage URI",
+        "status": "Status",
+        "conditions": "Conditions"
+      }
+    }
+  }
+}

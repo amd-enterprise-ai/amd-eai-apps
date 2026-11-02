@@ -1,0 +1,8 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+version: "2"
+
+run:
+  timeout: 5m

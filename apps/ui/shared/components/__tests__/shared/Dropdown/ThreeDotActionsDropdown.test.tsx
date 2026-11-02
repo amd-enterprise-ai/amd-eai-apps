@@ -138,7 +138,7 @@ describe('ThreeDotActionsDropdown', () => {
       render(<ThreeDotActionsDropdown actions={actions} item={mockItem} />);
 
       const icon = screen.getByText('action-dot-icon');
-      expect(icon).toHaveClass('text-default-300');
+      expect(icon).toHaveClass('text-muted');
     });
   });
 
@@ -182,7 +182,7 @@ describe('ThreeDotActionsDropdown', () => {
       });
     });
 
-    it('applies color-based className to dropdown items', async () => {
+    it('applies danger variant to dropdown items', async () => {
       const actions: ActionItem<TestItem>[] = [
         {
           key: 'danger-action',
@@ -201,7 +201,7 @@ describe('ThreeDotActionsDropdown', () => {
       // Wait for dropdown item to appear and check class
       await waitFor(() => {
         const dangerItem = screen.getByTestId('danger-action');
-        expect(dangerItem).toHaveClass('text-danger');
+        expect(dangerItem).toHaveClass('menu-item--danger');
       });
     });
 
@@ -626,9 +626,7 @@ describe('ThreeDotActionsDropdown', () => {
       // Check combined classes
       await waitFor(() => {
         const actionItem = screen.getByTestId('complex-class');
-        expect(actionItem).toHaveClass(
-          'custom-class another-class text-warning',
-        );
+        expect(actionItem).toHaveClass('custom-class another-class');
       });
     });
   });

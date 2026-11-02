@@ -3,18 +3,18 @@
 // SPDX-License-Identifier: MIT
 
 import type { Story, StoryDefault } from '@ladle/react';
+import type { ReactNode } from 'react';
 import { useState } from 'react';
 
+import type { SortDescriptor } from '@heroui/react';
 import {
   Table,
   TableBody,
   TableCell,
+  TableCollection,
   TableColumn,
-  TableHeader,
   TableRow,
-  getKeyValue,
-  type SortDescriptor,
-} from '../src/DataTable/TablePrimitive';
+} from '@heroui/react';
 
 export default {
   title: 'Components/Table',
@@ -23,8 +23,8 @@ export default {
 type Row = { id: string; name: string; role: string };
 
 const columns = [
-  { key: 'name', label: 'Name' },
-  { key: 'role', label: 'Role' },
+  { id: 'name', label: 'Name', isRowHeader: true },
+  { id: 'role', label: 'Role' },
 ];
 
 const rows: Row[] = [
@@ -40,44 +40,68 @@ export const FlatAliases: Story = () => {
   });
 
   return (
-    <Table
-      aria-label="Team members"
-      sortDescriptor={sortDescriptor}
-      onSortChange={setSortDescriptor}
-    >
-      <TableHeader columns={columns}>
-        {(column) => (
-          <TableColumn key={column.key} allowsSorting>
-            {column.label}
-          </TableColumn>
-        )}
-      </TableHeader>
-      <TableBody items={rows}>
-        {(item) => (
-          <TableRow key={item.id}>
-            {(columnKey) => (
-              <TableCell>{getKeyValue(item, columnKey)}</TableCell>
+    <Table.Root>
+      <Table.ScrollContainer>
+        <Table.Content
+          aria-label="Team members"
+          onSortChange={setSortDescriptor}
+          sortDescriptor={sortDescriptor}
+        >
+          <Table.Header columns={columns}>
+            {(column) => (
+              <TableColumn
+                allowsSorting
+                id={column.id}
+                isRowHeader={column.isRowHeader}
+              >
+                {column.label}
+              </TableColumn>
             )}
-          </TableRow>
-        )}
-      </TableBody>
-    </Table>
+          </Table.Header>
+          <TableBody items={rows}>
+            {(item) => (
+              <TableRow id={item.id}>
+                <TableCollection items={columns}>
+                  {(column) => (
+                    <TableCell>
+                      {(item as Record<string, ReactNode>)[column.id]}
+                    </TableCell>
+                  )}
+                </TableCollection>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table.Content>
+      </Table.ScrollContainer>
+    </Table.Root>
   );
 };
 
 export const CompoundAPI: Story = () => (
-  <Table aria-label="Team members (compound API)">
-    <Table.Header columns={columns}>
-      {(column) => <Table.Column key={column.key}>{column.label}</Table.Column>}
-    </Table.Header>
-    <Table.Body items={rows}>
-      {(item) => (
-        <Table.Row key={item.id}>
-          {(columnKey) => (
-            <Table.Cell>{getKeyValue(item, columnKey)}</Table.Cell>
+  <Table.Root>
+    <Table.ScrollContainer>
+      <Table.Content aria-label="Team members (compound API)">
+        <Table.Header columns={columns}>
+          {(column) => (
+            <Table.Column id={column.id} isRowHeader={column.isRowHeader}>
+              {column.label}
+            </Table.Column>
           )}
-        </Table.Row>
-      )}
-    </Table.Body>
-  </Table>
+        </Table.Header>
+        <Table.Body items={rows}>
+          {(item) => (
+            <Table.Row id={item.id}>
+              <Table.Collection items={columns}>
+                {(column) => (
+                  <Table.Cell>
+                    {(item as Record<string, ReactNode>)[column.id]}
+                  </Table.Cell>
+                )}
+              </Table.Collection>
+            </Table.Row>
+          )}
+        </Table.Body>
+      </Table.Content>
+    </Table.ScrollContainer>
+  </Table.Root>
 );

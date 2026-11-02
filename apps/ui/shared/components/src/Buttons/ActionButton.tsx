@@ -109,10 +109,11 @@ export const ActionButton = React.memo(
     } = props as ActionButtonProps & { closeToast?: unknown };
 
     const variantConfig = useMemo(() => {
+      if (color === 'danger') return VARIANT_CONFIGS.danger;
       if (primary) return VARIANT_CONFIGS.primary;
       if (tertiary) return VARIANT_CONFIGS.tertiary;
       return VARIANT_CONFIGS.secondary;
-    }, [primary, tertiary]);
+    }, [primary, tertiary, color]);
 
     const isIconOnly = useMemo(() => isChildrenEmpty(children), [children]);
 
@@ -120,7 +121,7 @@ export const ActionButton = React.memo(
       <Button
         {...buttonProps}
         ref={ref}
-        color={color || variantConfig.color}
+        color={color}
         radius={size}
         size={size}
         variant={variantConfig.variant}

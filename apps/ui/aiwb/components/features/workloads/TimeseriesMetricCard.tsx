@@ -11,12 +11,12 @@ import {
   AvailableChartColorsKeys,
   TimeRange,
   TimeSeriesData,
-  TimeSeriesResponse,
 } from '@amdenterpriseai/types';
 import { getTimeseriesMetric } from '@/lib/app/metrics';
 import { useQuery } from '@tanstack/react-query';
 import { useProject } from '@/contexts/ProjectContext';
 import type { workloadsKeys } from '@/types/react-i18next';
+import type { components } from '@/types/api';
 
 export type MetricLocaleKey =
   | 'timeToFirstToken'
@@ -64,7 +64,7 @@ export const METRIC_DESCRIPTION_KEYS = {
 
 export interface TimeseriesMetricConfig {
   /** Backend metric slug (e.g. 'time_to_first_token_seconds') */
-  metric: string;
+  metric: components['schemas']['MetricName'];
   /** Locale key under details.metrics (e.g. 'timeToFirstToken') */
   localeKey: MetricLocaleKey;
   /** Chart line color */
@@ -94,7 +94,7 @@ export const TimeseriesMetricCard: React.FC<Props> = ({
   const { activeProject } = useProject();
   const { metric, localeKey, color, dataFormatter } = config;
 
-  const { data, isLoading } = useQuery<TimeSeriesResponse>({
+  const { data, isLoading } = useQuery({
     queryKey: [
       'project',
       activeProject,
@@ -124,7 +124,10 @@ export const TimeseriesMetricCard: React.FC<Props> = ({
 
     return {
       metadata: data.data[0]?.metadata || {},
-      values: data.data[0]?.values || [],
+      values: (data.data[0]?.values ?? []).map((point) => ({
+        timestamp: point.timestamp,
+        value: point.value ?? null,
+      })),
       timestamps: data.range.timestamps || [],
     };
   }, [data]);

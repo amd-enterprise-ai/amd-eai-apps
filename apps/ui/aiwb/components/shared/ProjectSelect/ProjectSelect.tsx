@@ -12,14 +12,12 @@ import { useProject } from '@/contexts/ProjectContext';
 
 interface Props {
   disabled?: boolean;
-  size?: 'sm' | 'md' | 'lg';
   startContent?: ReactNode;
   showTooltip?: boolean;
 }
 
 export const ProjectSelect = ({
   disabled = false,
-  size,
   startContent,
   showTooltip = true,
 }: Props) => {
@@ -42,6 +40,7 @@ export const ProjectSelect = ({
     >
       <Select
         className="select-wrapper min-w-48"
+        variant="primary"
         data-testid="project-select"
         aria-label={t('projectSelection.label') || ''}
         placeholder={t('projectSelection.placeholder') || ''}
@@ -49,8 +48,7 @@ export const ProjectSelect = ({
         selectedKeys={activeProject ? [activeProject] : []}
         onChange={(e) => onActiveProjectChange(e.target.value)}
         isDisabled={projects.length === 0 || disabled}
-        size={size || 'sm'}
-        startContent={startContent || <IconCheckupList />}
+        startContent={startContent || <IconCheckupList size={16} />}
       >
         {projects.map((project) => (
           <SelectItem

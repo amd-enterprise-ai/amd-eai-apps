@@ -8,6 +8,7 @@ Documentation       High-level project testing keywords for AIRM.
 ...                 Uses the low-level API keywords from api/projects.resource to implement
 ...                 higher-level testing scenarios.
 Resource            api/projects.resource
+Resource            api/secrets.resource
 Resource            resources/api/common.resource
 Resource            resources/authorization.resource
 Resource            airm_clusters.resource
@@ -20,11 +21,16 @@ Library             Collections
 Library             String
 Library             BuiltIn
 Library             Process
+Library             SecretLookup
 Library             TestPrefix
+Library             ../libraries/Quota.py
 
 
 *** Variables ***
-# CREATED_PROJECT_IDS is lazy-initialized by Track Project For Cleanup
+# CREATED_PROJECT_IDS is lazy-initialized by Track Project For Cleanup, and holds isolated
+# projects a test created — those may be deleted by a per-test teardown. ADOPTED_PROJECT_IDS is
+# lazy-initialized by Track Adopted Project For Suite Cleanup and holds shared projects, whether
+# this run adopted or created them; those are deleted once, at the end of the whole directory suite.
 
 
 *** Keywords ***
@@ -102,8 +108,8 @@ Wait for project name to be available
     Log    Project name ${project_name} is available    DEBUG
 
 Verify project name is available
-    [Documentation]    Verifies that no active project with the given name exists
-    ...    Ignores projects with status "Deleting" or "Deleted" as they are being removed
+    [Documentation]    Verifies that no project with the given name exists.
+    ...    A project keeps its unique name until hard deletion removes its row.
     [Arguments]    ${project_name}
 
     ${response}=    Get projects    expected_status=any
@@ -115,17 +121,11 @@ Verify project name is available
         ${name}=    Get From Dictionary    ${project}    name
         ${status}=    Get From Dictionary    ${project}    status
         IF    $name == $project_name
-            # Allow if project is being deleted or already deleted
-            ${is_deleting}=    Evaluate    "${status}" == "Deleting" or "${status}" == "Deleted"
-            IF    ${is_deleting}
-                Log    Project ${project_name} exists but has status ${status}, ignoring    DEBUG
-                CONTINUE
-            END
             Fail    Project ${project_name} still exists with status ${status}, waiting for deletion to complete
         END
     END
 
-    Log    No active project found with name ${project_name}    TRACE
+    Log    No project found with name ${project_name}    TRACE
 
 Create Project With Validation
     [Documentation]    Create a basic project without user access
@@ -156,6 +156,11 @@ Create Project With Validation
     Create project request is sent
 
     Project should transition to "ready"
+
+    # Mint minio-credentials in the project namespace (configure.sh only does this for the demo
+    # project at install; storage/dataset/adapter suites need it). Best-effort — it must never
+    # crash setup, so a provisioning failure is logged and the MinIO-dependent tests fail instead.
+    MinIO credentials are available in the current project
 
     Log    Project ${TEST_PROJECT}[name] (${TEST_PROJECT_ID}) created successfully    INFO
 
@@ -295,7 +300,7 @@ Project "${project_name}" Exists In System
     # If not found, create it
     IF    $project == $None
         Log    Project "${project_name}" not found, creating new one    INFO
-        Create Project With Validation    project_name=${project_name}
+        Create Shared Project With Validation    project_name=${project_name}
         RETURN
     END
 
@@ -308,7 +313,7 @@ Project "${project_name}" Exists In System
         Log    Project "${project_name}" is Deleting, waiting for deletion to complete    INFO
         Wait Until Project Deleted    ${project_id}    timeout=3 min
         Log    Project "${project_name}" fully deleted, creating new one    INFO
-        Create Project With Validation    project_name=${project_name}
+        Create Shared Project With Validation    project_name=${project_name}
         RETURN
     ELSE IF    "${status}" in ["Deleted", "Failed"]
         Log    Project "${project_name}" is ${status}, creating new one    INFO
@@ -318,7 +323,7 @@ Project "${project_name}" Exists In System
             Log    Project ${project_id} cleanup failed, proceeding    DEBUG
         END
         Wait Until Project Deleted    ${project_id}    timeout=1 min
-        Create Project With Validation    project_name=${project_name}
+        Create Shared Project With Validation    project_name=${project_name}
         RETURN
     END
 
@@ -326,8 +331,13 @@ Project "${project_name}" Exists In System
     Set Test Variable    ${TEST_PROJECT_ID}    ${project_id}
     Set Test Variable    ${TEST_PROJECT}    ${project}
 
-    # Track for cleanup (ensures Suite Teardown deletes projects from interrupted runs)
-    Track Project For Cleanup    ${project_id}
+    # Adopted, not created. Registered for run-scoped cleanup only, never for per-test cleanup:
+    # creating a project and borrowing one are different acts, and only the former may be torn
+    # down by the test that did it. Tracking an adopted project the same way made every suite
+    # using a per-test teardown delete and recreate the shared fixed-name project once per test,
+    # after which the next test's setup waited out the still in-flight deletion in the branch
+    # above. The interrupted-run guarantee is preserved by Clean Up Adopted Projects.
+    Track Adopted Project For Suite Cleanup    ${project_id}
 
     Log    Reusing existing project "${project_name}" (ID: ${TEST_PROJECT_ID})    INFO
 
@@ -494,17 +504,28 @@ Updated Memory Quota Is Prepared
     Set Test Variable    ${TEST_PROJECT_DATA}    ${project_data}
 
 Updated GPU Quota Is Prepared
-    [Documentation]    Prepares updated GPU quota allocation preserving other values
-    ${current_quota}=    Set Variable    ${TEST_RESPONSE.json()['quota']}
+    [Documentation]    Prepares the smallest GPU quota increase that fits current cluster allocations.
+    ...    Polls for capacity released by asynchronous project cleanup.
+    ...    Requires: TEST_CLUSTER_ID, TEST_RESPONSE
+    ...    Sets: TEST_QUOTA_DATA, TEST_PROJECT_DATA
+    Wait Until Keyword Succeeds    2 min    5 sec
+    ...    Prepare Admissible GPU Quota Increase
 
-    # Convert to integers to ensure proper JSON serialization
-    ${gpu_int}=    Convert To Integer    3
+Prepare Admissible GPU Quota Increase
+    [Documentation]    Builds an update using live cluster quota allocation.
+    ${current_quota}=    Set Variable    ${TEST_RESPONSE.json()['quota']}
+    ${cluster_response}=    Get cluster    ${TEST_CLUSTER_ID}    expected_status=200
+    ${cluster}=    Set Variable    ${cluster_response.json()}
+    ${gpu_count}=    Next GPU Quota
+    ...    ${current_quota['gpuCount']}
+    ...    ${cluster['availableResources']['gpuCount']}
+    ...    ${cluster['allocatedResources']['gpuCount']}
 
     ${quota_data}=    Create Dictionary
     ...    cpuMilliCores=${current_quota['cpuMilliCores']}
     ...    memoryBytes=${current_quota['memoryBytes']}
     ...    ephemeralStorageBytes=${current_quota['ephemeralStorageBytes']}
-    ...    gpuCount=${gpu_int}
+    ...    gpuCount=${gpu_count}
     ${project_data}=    Create Dictionary
     ...    description=${TEST_PROJECT_DESC}
     ...    quota=${quota_data}
@@ -663,6 +684,27 @@ Delete project request is sent
     Set Test Variable    ${TEST_RESPONSE}    ${response}
     Log    Project ${TEST_PROJECT_ID} deletion requested    DEBUG
     RETURN    ${response}
+
+The user deletes the project
+    [Documentation]    Deletes the current project and preserves its name and identity for replacement checks.
+    Set Test Variable    ${TEST_DELETED_PROJECT_ID}    ${TEST_PROJECT_ID}
+    Set Test Variable    ${TEST_DELETED_PROJECT_NAME}    ${TEST_PROJECT}[name]
+    Delete project request is sent
+    Response status should be 204
+
+The user creates a project with the same name
+    [Documentation]    Creates a replacement after the deleted project releases its name.
+    Create Project With Validation    project_name=${TEST_DELETED_PROJECT_NAME}
+
+The replacement project should exist
+    [Documentation]    Verifies that the same-named replacement is available through the API.
+    Project should exist in database
+    Should Be Equal    ${TEST_PROJECT}[name]    ${TEST_DELETED_PROJECT_NAME}
+    ...    msg=Replacement project name differs from deleted project: ${TEST_PROJECT}[name] != ${TEST_DELETED_PROJECT_NAME}
+
+The replacement project should have a different identity from the deleted project
+    [Documentation]    Verifies that recreation produced a new project.
+    Project ID Should Be Different Than "${TEST_DELETED_PROJECT_ID}"
 
 Add users to project request is sent
     [Documentation]    Sends request to add users to a project.
@@ -872,10 +914,8 @@ The workload should be pre-empted
     ...    Verify idle workload pre-empted    ${namespace}    ${TEST_IDLE_DEPLOY_NAME}
 
 The project should not exist in database
-    [Documentation]    Verifies the project has soft delete status (Deleting or Deleted)
-    ...    Projects use soft delete: status changes to "Deleting" then "Deleted"
-    Wait Until Keyword Succeeds    2 min    2 sec
-    ...    Project status should be one of    Deleting, Deleted
+    [Documentation]    Uses API 404 as the observable signal that hard deletion removed the row and released its name.
+    Wait Until Project Deleted    ${TEST_PROJECT_ID}    timeout=2 min
 
 Project description in database should be "${expected_desc}"
     [Documentation]    Verifies project description is updated in database
@@ -1052,6 +1092,64 @@ User should not be member of project
     END
 
     Should Not Be True    ${is_member}    msg=User ${TEST_USER_ID} is still a member of project ${TEST_PROJECT_ID}
+
+Create Shared Project With Validation
+    [Documentation]    Creates a project used by shared-project setup and moves its cleanup to
+    ...    run scope. Normal creation records the new ID in suite-scoped CREATED_PROJECT_IDS;
+    ...    leaving it there lets the first child-suite teardown delete a project later suites
+    ...    still expect to reuse. Remove this one ID from that list, then add it to the same
+    ...    deduplicated global list used for projects adopted from an earlier run.
+    [Arguments]    ${project_name}    ${quota_data}=${None}
+    Create Project With Validation    project_name=${project_name}    quota_data=${quota_data}
+    ${created}=    Get Variable Value    ${CREATED_PROJECT_IDS}    ${None}
+    ${tracked_as_created}=    Evaluate    $created is not None and $TEST_PROJECT_ID in $created
+    IF    ${tracked_as_created}
+        Remove Values From List    ${CREATED_PROJECT_IDS}    ${TEST_PROJECT_ID}
+    END
+    Track Adopted Project For Suite Cleanup    ${TEST_PROJECT_ID}
+
+Track Adopted Project For Suite Cleanup
+    [Documentation]    Records a shared project for run-scoped cleanup, whether this run adopted
+    ...    or created it. Deliberately kept out of CREATED_PROJECT_IDS, so neither the generic
+    ...    "Clean Up All Tracked Resources" teardown nor a per-suite project teardown destroys a
+    ...    project later tests still share. Recorded once per id — many tests use the same shared
+    ...    project — and at GLOBAL scope, because the run-scoped teardown that consumes it lives
+    ...    in the directory suite, which cannot see variables set inside a child suite.
+    [Arguments]    ${project_id}
+    ${adopted}=    Get Variable Value    ${ADOPTED_PROJECT_IDS}    ${None}
+    IF    $adopted is None
+        @{adopted}=    Create List
+        Set Global Variable    ${ADOPTED_PROJECT_IDS}    ${adopted}
+    END
+    ${already}=    Evaluate    $project_id in $ADOPTED_PROJECT_IDS
+    IF    not ${already}
+        Append To List    ${ADOPTED_PROJECT_IDS}    ${project_id}
+        Log    Tracking adopted project ${project_id} for run-scoped cleanup    DEBUG
+    END
+
+Clean Up Adopted Projects
+    [Documentation]    Deletes the shared projects tracked for run-scoped cleanup — whether this run
+    ...    adopted them or created them via Create Shared Project With Validation. Run once at the
+    ...    directory-suite teardown of both the AIRM and AIWB suites. This is what preserves the
+    ...    guarantee that a project left behind by a previous interrupted run is still removed,
+    ...    without letting a per-test teardown delete a shared project other tests are still using.
+    ${adopted}=    Get Variable Value    ${ADOPTED_PROJECT_IDS}    ${None}
+    IF    $adopted is None    RETURN
+    ${count}=    Get Length    ${adopted}
+    IF    ${count} == 0    RETURN    END
+    Log    Deleting ${count} adopted project(s) at suite teardown    INFO
+
+    FOR    ${project_id}    IN    @{adopted}
+        TRY
+            Delete project    ${project_id}    expected_status=any
+        EXCEPT    AS    ${error}
+            Log    Failed to delete adopted project ${project_id}: ${error}    WARN
+        END
+    END
+
+    @{empty_list}=    Create List
+    Set Global Variable    ${ADOPTED_PROJECT_IDS}    ${empty_list}
+    Log    Adopted project cleanup complete    INFO
 
 Clean Up All Created Projects With Wait
     [Documentation]    Extended cleanup that waits for complete project deletion
@@ -1348,6 +1446,83 @@ Secret assignment should be synced
     [Documentation]    Waits for the secret assignment to reach synced status
     Wait Until Keyword Succeeds    2 min    5 sec
     ...    Verify secret assignment is synced
+
+MinIO credentials are available in the current project
+    [Documentation]    Ensures the minio-credentials-fetcher ExternalSecret is assigned to the
+    ...    current test project, so the minio-credentials Secret lands in the project namespace.
+    ...    Mirrors airm-api configure.sh (add_minio_secret_and_storage_to_project), which only
+    ...    provisions the demo project at install; E2E suites create their own projects and would
+    ...    otherwise never get minio-credentials, failing storage/dataset/adapter tests.
+    ...    Best-effort: this runs in universal project setup, so it must NEVER crash setup —
+    ...    a provisioning failure (permissions, a deployed API whose secrets shape differs from
+    ...    HEAD, etc.) is logged and swallowed, and the MinIO-dependent storage/dataset tests then
+    ...    fail on their own with a clear signal instead of taking down every project-creating test.
+    ...    Requires: TEST_PROJECT_ID    Idempotent: skips if already assigned.
+    TRY
+        VAR    ${secret_name}    minio-credentials-fetcher
+        ${response}=    Get secrets    expected_status=any
+        # Return the full matching item — tolerant of both supported name shapes — so its id comes
+        # from one read. Python owns the lookup because Robot's Evaluate cannot reliably expose a
+        # local scalar variable inside generator-expression scope.
+        ${match}=    Find Secret By Name    ${response}    ${secret_name}
+        IF    $match is None
+            Assign fresh MinIO credentials fetcher to current project    ${secret_name}
+            RETURN
+        END
+        ${secret_id}=    Get From Dictionary    ${match}    id
+        # Use the additive project-scoped endpoint. The organization-scoped assign endpoint replaces
+        # the complete assignment set and can revoke a project added concurrently after this read.
+        ${assign_response}=    Assign secret to project
+        ...    ${TEST_PROJECT_ID}    ${secret_id}    expected_status=any
+        # Already-assigned is the endpoint's only ValidationException, returned as HTTP 400
+        # ("Secret already assigned to this Project"), so treat 400 as the idempotent no-op.
+        IF    ${assign_response.status_code} == 204
+            Log    Assigned minio-credentials-fetcher to project ${TEST_PROJECT_ID}    INFO
+        ELSE IF    ${assign_response.status_code} == 400
+            Log    minio-credentials-fetcher already assigned to project ${TEST_PROJECT_ID}    DEBUG
+        ELSE
+            Log    Assigning minio-credentials-fetcher to project ${TEST_PROJECT_ID} failed (HTTP ${assign_response.status_code}): ${assign_response.text}    WARN
+        END
+    EXCEPT    AS    ${error}
+        Log    MinIO credential provisioning skipped (best-effort): ${error}    WARN
+    END
+
+Assign fresh MinIO credentials fetcher to current project
+    [Documentation]    Creates the minio-credentials-fetcher ExternalSecret assigned to the current
+    ...    project, mirroring the manifest airm-api configure.sh installs for the demo project.
+    [Arguments]    ${secret_name}
+    ${manifest}=    Catenate    SEPARATOR=\n
+    ...    apiVersion: external-secrets.io/v1beta1
+    ...    kind: ExternalSecret
+    ...    metadata:
+    ...    ${SPACE}${SPACE}name: ${secret_name}
+    ...    spec:
+    ...    ${SPACE}${SPACE}data:
+    ...    ${SPACE}${SPACE}${SPACE}${SPACE}- remoteRef:
+    ...    ${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}key: minio-api-access-key
+    ...    ${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}property: value
+    ...    ${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}secretKey: minio-access-key
+    ...    ${SPACE}${SPACE}${SPACE}${SPACE}- remoteRef:
+    ...    ${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}key: minio-api-secret-key
+    ...    ${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}property: value
+    ...    ${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}${SPACE}secretKey: minio-secret-key
+    ...    ${SPACE}${SPACE}refreshInterval: 1h
+    ...    ${SPACE}${SPACE}secretStoreRef:
+    ...    ${SPACE}${SPACE}${SPACE}${SPACE}kind: ClusterSecretStore
+    ...    ${SPACE}${SPACE}${SPACE}${SPACE}name: openbao-secret-store
+    ...    ${SPACE}${SPACE}target:
+    ...    ${SPACE}${SPACE}${SPACE}${SPACE}creationPolicy: Owner
+    ...    ${SPACE}${SPACE}${SPACE}${SPACE}name: minio-credentials
+    @{project_ids}=    Create List    ${TEST_PROJECT_ID}
+    ${secret_data}=    Create Dictionary
+    ...    name=${secret_name}
+    ...    type=ExternalSecret
+    ...    useCase=S3
+    ...    scope=Organization
+    ...    manifest=${manifest}
+    ...    projectIds=${project_ids}
+    Create secret    secret_data=${secret_data}    expected_status=any
+    Log    Created minio-credentials-fetcher for project ${TEST_PROJECT_ID}    INFO
 
 Verify secret assignment is synced
     [Documentation]    Helper to verify secret project assignment is synced

@@ -5,6 +5,7 @@
 """Tests for the generic CRD polling framework."""
 
 import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -43,8 +44,7 @@ def test_register_syncer_success(clean_poller_state):
 
     register_syncer(test_syncer)
 
-    assert test_syncer in clean_poller_state.syncers
-    assert len(clean_poller_state.syncers) == 1
+    assert [registered.syncer for registered in clean_poller_state.syncers] == [test_syncer]
 
 
 def test_register_syncer_duplicate(clean_poller_state):
@@ -71,9 +71,7 @@ def test_register_syncer_multiple(clean_poller_state):
     register_syncer(syncer1)
     register_syncer(syncer2)
 
-    assert len(clean_poller_state.syncers) == 2
-    assert syncer1 in clean_poller_state.syncers
-    assert syncer2 in clean_poller_state.syncers
+    assert [registered.syncer for registered in clean_poller_state.syncers] == [syncer1, syncer2]
 
 
 # =============================================================================
@@ -203,6 +201,38 @@ async def test_poll_resources_no_session_maker(clean_poller_state):
 
     # Should not raise
     await _poll_resources()
+
+
+@pytest.mark.asyncio
+@patch("app.dispatch.poller.database.session_maker")
+@patch("app.dispatch.poller.get_kube_client")
+async def test_poll_resources_does_not_get_kube_client_when_no_syncers_are_due(
+    mock_get_client, mock_session_maker, clean_poller_state
+):
+    """Test polling does not require Kubernetes when no syncer needs to run."""
+
+    await _poll_resources()
+
+    mock_get_client.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("app.dispatch.poller.database.session_maker")
+@patch("app.dispatch.poller.get_kube_client")
+async def test_poll_resources_does_not_get_kube_client_before_an_interval(
+    mock_get_client, mock_session_maker, clean_poller_state
+):
+    """Test an interval-gated syncer is skipped until it is due."""
+
+    async def test_syncer(session, kube_client):
+        pass
+
+    register_syncer(test_syncer, interval_seconds=60)
+    clean_poller_state.syncers[0].last_run = time.monotonic()
+
+    await _poll_resources()
+
+    mock_get_client.assert_not_called()
 
 
 @pytest.mark.asyncio

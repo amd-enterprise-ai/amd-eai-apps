@@ -5,11 +5,12 @@
 
 import base64
 import json
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from kubernetes_asyncio.client import ApiException, V1ObjectMeta, V1Secret
+from kubernetes_asyncio.client import ApiException, V1ConfigMap, V1ObjectMeta, V1Secret
 
 from api_common.exceptions import (
     ExternalServiceError,
@@ -18,10 +19,12 @@ from api_common.exceptions import (
     PreconditionNotMetException,
     ValidationException,
 )
+from api_common.secrets import SecretUseCase
 from app.aims.crds import AIMProfileResource
 from app.custom_models.constants import (
     AIM_DEPLOYMENT_IMAGE_REF_ANNOTATION,
     HF_MAX_RESPONSE_BYTES,
+    SOURCE_METADATA_MAX_BYTES,
 )
 from app.custom_models.schemas import PreviewRequest
 from app.custom_models.service import (
@@ -31,6 +34,10 @@ from app.custom_models.service import (
     preview_model_source,
 )
 from app.minio import MinioClient
+from app.minio.config import MINIO_BUCKET, MINIO_URL
+from app.secrets.constants import AIRM_USE_CASE_LABEL, USE_CASE_LABEL
+from app.storages.constants import STORAGE_CONFIGMAP_LABEL, STORAGE_TYPE_LABEL
+from app.storages.enums import StorageType
 
 HUB_RESPONSE = {
     "id": "meta-llama/Meta-Llama-3-8B-Instruct",
@@ -65,6 +72,44 @@ def _make_k8s_secret_from_raw_token_value(raw_token_value: str) -> V1Secret:
         data={"token": raw_token_value},
         metadata=V1ObjectMeta(labels={}),
     )
+
+
+def _make_k8s_secret_with_data(data: dict[str, str], labels: dict[str, str] | None = None) -> V1Secret:
+    """Build a typed K8s V1Secret with arbitrary pre-encoded data keys."""
+    return V1Secret(
+        data=data,
+        metadata=V1ObjectMeta(labels=labels or {}),
+    )
+
+
+def _make_s3_storage_config_map(
+    secret_name: str = "s3-creds",
+    bucket_url: str | None = None,
+    region: str | None = None,
+    access_key_name: str = "AWS_ACCESS_KEY_ID",
+    secret_key_name: str = "AWS_SECRET_ACCESS_KEY",
+) -> V1ConfigMap:
+    """Build a typed S3 storage ConfigMap that points to a credentials secret."""
+    data: dict[str, str] = {
+        "TYPE": StorageType.S3.value,
+        "SECRET_NAME": secret_name,
+        "ACCESS_KEY_NAME": access_key_name,
+        "SECRET_KEY_NAME": secret_key_name,
+    }
+    if bucket_url:
+        data["BUCKET_URL"] = bucket_url
+    if region:
+        data["REGION"] = region
+    return V1ConfigMap(
+        data=data,
+        metadata=V1ObjectMeta(labels={STORAGE_CONFIGMAP_LABEL: "true", STORAGE_TYPE_LABEL: StorageType.S3.value}),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _default_s3_storage_config(mock_kube_client: AsyncMock) -> None:
+    """Default every test to a valid S3 storage config for preview lookups."""
+    mock_kube_client.core_v1.read_namespaced_config_map = AsyncMock(return_value=_make_s3_storage_config_map())
 
 
 def _mock_hub_response(status_code: int, body: bytes, chunk_size: int | None = None):  # type: ignore[no-untyped-def]
@@ -125,6 +170,749 @@ async def test_preview_success_basic(mock_kube_client: AsyncMock, test_namespace
     assert result.gated is True
     assert result.hf_token_recommended is True
     assert result.layout_hint == "safetensors"
+    assert result.warnings == []
+
+
+@pytest.mark.asyncio
+async def test_preview_hf_source_does_not_read_source_files_for_tags(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """Hub preview keeps using Hub tags directly; S3-only file discovery must not leak into it."""
+    with (
+        patch("app.custom_models.service._fetch_hub_model", return_value={**HUB_RESPONSE, "gated": False}),
+        patch("app.custom_models.service._discover_s3_tags") as mock_discover,
+    ):
+        result = await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(source="meta-llama/Meta-Llama-3-8B-Instruct"),
+        )
+
+    mock_discover.assert_not_called()
+    assert result.tags == HUB_RESPONSE["tags"]
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_validates_layout_and_returns_metadata(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """S3 preview validates source/secret and returns discovered weight metadata."""
+    secret_data = {
+        "AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode(),
+        "AWS_SECRET_ACCESS_KEY": base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(
+        return_value=_make_k8s_secret_with_data(secret_data, labels={USE_CASE_LABEL: SecretUseCase.S3.value})
+    )
+
+    listed_objects = [
+        MagicMock(object_name="path/to/model/model-00001-of-00002.safetensors", size=4_000_000_000),
+        MagicMock(object_name="path/to/model/model-00002-of-00002.safetensors", size=4_000_000_000),
+        MagicMock(object_name="path/to/model/model.safetensors.index.json", size=3_012),
+        MagicMock(object_name="path/to/model/config.json", size=820),
+        MagicMock(object_name="path/to/model/tokenizer.json", size=1_024),
+    ]
+    minio_client = MagicMock()
+    minio_client.client.list_objects = MagicMock(return_value=listed_objects)
+
+    with (
+        patch("app.custom_models.service._fetch_hub_model") as mock_fetch,
+        patch("app.custom_models.service.MinioClient", return_value=minio_client),
+    ):
+        result = await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(
+                source_type="s3",
+                source="s3://my-bucket/path/to/model/",
+                s3_storage_name="s3-storage",
+            ),
+        )
+    mock_fetch.assert_not_called()
+    minio_client.client.list_objects.assert_called_once_with("my-bucket", prefix="path/to/model/", recursive=True)
+    assert result.source_type == "s3"
+    assert result.repo_id == "s3://my-bucket/path/to/model"
+    assert result.display_name == "model"
+    assert result.layout_hint == "safetensors"
+    assert result.tags == []
+    assert len(result.weight_files) == 4
+    assert result.warnings == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("access_alias", "secret_alias"),
+    [
+        ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"),
+        ("awsAccessKeyId", "awsSecretAccessKey"),
+        ("S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"),
+        ("MINIO_ACCESS_KEY", "MINIO_SECRET_KEY"),
+        ("ACCESS_KEY", "SECRET_KEY"),
+    ],
+)
+async def test_preview_s3_source_accepts_common_credential_aliases(
+    mock_kube_client: AsyncMock,
+    test_namespace: str,
+    access_alias: str,
+    secret_alias: str,
+) -> None:
+    """S3 preview uses credential key names configured on the S3 storage."""
+    mock_kube_client.core_v1.read_namespaced_config_map = AsyncMock(
+        return_value=_make_s3_storage_config_map(
+            bucket_url="https://s3.us-west-2.amazonaws.com/my-bucket",
+            region="us-west-2",
+            access_key_name=access_alias,
+            secret_key_name=secret_alias,
+        )
+    )
+    secret_data = {
+        access_alias: base64.b64encode(b"access-key").decode(),
+        secret_alias: base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(return_value=_make_k8s_secret_with_data(secret_data))
+
+    listed_objects = [
+        MagicMock(object_name="path/to/model/model-00001-of-00001.safetensors", size=4_000_000_000),
+        MagicMock(object_name="path/to/model/config.json", size=820),
+        MagicMock(object_name="path/to/model/tokenizer.json", size=1_024),
+    ]
+    minio_client = MagicMock()
+    minio_client.client.list_objects = MagicMock(return_value=listed_objects)
+
+    with patch("app.custom_models.service.MinioClient", return_value=minio_client) as mock_minio_client:
+        result = await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(
+                source_type="s3",
+                source="s3://my-bucket/path/to/model/",
+                s3_storage_name="s3-storage",
+            ),
+        )
+
+    mock_minio_client.assert_called_once_with(
+        host="https://s3.us-west-2.amazonaws.com",
+        access_key="access-key",
+        secret_key="secret-key",
+        region="us-west-2",
+    )
+    assert result.source_type == "s3"
+    assert result.repo_id == "s3://my-bucket/path/to/model"
+    assert result.warnings == []
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_without_bucket_url_uses_default_minio_for_default_bucket(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """Missing storage bucketUrl falls back to MINIO_URL for default bucket."""
+    secret_data = {
+        "AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode(),
+        "AWS_SECRET_ACCESS_KEY": base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(return_value=_make_k8s_secret_with_data(secret_data))
+
+    listed_objects = [
+        MagicMock(object_name="path/to/model/model-00001-of-00001.safetensors", size=4_000_000_000),
+        MagicMock(object_name="path/to/model/config.json", size=820),
+        MagicMock(object_name="path/to/model/tokenizer.json", size=1_024),
+    ]
+    minio_client = MagicMock()
+    minio_client.client.list_objects = MagicMock(return_value=listed_objects)
+
+    with patch("app.custom_models.service.MinioClient", return_value=minio_client) as mock_minio_client:
+        result = await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(
+                source_type="s3",
+                source=f"s3://{MINIO_BUCKET}/path/to/model/",
+                s3_storage_name="s3-storage",
+            ),
+        )
+
+    mock_minio_client.assert_called_once_with(
+        host=MINIO_URL,
+        access_key="access-key",
+        secret_key="secret-key",
+        region=None,
+    )
+    assert result.repo_id == f"s3://{MINIO_BUCKET}/path/to/model"
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_without_bucket_url_uses_default_minio_for_non_default_bucket(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """Missing storage bucketUrl falls back to MINIO_URL for non-default bucket."""
+    secret_data = {
+        "AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode(),
+        "AWS_SECRET_ACCESS_KEY": base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(return_value=_make_k8s_secret_with_data(secret_data))
+
+    listed_objects = [
+        MagicMock(object_name="path/to/model/model-00001-of-00001.safetensors", size=4_000_000_000),
+        MagicMock(object_name="path/to/model/config.json", size=820),
+        MagicMock(object_name="path/to/model/tokenizer.json", size=1_024),
+    ]
+    minio_client = MagicMock()
+    minio_client.client.list_objects = MagicMock(return_value=listed_objects)
+
+    with patch("app.custom_models.service.MinioClient", return_value=minio_client) as mock_minio_client:
+        result = await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(
+                source_type="s3",
+                source="s3://external-bucket/path/to/model/",
+                s3_storage_name="s3-storage",
+            ),
+        )
+
+    mock_minio_client.assert_called_once_with(
+        host=MINIO_URL,
+        access_key="access-key",
+        secret_key="secret-key",
+        region=None,
+    )
+    assert result.repo_id == "s3://external-bucket/path/to/model"
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_requires_s3_secret_keys(mock_kube_client: AsyncMock, test_namespace: str) -> None:
+    """S3 preview fails fast when required credential keys are missing from the secret."""
+    secret_data = {"AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode()}
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(return_value=_make_k8s_secret_with_data(secret_data))
+
+    with pytest.raises(ValidationException, match="missing required secret key"):
+        await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(
+                source_type="s3",
+                source="s3://my-bucket/path/to/model/",
+                s3_storage_name="s3-storage",
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_warns_on_missing_required_layout_files(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """S3 preview succeeds with warnings when HF-compatible layout files are missing."""
+    secret_data = {
+        "AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode(),
+        "AWS_SECRET_ACCESS_KEY": base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(return_value=_make_k8s_secret_with_data(secret_data))
+
+    listed_objects = [MagicMock(object_name="path/to/model/model-00001-of-00001.safetensors", size=4_000_000_000)]
+    minio_client = MagicMock()
+    minio_client.client.list_objects = MagicMock(return_value=listed_objects)
+
+    with patch("app.custom_models.service.MinioClient", return_value=minio_client):
+        result = await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(
+                source_type="s3",
+                source="s3://my-bucket/path/to/model/",
+                s3_storage_name="s3-storage",
+            ),
+        )
+    assert any("missing recommended file(s): config.json" in warning for warning in result.warnings)
+    assert any("should include tokenizer.json or tokenizer_config.json" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_warns_when_sharded_safetensors_missing_index(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """Sharded safetensors without an index should succeed with a warning."""
+    secret_data = {
+        "AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode(),
+        "AWS_SECRET_ACCESS_KEY": base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(return_value=_make_k8s_secret_with_data(secret_data))
+
+    listed_objects = [
+        MagicMock(object_name="path/to/model/model-00001-of-00002.safetensors", size=4_000_000_000),
+        MagicMock(object_name="path/to/model/model-00002-of-00002.safetensors", size=4_000_000_000),
+        MagicMock(object_name="path/to/model/config.json", size=820),
+        MagicMock(object_name="path/to/model/tokenizer.json", size=1_024),
+    ]
+    minio_client = MagicMock()
+    minio_client.client.list_objects = MagicMock(return_value=listed_objects)
+
+    with patch("app.custom_models.service.MinioClient", return_value=minio_client):
+        result = await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(
+                source_type="s3",
+                source="s3://my-bucket/path/to/model/",
+                s3_storage_name="s3-storage",
+            ),
+        )
+    assert any("missing a '*.safetensors.index.json' file" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_warns_when_no_safetensors_found(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """No safetensors should succeed with a warning instead of blocking preview."""
+    secret_data = {
+        "AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode(),
+        "AWS_SECRET_ACCESS_KEY": base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(return_value=_make_k8s_secret_with_data(secret_data))
+
+    listed_objects = [
+        MagicMock(object_name="path/to/model/config.json", size=820),
+        MagicMock(object_name="path/to/model/tokenizer.json", size=1_024),
+    ]
+    minio_client = MagicMock()
+    minio_client.client.list_objects = MagicMock(return_value=listed_objects)
+
+    with patch("app.custom_models.service.MinioClient", return_value=minio_client):
+        result = await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(
+                source_type="s3",
+                source="s3://my-bucket/path/to/model/",
+                s3_storage_name="s3-storage",
+            ),
+        )
+    assert any("should include at least one '*.safetensors' weight file" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_root_with_nested_weights_avoids_false_layout_warnings(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """Root prefixes with a weights/ subtree should pass layout checks."""
+    secret_data = {
+        "AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode(),
+        "AWS_SECRET_ACCESS_KEY": base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(return_value=_make_k8s_secret_with_data(secret_data))
+
+    listed_objects = [
+        MagicMock(object_name="path/to/model/manifest.yaml", size=2_048),
+        MagicMock(object_name="path/to/model/weights/config.json", size=820),
+        MagicMock(object_name="path/to/model/weights/tokenizer.json", size=1_024),
+        MagicMock(object_name="path/to/model/weights/model.safetensors", size=4_000_000_000),
+    ]
+    minio_client = MagicMock()
+    minio_client.client.list_objects = MagicMock(return_value=listed_objects)
+
+    with patch("app.custom_models.service.MinioClient", return_value=minio_client):
+        result = await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(
+                source_type="s3",
+                source="s3://my-bucket/path/to/model/",
+                s3_storage_name="s3-storage",
+            ),
+        )
+
+    assert not any("missing recommended file(s): config.json" in warning for warning in result.warnings)
+    assert not any("should include tokenizer.json or tokenizer_config.json" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_rejects_missing_prefix_listing(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """S3 preview reports a dedicated missing-folder error when the prefix does not exist."""
+    secret_data = {
+        "AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode(),
+        "AWS_SECRET_ACCESS_KEY": base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(return_value=_make_k8s_secret_with_data(secret_data))
+
+    minio_client = MagicMock()
+    minio_client.client.list_objects = MagicMock(return_value=[])
+
+    with patch("app.custom_models.service.MinioClient", return_value=minio_client):
+        with pytest.raises(ValidationException, match="does not exist"):
+            await preview_model_source(
+                kube_client=mock_kube_client,
+                namespace=test_namespace,
+                request=PreviewRequest(
+                    source_type="s3",
+                    source="s3://my-bucket/path/to/model/",
+                    s3_storage_name="s3-storage",
+                ),
+            )
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_rejects_empty_prefix_listing(mock_kube_client: AsyncMock, test_namespace: str) -> None:
+    """S3 preview reports a separate empty-folder error when the prefix marker exists but has no files."""
+    secret_data = {
+        "AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode(),
+        "AWS_SECRET_ACCESS_KEY": base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(return_value=_make_k8s_secret_with_data(secret_data))
+
+    minio_client = MagicMock()
+    minio_client.client.list_objects = MagicMock(return_value=[MagicMock(object_name="path/to/model/", size=0)])
+
+    with patch("app.custom_models.service.MinioClient", return_value=minio_client):
+        with pytest.raises(ValidationException, match="is empty"):
+            await preview_model_source(
+                kube_client=mock_kube_client,
+                namespace=test_namespace,
+                request=PreviewRequest(
+                    source_type="s3",
+                    source="s3://my-bucket/path/to/model/",
+                    s3_storage_name="s3-storage",
+                ),
+            )
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_rejects_unknown_use_case_label(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """S3 preview raises 400 when the secret carries an unrecognized use-case label value."""
+    secret_data = {
+        "AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode(),
+        "AWS_SECRET_ACCESS_KEY": base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(
+        return_value=_make_k8s_secret_with_data(secret_data, labels={USE_CASE_LABEL: "not-a-valid-use-case"})
+    )
+
+    with pytest.raises(ValidationException, match="unrecognized use-case label value"):
+        await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(
+                source_type="s3",
+                source="s3://my-bucket/path/to/model/",
+                s3_storage_name="s3-storage",
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_rejects_non_s3_airm_fallback_use_case_secret(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """S3 preview should reject non-S3 use-case labels on the AIRM fallback key too."""
+    secret_data = {
+        "AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode(),
+        "AWS_SECRET_ACCESS_KEY": base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(
+        return_value=_make_k8s_secret_with_data(
+            secret_data, labels={AIRM_USE_CASE_LABEL: SecretUseCase.HUGGING_FACE.value}
+        )
+    )
+
+    with pytest.raises(ForbiddenException, match="cannot be used for S3 preview"):
+        await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(
+                source_type="s3",
+                source="s3://my-bucket/path/to/model/",
+                s3_storage_name="s3-storage",
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_rejects_non_s3_use_case_secret(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """S3 preview returns a distinct forbidden error for non-S3 secret labels."""
+    secret_data = {
+        "AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode(),
+        "AWS_SECRET_ACCESS_KEY": base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(
+        return_value=_make_k8s_secret_with_data(secret_data, labels={USE_CASE_LABEL: SecretUseCase.HUGGING_FACE.value})
+    )
+
+    with pytest.raises(ForbiddenException, match="cannot be used for S3 preview"):
+        await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(
+                source_type="s3",
+                source="s3://my-bucket/path/to/model/",
+                s3_storage_name="s3-storage",
+            ),
+        )
+
+
+S3_CARD_WITH_PROVENANCE = b"""---
+base_model: mistralai/Mistral-7B-v0.1
+tags:
+  - conversational
+---
+
+# Fine-tuned model
+"""
+
+S3_CONFIG_JSON = b'{"model_type": "mistral", "architectures": ["MistralForCausalLM"]}'
+
+
+def _make_s3_object_reader(contents: dict[str, bytes]) -> MagicMock:
+    """Build a get_object stub serving ``contents`` keyed by full object name.
+
+    Object names absent from ``contents`` raise, mirroring a denied or missing
+    read so tests can assert discovery degrades instead of failing.
+    """
+
+    def _get_object(bucket: str, object_name: str) -> MagicMock:
+        if object_name not in contents:
+            raise RuntimeError(f"no such object: {object_name}")
+        payload = contents[object_name]
+        response = MagicMock(spec_set=["read", "close", "release_conn"])
+        response.read = MagicMock(return_value=payload)
+        return response
+
+    return MagicMock(side_effect=_get_object)
+
+
+def _make_s3_preview_client(listed_objects: list[MagicMock], contents: dict[str, bytes]) -> MagicMock:
+    minio_client = MagicMock()
+    minio_client.client.list_objects = MagicMock(return_value=listed_objects)
+    minio_client.client.get_object = _make_s3_object_reader(contents)
+    return minio_client
+
+
+def _s3_listing(*relative_paths: str) -> list[MagicMock]:
+    return [MagicMock(object_name=f"path/to/model/{relative_path}", size=1_024) for relative_path in relative_paths]
+
+
+async def _preview_s3_with(
+    mock_kube_client: AsyncMock,
+    test_namespace: str,
+    minio_client: MagicMock,
+    hub_patch: Any = None,
+) -> Any:
+    """Run an S3 preview against a prepared MinIO stub with valid credentials."""
+    secret_data = {
+        "AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode(),
+        "AWS_SECRET_ACCESS_KEY": base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(
+        return_value=_make_k8s_secret_with_data(secret_data, labels={USE_CASE_LABEL: SecretUseCase.S3.value})
+    )
+
+    with (
+        patch("app.custom_models.service.MinioClient", return_value=minio_client),
+        patch("app.custom_models.service._fetch_hub_model", **(hub_patch or {"return_value": {}})) as mock_fetch,
+    ):
+        result = await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(
+                source_type="s3",
+                source="s3://my-bucket/path/to/model/",
+                s3_storage_name="s3-storage",
+            ),
+        )
+    return result, mock_fetch
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_resolves_tags_from_base_model_provenance(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """A card citing a resolvable base model yields that model's catalog tags."""
+    minio_client = _make_s3_preview_client(
+        _s3_listing("model.safetensors", "config.json", "README.md", "tokenizer.json"),
+        {
+            "path/to/model/README.md": S3_CARD_WITH_PROVENANCE,
+            "path/to/model/config.json": S3_CONFIG_JSON,
+        },
+    )
+    hub_payload = {"tags": ["text-generation", "mistral"], "pipeline_tag": "text-generation"}
+
+    result, mock_fetch = await _preview_s3_with(
+        mock_kube_client, test_namespace, minio_client, {"return_value": hub_payload}
+    )
+
+    assert result.tags == [
+        "text-generation",
+        "mistral",
+        "conversational",
+    ]
+    assert result.pipeline_tag == "text-generation"
+    # Provenance is resolved by repo id against the fixed Hub base, with no
+    # revision and — critically — no namespace token attached.
+    mock_fetch.assert_awaited_once_with("mistralai/Mistral-7B-v0.1", None, None)
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_falls_back_to_card_tags_when_hub_lookup_fails(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """An unreachable base model degrades to author-written card tags, not an error."""
+    minio_client = _make_s3_preview_client(
+        _s3_listing("model.safetensors", "config.json", "README.md", "tokenizer.json"),
+        {
+            "path/to/model/README.md": S3_CARD_WITH_PROVENANCE,
+            "path/to/model/config.json": S3_CONFIG_JSON,
+        },
+    )
+
+    result, _ = await _preview_s3_with(
+        mock_kube_client,
+        test_namespace,
+        minio_client,
+        {"side_effect": ExternalServiceError("hub is down")},
+    )
+
+    assert result.tags == ["conversational"]
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_returns_no_tags_when_only_config_exists(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """Framework configuration is not treated as display metadata."""
+    minio_client = _make_s3_preview_client(
+        _s3_listing("model.safetensors", "config.json", "tokenizer.json"),
+        {"path/to/model/config.json": S3_CONFIG_JSON},
+    )
+
+    result, mock_fetch = await _preview_s3_with(mock_kube_client, test_namespace, minio_client)
+
+    assert result.tags == []
+    mock_fetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_returns_no_tags_when_nothing_is_discoverable(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """With no card and no usable config, preview succeeds reporting no discoverable tags."""
+    minio_client = _make_s3_preview_client(
+        _s3_listing("model.safetensors", "config.json", "tokenizer.json"),
+        {"path/to/model/config.json": b'{"hidden_size": 4096}'},
+    )
+
+    result, _ = await _preview_s3_with(mock_kube_client, test_namespace, minio_client)
+
+    assert result.tags == []
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_succeeds_when_metadata_objects_cannot_be_read(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """Tag discovery is display metadata: an unreadable card must not fail the preview."""
+    minio_client = _make_s3_preview_client(
+        _s3_listing("model.safetensors", "config.json", "README.md", "tokenizer.json"),
+        {},
+    )
+
+    result, _ = await _preview_s3_with(mock_kube_client, test_namespace, minio_client)
+
+    assert result.tags == []
+    assert result.layout_hint == "safetensors"
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_ignores_non_utf8_model_card(mock_kube_client: AsyncMock, test_namespace: str) -> None:
+    """A binary model card yields no tags rather than raising."""
+    minio_client = _make_s3_preview_client(
+        _s3_listing("model.safetensors", "README.md"),
+        {"path/to/model/README.md": b"\xff\xfe\x00binary"},
+    )
+
+    result, _ = await _preview_s3_with(mock_kube_client, test_namespace, minio_client)
+
+    assert result.tags == []
+    assert result.layout_hint == "safetensors"
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_bounds_metadata_reads(mock_kube_client: AsyncMock, test_namespace: str) -> None:
+    """Metadata reads are capped so an oversized object cannot be streamed during preview."""
+    reader = MagicMock(spec_set=["read", "close", "release_conn"])
+    reader.read = MagicMock(return_value=S3_CARD_WITH_PROVENANCE)
+    minio_client = MagicMock()
+    minio_client.client.list_objects = MagicMock(return_value=_s3_listing("model.safetensors", "README.md"))
+    minio_client.client.get_object = MagicMock(return_value=reader)
+
+    await _preview_s3_with(mock_kube_client, test_namespace, minio_client)
+
+    reader.read.assert_called_once_with(SOURCE_METADATA_MAX_BYTES)
+    reader.release_conn.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_ignores_nested_readme(mock_kube_client: AsyncMock, test_namespace: str) -> None:
+    """A nested README is not treated as the model's own card."""
+    minio_client = _make_s3_preview_client(
+        _s3_listing("model.safetensors", "examples/README.md"),
+        {"path/to/model/examples/README.md": S3_CARD_WITH_PROVENANCE},
+    )
+
+    result, mock_fetch = await _preview_s3_with(mock_kube_client, test_namespace, minio_client)
+
+    assert result.tags == []
+    mock_fetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_does_not_resolve_non_repo_id_provenance(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """A card citing a URL as its base model must not steer an outbound request."""
+    card = b"---\nbase_model: https://evil.example/owner/model\ntags:\n  - vision\n---\n"
+    minio_client = _make_s3_preview_client(
+        _s3_listing("model.safetensors", "README.md"),
+        {"path/to/model/README.md": card},
+    )
+
+    result, mock_fetch = await _preview_s3_with(mock_kube_client, test_namespace, minio_client)
+
+    mock_fetch.assert_not_awaited()
+    assert result.tags == ["vision"]
+
+
+@pytest.mark.asyncio
+async def test_preview_s3_source_requires_required_layout_files(
+    mock_kube_client: AsyncMock, test_namespace: str
+) -> None:
+    """S3 preview succeeds with warnings when recommended layout files are missing."""
+    secret_data = {
+        "AWS_ACCESS_KEY_ID": base64.b64encode(b"access-key").decode(),
+        "AWS_SECRET_ACCESS_KEY": base64.b64encode(b"secret-key").decode(),
+    }
+    mock_kube_client.core_v1.read_namespaced_secret = AsyncMock(return_value=_make_k8s_secret_with_data(secret_data))
+
+    listed_objects = [MagicMock(object_name="path/to/model/model-00001-of-00001.safetensors", size=4_000_000_000)]
+    minio_client = MagicMock()
+    minio_client.client.list_objects = MagicMock(return_value=listed_objects)
+
+    with patch("app.custom_models.service.MinioClient", return_value=minio_client):
+        result = await preview_model_source(
+            kube_client=mock_kube_client,
+            namespace=test_namespace,
+            request=PreviewRequest(
+                source_type="s3",
+                source="s3://my-bucket/path/to/model/",
+                s3_storage_name="s3-storage",
+            ),
+        )
+
+    assert any("missing recommended file(s): config.json" in warning for warning in result.warnings)
+    assert any("should include tokenizer.json or tokenizer_config.json" in warning for warning in result.warnings)
 
 
 @pytest.mark.asyncio
@@ -638,7 +1426,7 @@ async def test_fetch_hub_model_oversized_body_raises_external_service_error() ->
 
 
 # ---------------------------------------------------------------------------
-# finalize_aim_profile_for_onboarded_model (EAI-6340)
+# finalize_aim_profile_for_onboarded_model
 # ---------------------------------------------------------------------------
 
 

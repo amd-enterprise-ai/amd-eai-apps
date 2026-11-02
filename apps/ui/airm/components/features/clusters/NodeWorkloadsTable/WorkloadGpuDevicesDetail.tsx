@@ -23,7 +23,7 @@ export const GpuDeviceEntry: React.FC<{
   alwaysShowHostname?: boolean;
 }> = ({ device, isOnNode, alwaysShowHostname = false }) => (
   <span
-    className={`inline-flex items-center gap-0.5 ${isOnNode ? '' : 'text-default-400'}`}
+    className={`inline-flex items-center gap-0.5 ${isOnNode ? '' : 'text-muted'}`}
   >
     {!isOnNode || alwaysShowHostname ? (
       <>
@@ -84,7 +84,10 @@ export const WorkloadGpuDevicesDetail: React.FC<
       content={<GpuDevicesList devices={devices} nodeName={nodeName} />}
       placement="top"
     >
-      <span className="cursor-pointer underline">{devicesLabel}</span>
+      {/* biome-ignore lint/a11y/useSemanticElements: the element reveals supplemental text rather than performing an action. */}
+      <span className="cursor-pointer underline" role="button" tabIndex={0}>
+        {devicesLabel}
+      </span>
     </Tooltip>
   );
 };

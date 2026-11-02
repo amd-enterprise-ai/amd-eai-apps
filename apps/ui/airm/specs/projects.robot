@@ -57,19 +57,24 @@ Admin creates a project with GPU preemption enabled
 Admin views quota allocation details for a project
     [Documentation]    Verify that the quota tab displays resource allocation values
     ...                and admin controls for GPU, CPU, memory, and disk.
-    ...
-    ...                NOTE: Setting quota values is currently blocked by a UI rendering
-    ...                bug where the AllocationSettings component renders in read-only mode
-    ...                (plain text spans instead of SliderInput components) even for admin
-    ...                users. The Save/Discard buttons appear correctly, but the form fields
-    ...                are not editable. This test verifies the quota display and admin
-    ...                controls until the rendering issue is fixed.
     [Tags]    ui    airm    projects    quota
 
     Given an admin user is editing a project
     When the user navigates to the quota tab
     Then the quota tab shows resource allocation values
     And admin quota controls are visible
+
+Admin discards unsaved quota changes
+    [Documentation]    Verify that after changing a guaranteed allocation on the quota tab,
+    ...                discarding restores the previous values without saving.
+    [Tags]    ui    airm    projects    quota
+
+    Given an admin user is editing a project
+    When the user navigates to the quota tab
+    And the user notes the current CPU guaranteed allocation on the quota tab
+    And the user increases the CPU guaranteed allocation once without saving
+    And the user discards changes to the project settings form
+    Then the CPU guaranteed allocation matches the noted value
 
 Admin adds a team member to a project
     [Documentation]    Verify that an admin can add a platform user who is not yet

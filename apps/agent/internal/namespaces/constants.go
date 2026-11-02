@@ -6,9 +6,11 @@ package namespaces
 
 import "k8s.io/apimachinery/pkg/runtime/schema"
 
-var namespaceGVR = schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}
+var namespaceGVR = schema.GroupVersionResource{Version: coreV1APIVersion, Resource: "namespaces"}
 
 const (
+	coreV1APIVersion = "v1"
+
 	namespaceFinalizer = "airm.silogen.ai/namespace-finalizer"
 
 	KueueManagedLabel = "kueue-managed"

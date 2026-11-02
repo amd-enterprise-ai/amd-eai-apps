@@ -18,7 +18,7 @@ import React from 'react';
 
 import { useTranslation } from 'next-i18next';
 import { InferenceSettings } from '@/types/models';
-import { Workload } from '@/types/workloads';
+import type { Workload } from '@/types/workloads';
 
 interface Props {
   showSyncSettings: boolean;
@@ -26,9 +26,9 @@ interface Props {
   onSettingsChange: (settings: InferenceSettings) => void;
   syncSettings: boolean;
   onSyncSettingsChange: (syncSettings: boolean) => void;
-  selectedModelWorkload: Workload | undefined;
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
+  selectedModelWorkload?: Workload;
 }
 
 const SettingsDrawer: React.FC<Props> = ({
@@ -46,22 +46,18 @@ const SettingsDrawer: React.FC<Props> = ({
   return (
     <Drawer isOpen={isOpen} onOpenChange={onOpenChange} radius="none" size="sm">
       <DrawerContent>
-        <DrawerHeader>
-          <div className="flex items-center justify-between">
-            <div className="text-lg font-semibold">
-              <h3>{t('modelSettings.title')}</h3>
-              <div className="text-default-500 max-w-80 text-sm font-light text-nowrap truncate">
-                {selectedModelWorkload?.displayName}
-              </div>
-            </div>
+        <DrawerHeader>{t('modelSettings.title')}</DrawerHeader>
+        {selectedModelWorkload?.displayName && (
+          <div className="text-muted max-w-80 text-sm font-light text-nowrap truncate px-6 pb-2">
+            {selectedModelWorkload.displayName}
           </div>
-        </DrawerHeader>
+        )}
         <Divider />
         <DrawerBody className="p-6">
           <div className="w-full">
             {showSyncSettings && (
-              <div className="flex justify-between items-center border-b pb-4 mb-4 dark:border-default-100">
-                <span className="text-sm text-default-600 dark:text-default-500">
+              <div className="flex justify-between items-center border-b pb-4 mb-4 dark:border-default">
+                <span className="text-sm text-foreground dark:text-muted">
                   {t('modelSettings.syncSettings.description')}
                 </span>
                 <Checkbox
@@ -84,7 +80,7 @@ const SettingsDrawer: React.FC<Props> = ({
                     <button
                       aria-label={t('modelSettings.temperature.tooltip')}
                       type="button"
-                      className="inline-flex cursor-pointer rounded-small border-0 bg-transparent p-0 text-default-400 outline-offset-2 hover:opacity-80"
+                      className="inline-flex cursor-pointer rounded-small border-0 bg-transparent p-0 text-muted outline-offset-2 hover:opacity-80"
                     >
                       <IconInfoCircle aria-hidden size={16} />
                     </button>
@@ -101,7 +97,6 @@ const SettingsDrawer: React.FC<Props> = ({
               minValue={0}
               maxValue={1}
               step={0.05}
-              classNames={{ thumb: 'dark:after:bg-white' }}
               className="py-4 first:pt-0"
             />
 
@@ -116,7 +111,7 @@ const SettingsDrawer: React.FC<Props> = ({
                     <button
                       aria-label={t('modelSettings.frequencyPenalty.tooltip')}
                       type="button"
-                      className="inline-flex cursor-pointer rounded-small border-0 bg-transparent p-0 text-default-400 outline-offset-2 hover:opacity-80"
+                      className="inline-flex cursor-pointer rounded-small border-0 bg-transparent p-0 text-muted outline-offset-2 hover:opacity-80"
                     >
                       <IconInfoCircle aria-hidden size={16} />
                     </button>
@@ -133,7 +128,6 @@ const SettingsDrawer: React.FC<Props> = ({
               minValue={-2}
               maxValue={2}
               step={0.05}
-              classNames={{ thumb: 'dark:after:bg-white' }}
               className="py-4"
             />
 
@@ -148,7 +142,7 @@ const SettingsDrawer: React.FC<Props> = ({
                     <button
                       aria-label={t('modelSettings.presencePenalty.tooltip')}
                       type="button"
-                      className="inline-flex cursor-pointer rounded-small border-0 bg-transparent p-0 text-default-400 outline-offset-2 hover:opacity-80"
+                      className="inline-flex cursor-pointer rounded-small border-0 bg-transparent p-0 text-muted outline-offset-2 hover:opacity-80"
                     >
                       <IconInfoCircle aria-hidden size={16} />
                     </button>
@@ -165,7 +159,6 @@ const SettingsDrawer: React.FC<Props> = ({
               minValue={-2}
               maxValue={2}
               step={0.05}
-              classNames={{ thumb: 'dark:after:bg-white' }}
               className="py-4"
             />
 
@@ -181,7 +174,7 @@ const SettingsDrawer: React.FC<Props> = ({
                   <button
                     type="button"
                     aria-label={t('modelSettings.systemPrompt.tooltip')}
-                    className="inline-flex cursor-pointer rounded-small border-0 bg-transparent p-0 text-default-400 outline-offset-2 hover:opacity-80"
+                    className="inline-flex cursor-pointer rounded-small border-0 bg-transparent p-0 text-muted outline-offset-2 hover:opacity-80"
                   >
                     <IconInfoCircle aria-hidden size={16} />
                   </button>
@@ -191,17 +184,14 @@ const SettingsDrawer: React.FC<Props> = ({
                 aria-label={t('modelSettings.systemPrompt.label')}
                 placeholder={t('modelSettings.systemPrompt.placeholder')}
                 value={settings.systemPrompt}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                onChange={(e) =>
                   onSettingsChange({
                     ...settings,
                     systemPrompt: e.target.value,
                   })
                 }
                 minRows={6}
-                maxRows={6}
-                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) =>
-                  e.stopPropagation()
-                }
+                onKeyDown={(e) => e.stopPropagation()}
               />
             </div>
           </div>

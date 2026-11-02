@@ -43,9 +43,10 @@ Project for deployed AIM is selected
 # When keywords (actions)
 # =============================================================================
 
-User enables autoscaling in deploy drawer
-    [Documentation]    Enables autoscaling by clicking the toggle in the deploy drawer.
+User enables autoscaling in deploy wizard
+    [Documentation]    Navigates to the Scaling step and enables autoscaling.
 
+    Navigate to scaling step in deploy wizard
     Click autoscaling toggle
     Wait for autoscaling fields
 
@@ -66,8 +67,9 @@ User expands replicas list on autoscaling card
 # =============================================================================
 
 Autoscaling toggle should be visible
-    [Documentation]    Verifies that the autoscaling toggle is visible in the deploy drawer.
+    [Documentation]    Verifies that the autoscaling toggle is visible on the Scaling step.
 
+    Navigate to scaling step in deploy wizard
     Wait for autoscaling toggle
 
 Autoscaling toggle should be enabled

@@ -10,6 +10,9 @@ import {
 } from '@testing-library/react';
 
 import {
+  fetchProjectCpuUsage,
+  fetchProjectQuota,
+  fetchProjectSystemMemory,
   fetchProjectWorkloadMetrics,
   fetchProjectWorkloadStats,
   fetchProjectGPUDeviceUtilization,
@@ -23,7 +26,6 @@ import {
   getInferenceModel,
   listAllInferenceDeployments,
 } from '@/lib/app/inference';
-import { AIMMetric } from '@/types/aims';
 import { APIRequestError } from '@amdenterpriseai/utils/app';
 
 import type { GetServerSidePropsContext } from 'next';
@@ -66,6 +68,9 @@ vi.mock('@/lib/app/projects', async (importOriginal) => {
     fetchProjectWorkloadStats: vi.fn(),
     fetchProjectGPUDeviceUtilization: vi.fn(),
     fetchProjectGPUMemoryUtilization: vi.fn(),
+    fetchProjectCpuUsage: vi.fn(),
+    fetchProjectSystemMemory: vi.fn(),
+    fetchProjectQuota: vi.fn(),
   };
 });
 
@@ -133,6 +138,16 @@ describe('projects page', () => {
     (fetchProjectGPUDeviceUtilization as Mock).mockResolvedValue({
       data: [],
     });
+    (fetchProjectCpuUsage as Mock).mockResolvedValue({
+      data: [],
+    });
+    (fetchProjectSystemMemory as Mock).mockResolvedValue({
+      data: [],
+    });
+    (fetchProjectQuota as Mock).mockResolvedValue({
+      isQuotaManaged: false,
+      quotas: {},
+    });
     (listAllInferenceDeployments as Mock).mockResolvedValue([]);
     (getInferenceModel as Mock).mockRejectedValue(
       new APIRequestError('not found', 404),
@@ -142,7 +157,7 @@ describe('projects page', () => {
       canonicalName: '',
       imageVersion: '',
       name: '',
-      metric: AIMMetric.Default,
+      metric: 'default',
     } satisfies AIMServiceDisplayInfo);
 
     mockInvalidateQueries.mockClear();
@@ -218,11 +233,11 @@ describe('projects page', () => {
     expect(fetchProjectGPUDeviceUtilization as Mock).toBeCalledTimes(1);
 
     await waitFor(() => {
-      expect(screen.getByText('data.refresh')).toBeInTheDocument();
+      expect(screen.getByText('actions.refresh.title')).toBeInTheDocument();
     });
 
     await act(() => {
-      fireEvent.click(screen.getByText('data.refresh'));
+      fireEvent.click(screen.getByText('actions.refresh.title'));
     });
 
     expect(fetchProjectGPUMemoryUtilization as Mock).toBeCalledTimes(2);
@@ -242,7 +257,7 @@ describe('projects page', () => {
 
     // Verify the time selector component is rendered
     await waitFor(() => {
-      expect(screen.getByText('data.refresh')).toBeInTheDocument();
+      expect(screen.getByText('actions.refresh.title')).toBeInTheDocument();
     });
   });
 

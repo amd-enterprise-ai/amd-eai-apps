@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Copyright © Advanced Micro Devices, Inc., or its affiliates.
+
+SPDX-License-Identifier: MIT
+-->
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <changeSet id="013-add-workload-dataset-refs" author="system">
+        <comment>Persist dataset snapshots for fine-tuning workload history</comment>
+
+        <addColumn tableName="workloads">
+            <column name="dataset_refs" type="JSONB" defaultValueComputed="'[]'::jsonb">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+
+        <sql>
+            UPDATE workloads AS workload
+            SET dataset_refs = jsonb_build_array(
+                jsonb_build_object('id', dataset.id::text, 'name', dataset.name)
+            )
+            FROM datasets AS dataset
+            WHERE workload.dataset_id = dataset.id;
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

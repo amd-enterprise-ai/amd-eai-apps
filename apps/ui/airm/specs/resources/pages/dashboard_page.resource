@@ -116,6 +116,12 @@ Time range selector should be visible
 
     Wait For Elements State    ${TIME_RANGE_TABLIST}    visible    timeout=10s
 
+Get chart time range control label
+    [Documentation]    Returns the accessible label of the chart time range control.
+
+    ${label}=    Get Attribute    ${TIME_RANGE_TABLIST}    aria-label
+    RETURN    ${label}
+
 Get selected time range tab
     [Documentation]    Returns the text of the currently selected time range tab.
 
@@ -144,7 +150,7 @@ Get time range tab labels
 
 Get allocation stat card count
     [Documentation]    Returns the number of matching stat cards in the allocations section.
-    ...                Some stat card titles (e.g. "GPU Utilization") also appear as table column
+    ...                Some stat card titles (e.g. "GPU utilization") also appear as table column
     ...                headers, so this keyword targets cards in the summary panel specifically.
     [Arguments]    ${card_title}
 

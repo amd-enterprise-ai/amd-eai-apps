@@ -6,10 +6,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'next-i18next';
 import { useMemo } from 'react';
 
-import {
-  HuggingFaceTokenSelector,
-  type HuggingFaceTokenSelectorLabels,
-} from '@amdenterpriseai/components';
 import { SecretUseCase } from '@amdenterpriseai/types';
 import { APIRequestError } from '@amdenterpriseai/utils/app';
 
@@ -17,7 +13,12 @@ import { createHuggingFaceSecretRequest } from '@/lib/app/huggingface-secret';
 import { createProjectSecret, fetchProjectSecrets } from '@/lib/app/secrets';
 import type { SecretResponseData } from '@/types/secrets';
 
-export interface ProjectHuggingFaceTokenSelectorProps {
+import {
+  HuggingFaceTokenSelector,
+  type HuggingFaceTokenSelectorLabels,
+} from './HuggingFaceTokenSelector';
+
+type ProjectHuggingFaceTokenSelectorProps = {
   namespace: string;
   value: string | null | undefined;
   onChange: (name: string) => void;
@@ -25,7 +26,7 @@ export interface ProjectHuggingFaceTokenSelectorProps {
   isDisabled?: boolean;
   isInvalid?: boolean;
   errorMessage?: string;
-}
+};
 
 /**
  * Project-scoped binding of the shared {@link HuggingFaceTokenSelector}.
@@ -65,21 +66,38 @@ export const ProjectHuggingFaceTokenSelector = ({
   );
 
   const createMutation = useMutation({
-    mutationFn: async ({ name, token }: { name: string; token: string }) => {
+    mutationFn: async ({
+      displayName,
+      token,
+    }: {
+      displayName: string;
+      token: string;
+    }): Promise<SecretResponseData> => {
       if (!namespace) {
         throw new APIRequestError(t('errors.missingNamespace'), 422);
       }
-      const req = createHuggingFaceSecretRequest(name, token);
+      const req = createHuggingFaceSecretRequest(displayName, token);
       const created = await createProjectSecret(namespace, req);
       const createdName = created.metadata?.name;
       if (!createdName) {
         throw new APIRequestError(t('errors.invalidSecretResponse'), 502);
       }
-      return { name: createdName };
+      return created;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
+    onSuccess: (created) => {
+      queryClient.setQueryData<SecretResponseData[]>(
+        ['project', namespace, 'secrets'],
+        (prev) => {
+          const list = prev ?? [];
+          if (list.some((s) => s.metadata.name === created.metadata.name)) {
+            return list;
+          }
+          return [...list, created];
+        },
+      );
+      void queryClient.invalidateQueries({
         queryKey: ['project', namespace, 'secrets'],
+        refetchType: 'none',
       });
     },
   });
@@ -95,6 +113,13 @@ export const ProjectHuggingFaceTokenSelector = ({
     dialogTokenPlaceholder: t('dialog.tokenPlaceholder'),
     dialogCancelLabel: t('dialog.cancel'),
     dialogSubmitLabel: t('dialog.submit'),
+    validation: {
+      nameRequired: t('validation.nameRequired'),
+      invalidSecretName: t('validation.invalidSecretName'),
+      tokenRequired: t('validation.tokenRequired'),
+      invalidTokenFormat: t('validation.invalidTokenFormat'),
+      duplicateName: t('validation.duplicateName'),
+    },
   };
 
   const tokenOptions = useMemo(
@@ -111,7 +136,10 @@ export const ProjectHuggingFaceTokenSelector = ({
       value={value}
       onChange={onChange}
       existingTokens={tokenOptions}
-      onCreateToken={(input) => createMutation.mutateAsync(input)}
+      onCreateToken={async (input) => {
+        const created = await createMutation.mutateAsync(input);
+        return { secretName: created.metadata.name };
+      }}
       labels={labels}
       isRequired={isRequired}
       isDisabled={isDisabled || !namespace}
@@ -121,5 +149,3 @@ export const ProjectHuggingFaceTokenSelector = ({
     />
   );
 };
-
-export default ProjectHuggingFaceTokenSelector;

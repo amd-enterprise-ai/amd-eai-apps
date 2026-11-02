@@ -47,9 +47,7 @@ const createMockAIM = (
         title: 'Test AIM',
         licenses: 'MIT',
         vendor: 'Test Vendor',
-        authors: 'Test Author',
         source: 'https://github.com/example/model',
-        documentation: 'https://docs.example.com',
         created: '2023-01-01T00:00:00Z',
         revision: 'abc123',
       },
@@ -59,7 +57,7 @@ const createMockAIM = (
 });
 
 const createMockService = (
-  status: AIMServiceStatus = AIMServiceStatus.RUNNING,
+  status: AIMServiceStatus = 'Running',
 ): AIMService => ({
   id: 'service-123',
   metadata: {
@@ -74,13 +72,11 @@ const createMockService = (
   spec: {
     model: { name: 'test-aim' },
     replicas: 1,
-    overrides: {},
-    cacheModel: true,
     routing: { annotations: {}, enabled: true },
     runtimeConfigName: 'default',
   },
   status: { status },
-  clusterAuthGroupId: null,
+  statusValue: '',
   endpoints: {
     internal: 'http://test-service.test-namespace.svc.cluster.local',
     external: 'https://api.example.com/test-namespace/service-123',
@@ -134,20 +130,16 @@ describe('aims utils', () => {
         AIMWorkloadStatus.NOT_DEPLOYED,
       ]);
       expect(
-        aimParser(aim, [createMockService(AIMServiceStatus.RUNNING)])
-          .workloadStatuses,
+        aimParser(aim, [createMockService('Running')]).workloadStatuses,
       ).toContain(AIMWorkloadStatus.DEPLOYED);
       expect(
-        aimParser(aim, [createMockService(AIMServiceStatus.PENDING)])
-          .workloadStatuses,
+        aimParser(aim, [createMockService('Pending')]).workloadStatuses,
       ).toContain(AIMWorkloadStatus.PENDING);
       expect(
-        aimParser(aim, [createMockService(AIMServiceStatus.FAILED)])
-          .workloadStatuses,
+        aimParser(aim, [createMockService('Failed')]).workloadStatuses,
       ).toContain(AIMWorkloadStatus.FAILED);
       expect(
-        aimParser(aim, [createMockService(AIMServiceStatus.DEGRADED)])
-          .workloadStatuses,
+        aimParser(aim, [createMockService('Degraded')]).workloadStatuses,
       ).toContain(AIMWorkloadStatus.DEGRADED);
     });
 
@@ -185,8 +177,8 @@ describe('aims utils', () => {
     it('handles multiple deployed services', () => {
       const aim = createMockAIM();
       const services = [
-        createMockService(AIMServiceStatus.RUNNING),
-        createMockService(AIMServiceStatus.PENDING),
+        createMockService('Running'),
+        createMockService('Pending'),
       ];
       const result = aimParser(aim, services);
 

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 import {
-  Select,
+  FormSelect,
   SelectItem,
   DrawerForm,
   FormFieldComponent,
@@ -74,22 +74,30 @@ export const UserRoles: React.FC<Props> = ({ user }) => {
     {
       name: 'role',
       label: t('detail.projectsAndRoles.roles.form.role.label'),
-      placeholder: t('detail.projectsAndRoles.projects.form.role.placeholder'),
-      component: (props) => (
-        <Select
-          aria-label={props.label}
-          variant="bordered"
-          defaultSelectedKeys={[props.defaultValue]}
+      placeholder: t('detail.projectsAndRoles.roles.form.role.placeholder'),
+      component: (formElemProps) => (
+        <FormSelect
+          aria-label={formElemProps.label}
           disallowEmptySelection
-          {...props}
+          {...formElemProps}
         >
-          <SelectItem key={UserRole.PLATFORM_ADMIN}>
+          <SelectItem
+            key={UserRole.PLATFORM_ADMIN}
+            textValue={t(
+              'detail.projectsAndRoles.roles.form.role.options.platformAdmin',
+            )}
+          >
             {t('detail.projectsAndRoles.roles.form.role.options.platformAdmin')}
           </SelectItem>
-          <SelectItem key={UserRole.TEAM_MEMBER}>
+          <SelectItem
+            key={UserRole.TEAM_MEMBER}
+            textValue={t(
+              'detail.projectsAndRoles.roles.form.role.options.teamMember',
+            )}
+          >
             {t('detail.projectsAndRoles.roles.form.role.options.teamMember')}
           </SelectItem>
-        </Select>
+        </FormSelect>
       ),
     },
   ];
@@ -103,7 +111,9 @@ export const UserRoles: React.FC<Props> = ({ user }) => {
         {isRoleManagementEnabled && (
           <ActionButton
             tertiary
-            aria-label={t('detail.projectsAndRoles.roles.actions.edit') || ''}
+            aria-label={
+              t('detail.projectsAndRoles.roles.actions.edit.title') || ''
+            }
             color="primary"
             size="sm"
             onPress={onOpen}
@@ -164,7 +174,7 @@ export const UserRoles: React.FC<Props> = ({ user }) => {
                     field.name as keyof AssignUserRoleFormData
                   ]?.message
                 }
-                register={form.register}
+                form={form}
                 defaultValue={user.role}
               />
             ))}

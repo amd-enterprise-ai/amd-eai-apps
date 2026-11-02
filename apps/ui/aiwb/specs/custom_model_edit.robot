@@ -7,7 +7,8 @@ Documentation       Frontend E2E tests for editing a custom model.
 ...
 ...                 Covers deep-link entry and recovery when the requested model is not
 ...                 available, happy-path display name edit via the card actions menu,
-...                 and the duplicate display name advisory warning.
+...                 the duplicate display name advisory warning, and the immutability of
+...                 the model's import source.
 
 Resource            resources/common/browser_setup.resource
 Resource            resources/custom_model_import.resource
@@ -78,6 +79,19 @@ Editing a custom model display name from the model card saves and returns to the
     And user submits the import wizard
     Then the custom models tab should be shown
     And a custom model card with display name "Edited TinyLlama" should be shown
+
+Model settings presents the import source as unchangeable
+    [Documentation]    A model keeps the source it was onboarded from. Verify the edit wizard
+    ...                shows where the model came from but does not let the user repoint it.
+    [Tags]    ui    models    custom-models    edit    s3    smoke
+
+    Given a ready project with user access exists
+    And an onboarded custom model exists in the project
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    When user opens the model settings for the onboarded model
+    Then the model source type should be shown as "Hugging Face"
+    And the model source should be shown as read only
 
 Duplicate display name warning is shown when editing to a name already used in the project
     [Documentation]    When a user edits a model and types a display name already assigned

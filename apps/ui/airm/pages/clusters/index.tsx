@@ -30,10 +30,10 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { getServerSession } from 'next-auth';
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import router from 'next/router';
 
 import { useAccessControl } from '@/hooks/useAccessControl';
+import { getPageTranslations } from '@/utils/i18n';
 import { useOverlayState, useSystemToast } from '@amdenterpriseai/hooks';
 
 import {
@@ -527,11 +527,7 @@ export async function getServerSideProps(context: any) {
 
   return {
     props: {
-      ...(await serverSideTranslations(locale, [
-        'common',
-        'sharedComponents',
-        'clusters',
-      ])),
+      ...(await getPageTranslations(locale, ['clusters'])),
       clusters,
       workloadsStats,
     },

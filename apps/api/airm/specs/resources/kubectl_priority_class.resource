@@ -167,26 +167,32 @@ Kubectl job should be running
     ...    Verify kubectl job running    ${namespace}    ${job_name}
 
 Verify kubectl job running
-    [Documentation]    Helper to verify Job has Running pods
-    ...    Checks Job status (active/ready) and Suspended condition
+    [Documentation]    Helper to verify Job has Running pods.
+    ...    Reads the Job ONCE and derives both the Suspended condition and the pod counts
+    ...    from that single snapshot. Reading them with separate kubectl calls lets each
+    ...    observe a different moment, which produced self-contradictory diagnostics such
+    ...    as "SUSPENDED. Reason: Job resumed" — the status came from while the job was
+    ...    suspended and the message from after Kueue had already resumed it.
     [Arguments]    ${namespace}    ${job_name}
 
-    # Check if job is suspended
-    ${suspended_check}=    Run process    kubectl    get    job    ${job_name}    -n    ${namespace}    -o    jsonpath\={.status.conditions[?(@.type\=\=\"Suspended\")].status}
-    IF    "${suspended_check.stdout.strip()}" == "True"
-        ${suspend_reason}=    Run process    kubectl    get    job    ${job_name}    -n    ${namespace}    -o    jsonpath\={.status.conditions[?(@.type\=\=\"Suspended\")].message}
-        Fail    Job ${job_name} is SUSPENDED. Reason: ${suspend_reason.stdout}
+    ${result}=    Run process    kubectl    get    job    ${job_name}    -n    ${namespace}    -o    json
+    Should be equal as integers    ${result.rc}    0
+    ...    msg=Failed to read job ${job_name}: ${result.stderr}
+    ${job}=    Evaluate    json.loads($result.stdout)    modules=json
+
+    # The Suspended condition as it stood in this one snapshot, or {} when absent.
+    ${suspended}=    Evaluate
+    ...    next((c for c in $job.get('status', {}).get('conditions', []) if c.get('type') == 'Suspended'), {})
+    IF    $suspended.get('status') == 'True'
+        ${why}=    Evaluate    f"{$suspended.get('reason', 'unknown')}: {$suspended.get('message', '')}"
+        Fail    Job ${job_name} is SUSPENDED. ${why}
     END
 
-    # Check Job has active or ready pods
-    ${active}=    Run process    kubectl    get    job    ${job_name}    -n    ${namespace}    -o    jsonpath\={.status.active}
-    ${ready}=    Run process    kubectl    get    job    ${job_name}    -n    ${namespace}    -o    jsonpath\={.status.ready}
-
-    ${active_count}=    Set variable if    "${active.stdout.strip()}" != ""    ${active.stdout.strip()}    0
-    ${ready_count}=    Set variable if    "${ready.stdout.strip()}" != ""    ${ready.stdout.strip()}    0
+    ${active_count}=    Evaluate    $job.get('status', {}).get('active', 0) or 0
+    ${ready_count}=    Evaluate    $job.get('status', {}).get('ready', 0) or 0
 
     Should be true    ${active_count} > 0 or ${ready_count} > 0
-    ...    msg=Job ${job_name} has no active or ready pods (active=${active_count}, ready=${ready_count})
+    ...    msg=Job ${job_name} has no active or ready pods (active=${active_count}, ready=${ready_count}); suspended condition=${suspended}
 
     Log    Job ${job_name} pod is Running    DEBUG
 

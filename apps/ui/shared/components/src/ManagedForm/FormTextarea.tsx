@@ -25,8 +25,6 @@ export const FormTextarea = <T extends FieldValues>({
 
   return (
     <Textarea
-      labelPlacement="outside"
-      variant="bordered"
       {...props}
       {...registration}
       className={cn(className, {

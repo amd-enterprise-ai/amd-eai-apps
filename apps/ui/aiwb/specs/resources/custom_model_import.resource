@@ -13,6 +13,7 @@ Library             Collections
 Library             libraries/custom_model_import_network.py
 Resource            common/session.resource
 Resource            pages/models_page.resource
+Resource            resources/airm_secrets.resource
 Resource            resources/aiwb_secrets.resource
 Resource            resources/aiwb_custom_models.resource
 
@@ -47,6 +48,22 @@ User is on fine-tune models tab
     ...                Expects ${UI_BASE_URL} and ${TEST_PROJECT} to be set.
 
     Navigate to fine-tune models page    ${UI_BASE_URL}    ${TEST_PROJECT}[name]
+
+A model folder missing recommended files exists in object storage
+    [Documentation]    Seeds a folder in the platform's object storage that holds only a
+    ...                config.json. Previewing it succeeds, but the missing tokenizer and
+    ...                weight files give the wizard warnings to surface.
+
+    A config-only S3 source is prepared for custom model preview
+
+Object storage credentials are ready in the project
+    [Documentation]    Assigns minio-credentials-fetcher and waits for the synced
+    ...                minio-credentials secret before S3 import wizard steps use it.
+
+    Secret "minio-credentials-fetcher" is assigned to project
+    ${namespace}=    Get Project Namespace
+    Wait Until Keyword Succeeds    2 min    5 sec
+    ...    Minio Credentials Secret Exists In Project Namespace    ${namespace}
 
 # =============================================================================
 # When keywords (actions)
@@ -94,6 +111,45 @@ User selects saved Hugging Face token by display name
     Open project Hugging Face token dropdown
     Click Hugging Face token option labeled    ${display_name}
 
+User chooses Hugging Face as the model source
+    [Documentation]    Picks the Hugging Face source family on the wizard's source step.
+
+    Select import wizard source type    huggingFace
+
+User chooses S3 as the model source
+    [Documentation]    Picks the S3 source family on the wizard's source step.
+
+    Select import wizard source type    s3
+
+User enters the prepared object storage folder in the import wizard
+    [Documentation]    Types the seeded object-storage folder into the source input. Requires
+    ...                a preceding Given that prepared the folder.
+
+    Should Not Be Equal    ${TEST_S3_PREVIEW_SOURCE}    ${None}
+    ...    msg=No object storage folder was prepared for this test
+    Fill import wizard source    ${TEST_S3_PREVIEW_SOURCE}
+
+User selects saved S3 configuration named
+    [Arguments]    ${name}
+    [Documentation]    Picks an existing project S3 configuration in the import wizard by the
+    ...                name shown in the dropdown.
+
+    Open project S3 configuration dropdown
+    Click S3 configuration option labeled    ${name}
+
+User creates an S3 configuration named "${name}" backed by secret "${secret_label}"
+    [Documentation]    Opens the inline create dialog on the source step, fills the S3
+    ...                configuration details, picks an existing S3 secret to back it, and
+    ...                saves. The wizard auto-selects the newly created configuration.
+
+    Open project S3 configuration dropdown
+    Open S3 configuration create dialog
+    Fill S3 configuration dialog    ${name}    ${AIWB_E2E_S3_BUCKET_URL}    us-east-1
+    Select S3 configuration dialog secret labeled    ${secret_label}
+    Submit S3 configuration create dialog
+    ${k8s_name}=    Resolve S3 storage Kubernetes name    ${TEST_PROJECT}[name]    ${name}
+    Set Test Variable    ${TEST_S3_STORAGE_K8S_NAME}    ${k8s_name}
+
 User cancels the import wizard
     [Documentation]    Cancels the wizard via the source step's Cancel button.
 
@@ -119,10 +175,32 @@ User sets runtime profile engine settings to "${engine_args_yaml}" and "${env_va
     Fill runtime profile engine arguments    ${engine_args_yaml}
     Fill runtime profile environment variables    ${env_vars_yaml}
 
+User selects runtime profile precision "${precision}"
+    [Documentation]    Chooses a precision in the runtime step's precision select. The
+    ...                selection must survive onboarding even though the AIMModel CRD
+    ...                prunes it from spec.profiles.overrides.
+
+    Select runtime profile precision    ${precision}
+
+User selects runtime profile container image family "${family_label}"
+    [Documentation]    Chooses a container-image family in the runtime profile step.
+
+    Select runtime profile container image family    ${family_label}
+
 User saves the runtime profile and starts onboarding
     [Documentation]    Submits the wizard's runtime step to onboard the model with the
     ...                supplied runtime profile.
 
+    Submit import wizard runtime step
+
+User onboards on a runtime combination the wizard offers
+    [Documentation]    Switches to the last precision the wizard offers, then submits. The
+    ...                precision select lists only values reachable from the current
+    ...                accelerator/count, so a chosen option resolves to a base profile and
+    ...                the onboard is accepted rather than failing on an unsupported choice.
+
+    ${precision}=    Select the last offered runtime precision
+    VAR    ${TEST_ONBOARD_CHOSEN_PRECISION}    ${precision}    scope=TEST
     Submit import wizard runtime step
 
 # =============================================================================
@@ -146,6 +224,113 @@ The import wizard should remain on the source step
 
     Import wizard source input should be visible
 
+The wizard should ask for a Hugging Face token
+    [Documentation]    Verifies the Hugging Face credential field is the one on offer, and the
+    ...                S3 configuration field is not — the source families must not be mixed.
+
+    Import wizard Hugging Face token selector should be visible
+    Import wizard S3 configuration selector should be absent
+
+The wizard should ask for an S3 configuration
+    [Documentation]    Verifies the S3 configuration field is the one on offer, and the Hugging
+    ...                Face token field is not — the source families must not be mixed.
+
+    Import wizard S3 configuration selector should be visible
+    Import wizard Hugging Face token selector should be absent
+
+The import wizard should reach the information step
+    [Documentation]    Verifies the wizard advanced past the source step to model information.
+
+    Import wizard information step should be visible
+
+The import wizard should warn about the source contents
+    [Documentation]    Verifies the wizard reports what the preview found missing in the source
+    ...                folder. The warning is advisory: the user can still continue.
+
+    Import wizard preview warnings should be visible
+
+The runtime profile should offer container image family "${family_label}"
+    [Documentation]    Verifies the runtime profile image-family dropdown includes the
+    ...                supplied family label among available options.
+
+    Open runtime profile container image selector
+    ${count}=    Get open select option count
+    @{option_labels}=    Create List
+    FOR    ${idx}    IN RANGE    ${count}
+        ${label}=    Get open select option text    ${idx}
+        Append To List    ${option_labels}    ${label}
+    END
+    List Should Contain Value    ${option_labels}    ${family_label}
+
+User selects the first non-automatic runtime profile container image family
+    [Documentation]    Picks the first discovered family that is not "Automatic".
+    ...                Fails when only the automatic placeholder is available.
+
+    Open runtime profile container image selector
+    ${count}=    Get open select option count
+    @{option_labels}=    Create List
+    FOR    ${idx}    IN RANGE    ${count}
+        ${label}=    Get open select option text    ${idx}
+        Append To List    ${option_labels}    ${label}
+    END
+    ${selected_family}=    Evaluate    next((label for label in $option_labels if label.strip().lower() != "automatic"), None)
+    Should Not Be Equal    ${selected_family}    ${None}
+    ...    msg=Expected at least one discovered (non-automatic) container image family
+    User selects runtime profile container image family "${selected_family}"
+
+The runtime profile should offer at least one non-automatic container image family
+    [Documentation]    Verifies the image-family dropdown includes at least one discovered
+    ...                base family besides the automatic placeholder.
+
+    Open runtime profile container image selector
+    ${count}=    Get open select option count
+    @{option_labels}=    Create List
+    FOR    ${idx}    IN RANGE    ${count}
+        ${label}=    Get open select option text    ${idx}
+        Append To List    ${option_labels}    ${label}
+    END
+    ${non_automatic_count}=    Evaluate    len([label for label in $option_labels if label.strip().lower() != "automatic"])
+    Should Be True    ${non_automatic_count} > 0
+    ...    msg=Expected at least one discovered (non-automatic) container image family
+
+The runtime profile should list container versions in this order
+    [Documentation]    Verifies the runtime profile version dropdown starts with the
+    ...                expected newest-first tag ordering for the selected image family.
+    [Arguments]    @{expected_versions}
+
+    Open runtime profile container version selector
+    FOR    ${idx}    ${expected}    IN ENUMERATE    @{expected_versions}
+        ${actual}=    Get open select option text    ${idx}
+        Should Be Equal As Strings    ${actual}    ${expected}
+        ...    msg=Version option at index ${idx} should be '${expected}' but was '${actual}'
+    END
+
+The runtime profile should default to the newest container version option
+    [Documentation]    Verifies the version select defaults to the first (newest)
+    ...                option shown in the version dropdown for the selected family.
+
+    ${selected}=    Get runtime profile selected container version text
+    Open runtime profile container version selector
+    ${count}=    Get open select option count
+    Should Be True    ${count} > 0
+    ...    msg=Expected at least one container-version option for selected image family
+    ${first}=    Get open select option text    0
+    Should Be Equal As Strings    ${selected}    ${first}
+    ...    msg=Expected selected container version '${selected}' to match first option '${first}'
+
+The custom model preview request should name the S3 configuration
+    [Arguments]    ${preview_response}    ${expected_storage_name}
+    [Documentation]    Verifies the browser's preview POST carried the selected S3
+    ...                configuration identifier as ``s3StorageName``.
+
+    ${request}=    Get From Dictionary    ${preview_response}    request
+    Should Not Be Equal    ${request}    ${None}
+    ${post}=    Get From Dictionary    ${request}    postData
+    ${post_dict}=    Normalize Json Post Payload    ${post}
+    Dictionary Should Contain Key    ${post_dict}    s3StorageName
+    ${actual}=    Get From Dictionary    ${post_dict}    s3StorageName
+    Should Be Equal    ${actual}    ${expected_storage_name}
+
 The duplicate display name warning should be shown
     [Documentation]    Verifies the wizard warns that the entered display name
     ...                matches an existing custom model, warning that saving may
@@ -164,13 +349,14 @@ The custom models tab should be shown
 
     Custom models tab should be visible
 
-A custom model card should appear as importing or ready
-    [Documentation]    Polls until at least one custom model card shows "Importing" or
-    ...                "Ready" status, confirming the onboard API accepted the submission
+A custom model card should appear as ready
+    [Documentation]    Polls until at least one custom model card reaches a
+    ...                deployable ("Ready") state, detected by an enabled Deploy
+    ...                button. Confirms the onboard API accepted the submission
     ...                and the list page reflects it.
 
     Wait Until Keyword Succeeds    2 min    5 sec
-    ...    Custom model card with importing or ready status should be visible
+    ...    Custom model card with ready status should be visible
 
 The import wizard should show a preview error
     [Documentation]    Verifies that a preview failure surfaces an error toast to the user.
@@ -239,3 +425,28 @@ Onboarded model overrides should carry environment variable
         END
     END
     Fail    Environment variable '${var_name}' not found in onboarded model overrides engineEnv
+
+The onboarded model should use precision "${precision}"
+    [Documentation]    Reads the onboarded AIMModel's precision annotation via the API to prove the
+    ...                wizard's precision selection reached the backend. Precision is pruned from
+    ...                spec.profiles.overrides by the CRD, so it is persisted (and read back) on the
+    ...                ``aiwb.apps.eai.amd.com/precision`` annotation. Polled because onboarding
+    ...                writes the CR asynchronously after submit.
+
+    Wait Until Keyword Succeeds    90 sec    5 sec
+    ...    Onboarded model annotation should carry precision    ${precision}
+
+The onboarded model should use the chosen precision
+    [Documentation]    Confirms the onboarded model runs on the precision the wizard offered and the
+    ...                user chose, proving the wizard only offers combinations the base supports.
+
+    Wait Until Keyword Succeeds    90 sec    5 sec
+    ...    Onboarded model annotation should carry precision    ${TEST_ONBOARD_CHOSEN_PRECISION}
+
+Onboarded model annotation should carry precision
+    [Documentation]    Single-poll helper: the onboarded model's precision annotation matches.
+    [Arguments]    ${precision}
+    ${annotations}=    Get onboarded model annotations
+    ${actual}=    Get From Dictionary    ${annotations}    aiwb.apps.eai.amd.com/precision    default=${EMPTY}
+    Should Be Equal As Strings    ${actual}    ${precision}
+    ...    msg=Wizard precision selection was not persisted on the onboarded model annotation

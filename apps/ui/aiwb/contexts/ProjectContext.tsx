@@ -14,12 +14,12 @@ import { useRouter } from 'next/router';
 import { useLocalStorage } from '@amdenterpriseai/hooks';
 
 import { getAppConfig, AppConfig } from '@/lib/app/app-config';
-import { ProjectsResponse } from '@/types/projects';
 import { fetchProjects } from '@/lib/app/projects';
+import type { ProjectsResponse } from '@/types/projects';
 
 interface ProjectContextType {
   isStandaloneMode: boolean;
-  clusterAuthEnabled: boolean;
+  apiKeysManagementEnabled: boolean;
   aiGatewayEnabled: boolean;
   aiGatewayUrl?: string;
   airmAppUrl?: string;
@@ -57,7 +57,7 @@ export const ProjectProvider = ({ children }: ProjectProviderProps) => {
     initialData: {
       isStandaloneMode: false,
       defaultNamespace: null,
-      clusterAuthEnabled: true,
+      apiKeysManagementEnabled: true,
       aiGatewayEnabled: true,
     },
   });
@@ -65,7 +65,7 @@ export const ProjectProvider = ({ children }: ProjectProviderProps) => {
   const {
     isStandaloneMode,
     defaultNamespace,
-    clusterAuthEnabled = true,
+    apiKeysManagementEnabled = true,
     aiGatewayEnabled = true,
     aiGatewayUrl,
   } = appConfig;
@@ -151,7 +151,7 @@ export const ProjectProvider = ({ children }: ProjectProviderProps) => {
   const value: ProjectContextType = useMemo(
     () => ({
       isStandaloneMode,
-      clusterAuthEnabled,
+      apiKeysManagementEnabled,
       aiGatewayEnabled,
       aiGatewayUrl,
       airmAppUrl: appConfig.airmAppUrl,
@@ -166,7 +166,7 @@ export const ProjectProvider = ({ children }: ProjectProviderProps) => {
     }),
     [
       isStandaloneMode,
-      clusterAuthEnabled,
+      apiKeysManagementEnabled,
       aiGatewayEnabled,
       aiGatewayUrl,
       appConfig.airmAppUrl,

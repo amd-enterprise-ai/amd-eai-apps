@@ -4,13 +4,14 @@
 
 
 import hashlib
-from typing import TYPE_CHECKING, Any
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any, NamedTuple
 from urllib.parse import urljoin
 from uuid import uuid4
 
 from loguru import logger
 
-from api_common.exceptions import ValidationException
+from api_common.exceptions import InconsistentStateException, ValidationException
 
 from ..config import CLUSTER_HOST, EAI_APPS_METADATA_PREFIX, SUBMITTER_ANNOTATION
 from ..dispatch.crds import K8sMetadata
@@ -18,13 +19,23 @@ from ..workloads.constants import CANONICAL_NAME_LABEL, DISPLAY_NAME_ANNOTATION,
 from ..workloads.enums import WorkloadType
 from .config import AIM_CLUSTER_RUNTIME_CONFIG_NAME, AIM_GATEWAY_NAME, AIM_GATEWAY_NAMESPACE
 from .constants import (
-    CLUSTER_AUTH_GROUP_ANNOTATION,
+    AIM_PROFILE_SET_RESOURCE,
+    AIM_PROFILE_SOURCE_MODEL_LABEL,
     FINE_TUNED_LABEL,
     NAMESPACE_AIM_MODEL_LABEL,
+    PROFILE_ORIGIN_LABEL,
     RECONCILER_PIPELINE_ANNOTATION,
     RECONCILER_PIPELINE_PROFILE,
 )
-from .crds import AIMModelResource, AIMServiceResource, AIMServiceSpec, HTTPRouteResource
+from .crds import (
+    AIMModelResource,
+    AIMProfileResource,
+    AIMProfileSetResource,
+    AIMServiceResource,
+    AIMServiceSpec,
+    HTTPRouteResource,
+)
+from .enums import AIMModelStatus
 
 if TYPE_CHECKING:
     from .schemas import AIMDeployRequest
@@ -44,6 +55,259 @@ def is_condition_true(conditions: list[dict[str, Any]], condition_type: str) -> 
         if condition.get("type") == condition_type:
             return condition.get("status") == "True"
     return False
+
+
+def is_default_profile_set(profile_set: AIMProfileSetResource) -> bool:
+    """A set is the Default iff it lacks AIWB's origin label."""
+    return PROFILE_ORIGIN_LABEL not in (profile_set.metadata.labels or {})
+
+
+def classify_default_profile_set(profile_sets: list[AIMProfileSetResource]) -> AIMProfileSetResource:
+    """Return the single Default set, raising if not exactly one is present."""
+    defaults = [profile_set for profile_set in profile_sets if is_default_profile_set(profile_set)]
+    if len(defaults) != 1:
+        raise InconsistentStateException(f"Expected exactly one Default AIMProfileSet, found {len(defaults)}")
+    return defaults[0]
+
+
+def owning_profile_set_name(profile: AIMProfileResource) -> str | None:
+    """Return the name of the AIMProfileSet that owns ``profile``, or None.
+
+    aim-engine owns every custom-model AIMProfile via an ``AIMProfileSet``
+    owner reference, which is the durable link between a derived profile and
+    the set it belongs to (the model.name label alone ties a profile to the
+    model, not to a specific set).
+    """
+    for ref in profile.metadata.owner_references or []:
+        if ref.get("kind") == AIM_PROFILE_SET_RESOURCE:
+            return ref.get("name")
+    return None
+
+
+def profiles_derived_from_set(profiles: list[AIMProfileResource], set_name: str) -> list[AIMProfileResource]:
+    """The subset of ``profiles`` owned by the AIMProfileSet named ``set_name``, in list order."""
+    return [profile for profile in profiles if owning_profile_set_name(profile) == set_name]
+
+
+def profiles_without_owning_set(profiles: list[AIMProfileResource]) -> list[AIMProfileResource]:
+    """The subset of ``profiles`` no AIMProfileSet owns, in list order.
+
+    These are the profiles aim-engine emitted before sets owned them; a model
+    that has never been reconciled by a set-aware engine has only these.
+    """
+    return [profile for profile in profiles if owning_profile_set_name(profile) is None]
+
+
+class ServedWeights(NamedTuple):
+    """The identities naming the weights a deployment runs, as its resolved profile states them.
+
+    ``model_id`` names the specific weights; ``aim_id`` names the group every variant built from
+    them shares. Both are optional because a profile predating either field states neither, and
+    ``ServedWeights(None, None)`` is a settled negative — the deployment can serve no adapter —
+    rather than an absence, which callers signal with ``None`` instead of an instance.
+    """
+
+    model_id: str | None
+    aim_id: str | None
+
+
+def adapter_serves(
+    compatible_with: Iterable[str],
+    served: ServedWeights,
+    *,
+    adapter_name: str,
+    namespace: str,
+) -> bool:
+    """Whether an adapter declares the weights a deployment runs, on either identity.
+
+    ``modelId`` is the identity that actually decides this: an adapter is trained against one set
+    of weights, and a profile serves one set. ``aimId`` is coarser — every quantised variant of a
+    model shares it — so matching on it can admit an adapter the running variant cannot load.
+
+    It is accepted anyway because nothing on the platform writes a modelId into ``compatibleWith``
+    yet; every producer writes an aimId, AIWB's own fine-tuning output included, and on the
+    families where the two differ a modelId-only rule would reject every adapter the platform
+    itself made. Accepting both keeps the precise identity authoritative wherever it is present
+    while the old one is still the only thing being written.
+
+    An aimId-only match is logged so the size of the remaining old-axis population stays
+    measurable. The aimId arm can be deleted once that count reaches zero — that is, once adapter
+    producers record the profile's modelId in ``compatibleWith`` and existing adapters have been
+    re-declared against it — after which this becomes the exact rule the name suggests.
+    """
+    declared = set(compatible_with)
+    if served.model_id and served.model_id in declared:
+        return True
+    if served.aim_id and served.aim_id in declared:
+        logger.info(
+            "Adapter {} in {} matched model group '{}' rather than the weights '{}' the deployment "
+            "serves; compatibleWith={}",
+            adapter_name,
+            namespace,
+            served.aim_id,
+            served.model_id or "unknown",
+            sorted(declared),
+        )
+        return True
+    return False
+
+
+def agreed_adapter_weights(declarations: Iterable[Iterable[str]], published_model_ids: Iterable[str]) -> str | None:
+    """The one set of weights every requested adapter names and the model publishes, or None.
+
+    ``compatibleWith`` mixes the two identities ``adapter_serves`` matches on, and which of the two
+    a given string is cannot be read off the string. Classifying it in isolation gets that wrong in
+    both directions: on an unquantised base the group id is also the ``modelId`` of the profile
+    serving those weights, so treating that string as a mere family name discards exactly the
+    declaration a migrated producer writes; and an adapter naming several variants is counted as
+    disagreement even when the model serves only one of them.
+
+    So the question is answered from the side that knows. Keeping only what the model's own
+    profiles publish lets a string equal to the group id survive when a profile genuinely serves it,
+    and narrows a multi-entry declaration to the variants this model can run.
+
+    Several survivors are several workable answers rather than an impasse: each one is weights every
+    requested adapter declared and this deployment can actually resolve, so any of them loads the
+    adapters. Abstaining there does not leave the deploy merely unconstrained — a declaration that
+    names no group id has nothing else for ``adapter_serves`` to match on, so no pin is a refusal of
+    an adapter the model demonstrably serves. One is therefore chosen, by sorted order, so the same
+    request pins the same weights every time rather than following the listing's arrival order.
+
+    None only when nothing survives: that is the old-axis population with nothing more precise to
+    say than the group, or weights this deployment cannot resolve, and both leave selector
+    resolution exactly as unconstrained as it is without adapters. ``published_model_ids`` is what
+    keeps that honest — the caller passes the weights eligible for *this* deploy, not every weights
+    id sharing the group.
+    """
+    declared = [frozenset(entry) for entry in declarations]
+    if not declared:
+        return None
+    agreed = frozenset.intersection(*declared) & frozenset(published_model_ids)
+    return min(agreed) if agreed else None
+
+
+def deploy_selector_criteria(deploy_request: "AIMDeployRequest") -> dict[str, str]:
+    """The profile-selector criteria the request itself carries, under the engine's own key names.
+
+    One definition serves two readers: the selector written to the CR, and the set of profiles
+    aim-engine could resolve against that selector. Deriving them separately is what let the gate
+    admit adapters on weights no candidate of this deploy publishes.
+    """
+    criteria: dict[str, str] = {}
+    if deploy_request.metric:
+        criteria["metric"] = str(deploy_request.metric)
+    if deploy_request.precision:
+        criteria["precision"] = deploy_request.precision
+    if deploy_request.gpu_model is not None:
+        criteria["acceleratorModel"] = deploy_request.gpu_model
+    return criteria
+
+
+def _profile_axis(profile: AIMProfileResource, axis: str) -> str | None:
+    """Read the profile field a selector key names, or None when the profile states none."""
+    spec = profile.spec
+    return {"metric": spec.metric, "precision": spec.precision, "acceleratorModel": spec.accelerator_model}.get(axis)
+
+
+def profiles_eligible_for_deploy(
+    profiles: Iterable[AIMProfileResource],
+    *,
+    model_name: str,
+    criteria: dict[str, str],
+) -> list[AIMProfileResource]:
+    """The profiles aim-engine could still resolve for this deploy, out of the model group's own.
+
+    A group id spans every quantised variant and every version of a model, so the group's profiles
+    are a far wider pool than one deploy can land on. aim-engine's selector match is conjunctive and
+    its candidate listing is scoped to the model a profile records as its source, so a profile is
+    only a real candidate when it belongs to the model version being deployed *and* agrees with
+    every criterion the request carries. Anything the request left open stays open, matching the
+    selector it writes.
+
+    Provenance is read from the label aim-engine itself stamps and selects on, so a profile the
+    engine attributed to a sibling version is excluded on the strength of what the engine wrote
+    rather than on a key it never sets — reading a key the engine does not stamp leaves every
+    profile unlabelled, which silently retains the whole group.
+
+    A profile carrying no provenance label is still kept: an unstamped profile is a gap in that
+    provenance rather than evidence of belonging to a sibling — the same reason an empty catalog is
+    not read as a mismatch. Comparison is case-insensitive, as ``select_custom_deploy_profile``
+    already treats precision, so a catalog writing ``FP8`` where the request says ``fp8`` does not
+    read as a different profile.
+    """
+    eligible = []
+    for profile in profiles:
+        labelled_model = (profile.metadata.labels or {}).get(AIM_PROFILE_SOURCE_MODEL_LABEL)
+        if labelled_model and labelled_model != model_name:
+            continue
+        if any((_profile_axis(profile, axis) or "").lower() != value.lower() for axis, value in criteria.items()):
+            continue
+        eligible.append(profile)
+    return eligible
+
+
+# Optimization tiers (best first) and metric preference used to pick one profile
+# deterministically among several that share the onboarded precision.
+_PROFILE_TYPE_RANK = {"optimized": 0, "general": 1, "preview": 2, "unoptimized": 3}
+_PROFILE_METRIC_RANK = {"latency": 0, "throughput": 1}
+# Sort key for a profile whose type/metric is unrecognized: rank it after every
+# known value so unknowns are only ever chosen as a last resort.
+_PROFILE_RANK_UNKNOWN = 99
+
+
+def select_custom_deploy_profile(
+    profiles: list[AIMProfileResource], preferred_precision: str
+) -> AIMProfileResource | None:
+    """Return the Ready AIMProfile matching the onboarded precision, or None.
+
+    A custom model emits one profile per (precision, metric) pair, so pinning an
+    arbitrary one loses the user's onboarded precision. Prefer a Ready profile
+    whose ``spec.precision`` matches ``preferred_precision``; ties break by
+    optimization tier, the engine's ``primary`` flag, metric (latency first),
+    then name, matching aim-engine's documented ranking. Returns None when no Ready
+    profile carries that precision, so the caller can fall back.
+    """
+    matching = [
+        p
+        for p in profiles
+        if (p.spec.precision or "").lower() == preferred_precision.lower()
+        and p.status
+        and str(p.status.status) == AIMModelStatus.READY
+    ]
+    if not matching:
+        return None
+
+    def _rank(profile: AIMProfileResource) -> tuple[int, int, int, str]:
+        spec = profile.spec
+        return (
+            _PROFILE_TYPE_RANK.get((spec.type or "").lower(), _PROFILE_RANK_UNKNOWN),
+            0 if spec.primary else 1,
+            _PROFILE_METRIC_RANK.get((spec.metric or "").lower(), _PROFILE_RANK_UNKNOWN),
+            profile.metadata.name or "",
+        )
+
+    return min(matching, key=_rank)
+
+
+def effective_profile_for_set(
+    derived_profiles: list[AIMProfileResource],
+    preferred_precision: str | None,
+) -> AIMProfileResource | None:
+    """Pick the profile a deploy pins for a set, so row summaries agree with deploy.
+
+    A narrowed set derives exactly one profile, so the choice is unambiguous. An
+    unnarrowed Default derives several: prefer the Ready profile matching the
+    precision the model was onboarded at, and fall back to the first derived
+    profile when the model carries no precision annotation or has no Ready profile
+    at that precision — the same profile deploy pinned before this selection existed.
+    """
+    if not derived_profiles:
+        return None
+    if preferred_precision:
+        selected = select_custom_deploy_profile(derived_profiles, preferred_precision)
+        if selected is not None:
+            return selected
+    return derived_profiles[0]
 
 
 def generate_aim_service_name(aim_id: str | None = None) -> str:
@@ -192,24 +456,36 @@ def extract_endpoints(
     return endpoints
 
 
-def _build_aim_service_profile(deploy_request: "AIMDeployRequest") -> dict[str, Any]:
+def _build_aim_service_profile(
+    deploy_request: "AIMDeployRequest",
+    pinned_model_id: str | None = None,
+    pinned_aim_id: str | None = None,
+) -> dict[str, Any]:
     """Build spec.profile (direct name or selector) from deploy-time criteria.
 
     Always injects minimumType=any so aim-engine considers all profile tiers
     (optimized, preview, unoptimized) rather than enforcing the default optimized
     floor. Without this, deployments on clusters that only have unoptimized or
     preview profiles fail with ProfileNotFound even when matching candidates exist.
+
+    ``pinned_model_id`` is the weights the requested adapters were built for. aim-engine resolves a
+    selector after the CR is written, and an unconstrained one can land on a sibling variant of the
+    same model — another quantisation, say — that those adapters cannot load. The request is
+    accepted and the failure arrives minutes later as a service that never starts. Naming the
+    weights leaves the engine no such profile to choose.
+
+    ``pinned_aim_id`` travels with it rather than standing in for it: the engine's candidate listing
+    is indexed on the group identity and falls back to listing every profile in scope without it.
+    Both are needed for the narrowing to be free, so a weights identity with no group identity
+    beside it pins nothing -- the caller-supplied criteria are left exactly as they are today.
     """
     if deploy_request.profile_name:
         return {"name": deploy_request.profile_name}
 
-    selector: dict[str, Any] = {"minimumType": "any"}
-    if deploy_request.metric:
-        selector["metric"] = deploy_request.metric
-    if deploy_request.precision:
-        selector["precision"] = deploy_request.precision
-    if deploy_request.gpu_model is not None:
-        selector["acceleratorModel"] = deploy_request.gpu_model
+    selector: dict[str, Any] = {"minimumType": "any", **deploy_selector_criteria(deploy_request)}
+    if pinned_model_id and pinned_aim_id:
+        selector["modelId"] = pinned_model_id
+        selector["aimId"] = pinned_aim_id
     return {"selector": selector}
 
 
@@ -253,12 +529,40 @@ def _build_aim_service_profile_overrides(deploy_request: "AIMDeployRequest") -> 
     return overrides
 
 
-def _apply_deploy_profile_fields(spec_dict: dict[str, Any], deploy_request: "AIMDeployRequest") -> None:
+def _apply_deploy_profile_fields(
+    spec_dict: dict[str, Any],
+    deploy_request: "AIMDeployRequest",
+    pinned_model_id: str | None = None,
+    pinned_aim_id: str | None = None,
+) -> None:
     """Populate spec.profile and spec.profileOverrides from the deploy request."""
-    spec_dict["profile"] = _build_aim_service_profile(deploy_request)
+    spec_dict["profile"] = _build_aim_service_profile(deploy_request, pinned_model_id, pinned_aim_id)
     profile_overrides = _build_aim_service_profile_overrides(deploy_request)
     if profile_overrides:
         spec_dict["profile_overrides"] = profile_overrides
+
+
+def _apply_deploy_adapter_fields(spec_dict: dict[str, Any], deploy_request: "AIMDeployRequest") -> None:
+    """Populate the adapter fields from the deploy request.
+
+    An empty adapters list is treated as no request at all, exactly like omitting the field. Writing
+    `spec.adapters: []` would not be the neutral record it looks like: under the default `static`
+    mode aim-engine mounts the adapter disk for any service that declares adapters, so persisting an
+    empty declaration hands the caller a mount they never asked for.
+
+    adapterMode is likewise left unwritten unless chosen, because it is immutable once set — leaving
+    it out keeps the CRD default in force rather than permanently pinning the service to a mode the
+    user never picked.
+
+    adapterRuntime is a sibling of profileOverrides, so the rank ceiling is written independently
+    of engine and container overrides on the profile.
+    """
+    if deploy_request.adapters:
+        spec_dict["adapters"] = [{"kind": "AIMArtifact", "name": name} for name in deploy_request.adapters]
+    if deploy_request.adapter_mode is not None:
+        spec_dict["adapter_mode"] = deploy_request.adapter_mode
+    if deploy_request.max_lora_rank is not None:
+        spec_dict["adapter_runtime"] = {"max_rank": deploy_request.max_lora_rank}
 
 
 def generate_fine_tuned_aim_service_manifest(
@@ -268,7 +572,6 @@ def generate_fine_tuned_aim_service_manifest(
     service_name: str,
     api_version: str,
     submitter: str,
-    cluster_auth_group_id: str | None,
     display_name: str,
     canonical_name: str,
 ) -> dict:
@@ -280,7 +583,6 @@ def generate_fine_tuned_aim_service_manifest(
         service_name=service_name,
         api_version=api_version,
         submitter=submitter,
-        cluster_auth_group_id=cluster_auth_group_id,
         display_name=display_name,
         canonical_name=canonical_name,
         is_fine_tuned=True,
@@ -294,12 +596,13 @@ def generate_namespace_aim_service_manifest(
     service_name: str,
     api_version: str,
     submitter: str,
-    cluster_auth_group_id: str | None,
     display_name: str,
     canonical_name: str,
     is_fine_tuned: bool = True,
     resolved_profile_name: str | None = None,
     deploy_display_name: str | None = None,
+    pinned_model_id: str | None = None,
+    pinned_aim_id: str | None = None,
 ) -> dict:
     """Generate AIMService manifest for a namespace AIMModel deployment.
 
@@ -313,6 +616,9 @@ def generate_namespace_aim_service_manifest(
     ``deploy_display_name`` is the optional user-entered deploy name; when present
     it wins for the user-visible DISPLAY_NAME_ANNOTATION, otherwise it falls back
     to the model identity.
+
+    ``pinned_model_id``/``pinned_aim_id`` narrow selector resolution to the weights the requested
+    adapters were built for; the caller resolves them, as this builds no state of its own.
     """
     routing_config: dict[str, Any] = {
         "enabled": True,
@@ -321,13 +627,6 @@ def generate_namespace_aim_service_manifest(
             "namespace": AIM_GATEWAY_NAMESPACE,
         },
     }
-    # DEPRECATED (EAI-6038): retained for the legacy kgateway + API key auth path.
-    # The Envoy AI Gateway path reads cluster-auth/allowed-group from
-    # metadata.annotations below (propagated to InferenceService by aim-engine,
-    # then surfaced as SecurityPolicy contextExtensions by ai-gateway-discovery).
-    # Remove once kgateway is no longer in use.
-    if cluster_auth_group_id is not None:
-        routing_config["annotations"] = {CLUSTER_AUTH_GROUP_ANNOTATION: cluster_auth_group_id}
 
     spec_dict: dict[str, Any] = {
         "model": {"name": model_name},
@@ -345,7 +644,9 @@ def generate_namespace_aim_service_manifest(
     if resolved_profile_name:
         spec_dict["profile"] = {"name": resolved_profile_name}
     else:
-        _apply_deploy_profile_fields(spec_dict, deploy_request)
+        _apply_deploy_profile_fields(spec_dict, deploy_request, pinned_model_id, pinned_aim_id)
+
+    _apply_deploy_adapter_fields(spec_dict, deploy_request)
 
     if deploy_request.min_replicas is not None:
         spec_dict["min_replicas"] = deploy_request.min_replicas
@@ -361,13 +662,12 @@ def generate_namespace_aim_service_manifest(
             namespace=namespace,
             annotations={
                 SUBMITTER_ANNOTATION: submitter,
-                # TODO(EAI-6783): drop once aim-engine removes v1alpha1 and the
+                # TODO: drop once aim-engine removes v1alpha1 and the
                 # profile pipeline becomes the default dispatch.
                 RECONCILER_PIPELINE_ANNOTATION: RECONCILER_PIPELINE_PROFILE,
                 CANONICAL_NAME_LABEL: canonical_name,
                 MODEL_NAME_LABEL: display_name,
                 **({DISPLAY_NAME_ANNOTATION: effective_display_name} if effective_display_name else {}),
-                **({CLUSTER_AUTH_GROUP_ANNOTATION: cluster_auth_group_id} if cluster_auth_group_id is not None else {}),
             },
             labels={
                 f"{EAI_APPS_METADATA_PREFIX}/workload-type": WorkloadType.INFERENCE,
@@ -397,10 +697,14 @@ def generate_aim_service_manifest(
     service_name: str,
     api_version: str,
     submitter: str,
-    cluster_auth_group_id: str | None,
     display_name: str | None = None,
+    pinned_model_id: str | None = None,
+    pinned_aim_id: str | None = None,
 ) -> dict:
     """Generate AIMService CRD manifest for deploying an AIM using Pydantic models.
+
+    ``pinned_model_id``/``pinned_aim_id`` narrow selector resolution to the weights the requested
+    adapters were built for; the caller resolves them, as this builds no state of its own.
 
     Args:
         aim: AIMClusterModel resource
@@ -409,7 +713,6 @@ def generate_aim_service_manifest(
         service_name: The K8s resource name for the AIMService
         api_version: K8s API version
         submitter: User submitting the service
-        cluster_auth_group_id: Cluster-Auth group ID for access control, or None when disabled
         display_name: Optional user-visible display name stored as annotation
     """
     # Build spec using dict for complex fields that aren't fully modeled
@@ -420,13 +723,6 @@ def generate_aim_service_manifest(
             "namespace": AIM_GATEWAY_NAMESPACE,
         },
     }
-    # DEPRECATED (EAI-6038): retained for the legacy kgateway + API key auth path.
-    # The Envoy AI Gateway path reads cluster-auth/allowed-group from
-    # metadata.annotations below (propagated to InferenceService by aim-engine,
-    # then surfaced as SecurityPolicy contextExtensions by ai-gateway-discovery).
-    # Remove once kgateway is no longer in use.
-    if cluster_auth_group_id is not None:
-        routing_config["annotations"] = {CLUSTER_AUTH_GROUP_ANNOTATION: cluster_auth_group_id}
 
     spec_dict: dict[str, Any] = {
         "model": {"name": aim.metadata.name},
@@ -436,7 +732,8 @@ def generate_aim_service_manifest(
         "routing": routing_config,
     }
 
-    _apply_deploy_profile_fields(spec_dict, deploy_request)
+    _apply_deploy_profile_fields(spec_dict, deploy_request, pinned_model_id, pinned_aim_id)
+    _apply_deploy_adapter_fields(spec_dict, deploy_request)
 
     # Add scaling policy if provided (validation handled by pydantic schema)
     if deploy_request.min_replicas is not None:
@@ -461,11 +758,10 @@ def generate_aim_service_manifest(
             namespace=namespace,
             annotations={
                 SUBMITTER_ANNOTATION: submitter,
-                # TODO(EAI-6783): drop once aim-engine removes v1alpha1 and the
+                # TODO: drop once aim-engine removes v1alpha1 and the
                 # profile pipeline becomes the default dispatch.
                 RECONCILER_PIPELINE_ANNOTATION: RECONCILER_PIPELINE_PROFILE,
                 **({DISPLAY_NAME_ANNOTATION: display_name} if display_name else {}),
-                **({CLUSTER_AUTH_GROUP_ANNOTATION: cluster_auth_group_id} if cluster_auth_group_id is not None else {}),
             },
             labels={
                 f"{EAI_APPS_METADATA_PREFIX}/workload-type": WorkloadType.INFERENCE,

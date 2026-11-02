@@ -134,13 +134,11 @@ export const SecretsTable: React.FC<Props> = ({
           <NoDataDisplay />
         ),
       [SecretsTableField.CREATED_AT]: (item: {
-        [SecretsTableField.CREATED_AT]: string;
-      }) =>
-        item[SecretsTableField.CREATED_AT] ? (
-          <DateDisplay date={item[SecretsTableField.CREATED_AT]} />
-        ) : (
-          <NoDataDisplay />
-        ),
+        [SecretsTableField.CREATED_AT]: string | null | undefined;
+      }) => {
+        const createdAt = item[SecretsTableField.CREATED_AT];
+        return createdAt ? <DateDisplay date={createdAt} /> : <NoDataDisplay />;
+      },
     }),
     [t],
   );

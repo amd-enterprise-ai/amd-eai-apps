@@ -35,6 +35,7 @@ List datasets
     Then response status should be 200
     And response should contain datasets list
     And response should contain at least 3 datasets
+    And listed datasets should report their file sizes
 
 List datasets with type filter
     [Documentation]    Verify that datasets can be filtered by type via GET /datasets?type=...
@@ -76,6 +77,15 @@ Get specific dataset
     And response should contain "${TEST_DATASET}[name]"
     And response should contain key "id"
     And response should contain value "${TEST_DATASET_ID}"
+
+Uploaded dataset reports its file size
+    [Documentation]    A dataset exposes the size of the file stored for it.
+    [Tags]                  datasets                get                     size
+    Given a ready project with user access exists
+    And a dataset is uploaded
+    When get dataset request is sent
+    Then response status should be 200
+    And dataset size should match uploaded file
 
 Modify existing dataset
     [Documentation]    UNSUPPORTED: Verify that an existing dataset can be modified via PUT /datasets/{id}

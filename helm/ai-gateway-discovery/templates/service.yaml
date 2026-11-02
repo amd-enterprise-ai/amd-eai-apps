@@ -12,12 +12,24 @@ metadata:
     app.kubernetes.io/name: {{ .Release.Name }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
+  # Selector points at the authz pods, not the controller: this Service is the extAuth backendRef
+  # target (per-model catch-all + workloads SecurityPolicies, and the cluster-forge default-deny),
+  # so its name/namespace/ports are a fixed contract. Only the selector moves in the split, which is
+  # what keeps the change contained to this chart (no cluster-forge or ReferenceGrant churn).
   selector:
-    app.kubernetes.io/name: {{ .Release.Name }}
+    app.kubernetes.io/name: {{ .Release.Name }}-authz
     app.kubernetes.io/instance: {{ .Release.Name }}
   ports:
     - name: health
       port: {{ .Values.controller.healthPort }}
       targetPort: health
+      protocol: TCP
+    - name: authz
+      port: {{ .Values.controller.authzPort }}
+      targetPort: authz
+      protocol: TCP
+    - name: workloads-authz
+      port: {{ .Values.controller.workloadsAuthzPort }}
+      targetPort: workloads-authz
       protocol: TCP
   type: ClusterIP

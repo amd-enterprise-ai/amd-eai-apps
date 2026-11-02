@@ -22,7 +22,8 @@
     }
   },
   "actions": {
-    "createProject": "Create project"
+    "createProject": "Create project",
+    "back": "Back to project"
   },
   "list": {
     "headers": {
@@ -43,13 +44,16 @@
       }
     },
     "filter": {
+      "label": "Search projects",
       "search": {
         "placeholder": "Search"
       },
       "cluster": {
+        "label": "Filter by cluster",
         "placeholder": "Cluster"
       },
       "status": {
+        "label": "Filter by status",
         "placeholder": "Status"
       }
     },
@@ -100,13 +104,13 @@
           "title": "VRAM"
         },
         "runTime": {
-          "title": "Run Time"
+          "title": "Run time"
         },
         "createdAt": {
-          "title": "Created At"
+          "title": "Created at"
         },
         "createdBy": {
-          "title": "Created By"
+          "title": "Created by"
         },
         "actions": {
           "title": ""
@@ -145,7 +149,7 @@
           "title": "Role"
         },
         "lastActive": {
-          "title": "Last Active"
+          "title": "Last active"
         },
         "actions": {
           "title": "Actions"
@@ -171,13 +175,13 @@
           "title": "Name"
         },
         "cpu": {
-          "title": "CPU Allocation"
+          "title": "CPU allocation"
         },
         "gpu": {
-          "title": "GPU Allocation"
+          "title": "GPU allocation"
         },
         "memory": {
-          "title": "Memory Allocation"
+          "title": "Memory allocation"
         },
         "actions": {
           "title": ""
@@ -185,13 +189,13 @@
       },
       "filter": {
         "name": {
-          "placeholder": "Search by identifier..."
+          "placeholder": "Search"
         },
         "cluster": {
-          "placeholder": "Filter by Cluster"
+          "placeholder": "Filter by cluster"
         },
         "project": {
-          "placeholder": "Filter by Assignee"
+          "placeholder": "Filter by assignee"
         }
       },
       "clusters": {
@@ -232,7 +236,7 @@
     "Failed": "Error",
     "Deleting": "Deleting",
     "Pending": "Syncing",
-    "PartiallyReady": "Partially Ready"
+    "PartiallyReady": "Partially ready"
   },
   "modal": {
     "create": {
@@ -245,10 +249,10 @@
         "name": {
           "label": "Name",
           "placeholder": "Eg. project-name",
-          "description": "Provide a unique name for the project (namespace). Only lowercase letters, numbers and hyphens are allowed.",
+          "description": "Provide a unique name for the project (namespace). Only lowercase letters, numbers and single hyphens between them are allowed.",
           "validation": {
             "unique": "A project with the same name already exists.",
-            "format": "A project name can only consist of lowercase characters, numbers and '-' character (and not start or end with '-').",
+            "format": "A project name can only consist of lowercase characters, numbers and '-' character (it can't start or end with '-', or contain consecutive hyphens).",
             "length": "The name of the project must be between 2 and 41 characters."
           }
         },
@@ -304,11 +308,11 @@
     "navigation": "Project settings",
     "title": "Project settings",
     "delete": {
-      "title": "Danger Zone",
+      "title": "Danger zone",
       "message": "These changes are permanent and cannot be undone. Please make sure the project is not in use, prior to deletion.",
       "action": "Delete project",
       "confirmation": {
-        "title": "Confirm Deletion",
+        "title": "Confirm deletion",
         "description": "Are you sure you want to delete this project <strong>{{project}}</strong>? The action is permanent and cannot be undone."
       },
       "notification": {
@@ -341,17 +345,18 @@
         }
       },
       "guaranteedQuota": {
+        "title": "Guaranteed quota allocation",
         "info": "Define a quota below to guarantee a fixed amount of compute resources for the assigned project. Setting a quota category to 0 means no resources are guaranteed exclusively for that project \u2014 its workloads will still use any available resource.  Even with a quota in place, workloads may temporarily exceed their quota if additional resources are available.",
         "groups": {
           "resource": "Resource",
-          "allocation": "Guaranteed Allocation",
-          "available": "Available to Allocate"
+          "allocation": "Guaranteed allocation",
+          "available": "Available to allocate"
         },
         "fields": {
-          "cpu": "CPU Cores",
-          "ram": "System Memory",
+          "cpu": "CPU cores",
+          "ram": "System memory",
           "gpu": "GPUs",
-          "disk": "Ephemeral Disk"
+          "disk": "Ephemeral disk"
         }
       },
       "deleteProject": {
@@ -367,16 +372,16 @@
       }
     },
     "membersAndInvitedUsers": {
-      "title": "Assigned Users",
+      "title": "Assigned users",
       "members": {
         "title": "Members",
         "empty": "This project has no members.",
         "actions": {
           "add": {
-            "title": "Add Member",
+            "title": "Add member",
             "modal": {
               "intro": "Search and select user(s) you want to add to the <strong>{{project}}</strong> project.",
-              "title": "Add User(s) to Project",
+              "title": "Add user(s) to project",
               "confirm": "Add to project",
               "cancel": "Cancel"
             },
@@ -394,7 +399,7 @@
                 },
                 "section": {
                   "users": "Users",
-                  "invitedUsers": "Invited Users"
+                  "invitedUsers": "Invited users"
                 }
               }
             },
@@ -476,25 +481,25 @@
         }
       },
       "waitTimeAvg": {
-        "title": "Wait Time (Avg)",
+        "title": "Wait time (Avg)",
         "description": "The average time a workload spends waiting to be executed, prior to execution."
       },
       "quotaUtilizationAvg": {
-        "title": "Quota Utilization (Avg)",
+        "title": "Quota utilization (Avg)",
         "description": "The average ratio of utilized GPUs versus the allocated GPUs for all workloads running within the project, submitted in the selected time range."
       },
       "gpuIdleTimeAvg": {
-        "title": "GPU Idle Time (Avg)",
+        "title": "GPU idle time (Avg)",
         "description": "The average time each GPU devices allocated to the project is in an idling state. Idle state meaning running workloads not utilizing GPUs quota allocated to the project."
       },
       "gpuDeviceUsage": {
-        "title": "GPU Device Usage",
+        "title": "GPU device usage",
         "description": "The number of GPU devices utilized by workloads in this project versus the GPUs allocated to it, over specified timeframe.",
         "upperLimit": "/ {{num}} allocated",
         "upperLimitUnallocated": "/ no allocation"
       },
       "vramDeviceUsage": {
-        "title": "GPU VRAM Usage",
+        "title": "GPU VRAM usage",
         "description": "The amount of GPU VRAM GPU utilized by workloads in this project versus the VRAM allocated to them, via the allocated GPUs, over specified timeframe.",
         "upperLimit": "/ {{num}} allocated",
         "upperLimitUnallocated": "/ no allocation"

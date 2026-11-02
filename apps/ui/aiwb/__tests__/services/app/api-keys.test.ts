@@ -16,42 +16,56 @@ import {
   generateMockFullApiKey,
 } from '@/__mocks__/utils/api-keys-mock';
 
-vi.mock('@amdenterpriseai/utils/app', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@amdenterpriseai/utils/app')>();
+// Mock the typed apiClient (not globalThis.fetch): the service layer awaits an
+// openapi-fetch `{ data, error, response }` envelope from each verb.
+const mockGET = vi.fn();
+const mockPOST = vi.fn();
+const mockDELETE = vi.fn();
+const mockPATCH = vi.fn();
+
+vi.mock('@/lib/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api-client')>();
   return {
     ...actual,
-    getErrorMessage: vi.fn().mockResolvedValue('error message'),
+    apiClient: {
+      GET: (...args: unknown[]) => mockGET(...args),
+      POST: (...args: unknown[]) => mockPOST(...args),
+      DELETE: (...args: unknown[]) => mockDELETE(...args),
+      PATCH: (...args: unknown[]) => mockPATCH(...args),
+    },
   };
 });
 
-const mockJson = vi.fn();
-const mockFetch = vi.fn();
-
-globalThis.fetch = mockFetch as any;
-
 beforeEach(() => {
   vi.clearAllMocks();
-  mockJson.mockClear();
 });
 
 describe('api-keys service', () => {
   describe('fetchProjectApiKeys', () => {
     it('should fetch a single page when total fits in one page', async () => {
       const mockResponse = generateMockApiKeyResponse();
-
-      mockJson.mockResolvedValue({
-        ...mockResponse,
-        pagination: { page: 1, pageSize: 100, total: mockResponse.data.length },
+      mockGET.mockResolvedValue({
+        data: {
+          data: mockResponse.data,
+          pagination: {
+            page: 1,
+            pageSize: 100,
+            total: mockResponse.data.length,
+          },
+        },
+        error: undefined,
+        response: { status: 200 } as Response,
       });
-      mockFetch.mockResolvedValue({ ok: true, json: mockJson });
 
       const result = await fetchProjectApiKeys('project-1');
 
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/projects/project-1/api-keys?pageSize=100&page=1',
-      );
+      expect(mockGET).toHaveBeenCalledTimes(1);
+      expect(mockGET).toHaveBeenCalledWith('/api/projects/{project}/api-keys', {
+        params: {
+          path: { project: 'project-1' },
+          query: { page: 1, pageSize: 100 },
+        },
+      });
       expect(result).toEqual({ data: mockResponse.data });
     });
 
@@ -66,98 +80,84 @@ describe('api-keys service', () => {
         id: `k-${200 + i}`,
       }));
 
-      mockFetch.mockImplementation(async (url: string) => {
-        const page = new URL(url, 'http://t').searchParams.get('page');
-        const data =
-          page === '1' ? pageOne : page === '2' ? pageTwo : pageThree;
-        return {
-          ok: true,
-          json: async () => ({
-            data,
-            pagination: { page: Number(page), pageSize: 100, total: 250 },
-          }),
-        };
-      });
+      mockGET.mockImplementation(
+        (_path: string, opts: { params: { query: { page: number } } }) => {
+          const page = opts.params.query.page;
+          const data = page === 1 ? pageOne : page === 2 ? pageTwo : pageThree;
+          return Promise.resolve({
+            data: { data, pagination: { page, pageSize: 100, total: 250 } },
+            error: undefined,
+            response: { status: 200 } as Response,
+          });
+        },
+      );
 
       const result = await fetchProjectApiKeys('project-1');
 
-      expect(mockFetch).toHaveBeenCalledTimes(3);
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/projects/project-1/api-keys?pageSize=100&page=1',
-      );
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/projects/project-1/api-keys?pageSize=100&page=2',
-      );
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/projects/project-1/api-keys?pageSize=100&page=3',
-      );
+      expect(mockGET).toHaveBeenCalledTimes(3);
       expect(result.data).toHaveLength(250);
       expect(result.data[0]).toEqual({ id: 'k-0' });
       expect(result.data[249]).toEqual({ id: 'k-249' });
     });
 
     it('should handle fetch error', async () => {
-      mockFetch.mockResolvedValue({ ok: false, status: 500 });
+      // Mirror the BFF handleError() response shape: it flattens the upstream
+      // detail into a top-level `error` field, which is what getApiClientErrorMessage reads.
+      mockGET.mockResolvedValue({
+        data: undefined,
+        error: { detail: 'boom', error: 'boom' },
+        response: {
+          status: 500,
+          statusText: 'Internal Server Error',
+        } as Response,
+      });
 
-      await expect(fetchProjectApiKeys('project-1')).rejects.toThrow(
-        APIRequestError,
-      );
+      await expect(fetchProjectApiKeys('project-1')).rejects.toThrow(/boom/);
 
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/projects/project-1/api-keys?pageSize=100&page=1',
-      );
+      expect(mockGET).toHaveBeenCalledTimes(1);
     });
 
     it('should handle empty API keys list', async () => {
-      mockJson.mockResolvedValue({
-        data: [],
-        pagination: { page: 1, pageSize: 100, total: 0 },
+      mockGET.mockResolvedValue({
+        data: { data: [], pagination: { page: 1, pageSize: 100, total: 0 } },
+        error: undefined,
+        response: { status: 200 } as Response,
       });
-      mockFetch.mockResolvedValue({ ok: true, json: mockJson });
 
       const result = await fetchProjectApiKeys('project-1');
 
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/projects/project-1/api-keys?pageSize=100&page=1',
-      );
+      expect(mockGET).toHaveBeenCalledTimes(1);
       expect(result).toEqual({ data: [] });
     });
   });
 
   describe('deleteApiKey', () => {
     it('should delete API key successfully', async () => {
-      mockFetch.mockResolvedValue({ ok: true });
+      mockDELETE.mockResolvedValue({
+        error: undefined,
+        response: { status: 204, ok: true } as Response,
+      });
 
       await deleteApiKey('project-1', 'api-key-1');
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/projects/project-1/api-keys/api-key-1',
-        {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        },
+      expect(mockDELETE).toHaveBeenCalledWith(
+        '/api/projects/{project}/api-keys/{api_key_id}',
+        { params: { path: { project: 'project-1', api_key_id: 'api-key-1' } } },
       );
     });
 
     it('should handle delete error', async () => {
-      mockFetch.mockResolvedValue({ ok: false, status: 404 });
+      mockDELETE.mockResolvedValue({
+        error: { detail: 'not found', error: 'not found' },
+        response: {
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+        } as Response,
+      });
 
       await expect(deleteApiKey('project-1', 'api-key-1')).rejects.toThrow(
-        APIRequestError,
-      );
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/projects/project-1/api-keys/api-key-1',
-        {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        },
+        /not found/,
       );
     });
   });
@@ -165,59 +165,51 @@ describe('api-keys service', () => {
   describe('createApiKey', () => {
     it('should create API key successfully', async () => {
       const mockResponse = generateMockFullApiKey();
-
-      mockJson.mockResolvedValue(mockResponse);
-      mockFetch.mockResolvedValue({ ok: true, json: mockJson });
+      mockPOST.mockResolvedValue({
+        data: mockResponse,
+        error: undefined,
+        response: { status: 201 } as Response,
+      });
 
       const createData = generateMockCreateApiKeyData();
       const result = await createApiKey('project-1', createData);
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/projects/project-1/api-keys',
+      expect(mockPOST).toHaveBeenCalledWith(
+        '/api/projects/{project}/api-keys',
         {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(createData),
+          params: { path: { project: 'project-1' } },
+          body: createData,
         },
       );
-      expect(mockJson).toHaveBeenCalled();
       expect(result).toEqual(mockResponse);
     });
 
     it('should handle create error', async () => {
-      mockFetch.mockResolvedValue({ ok: false, status: 400 });
+      mockPOST.mockResolvedValue({
+        data: undefined,
+        error: { detail: 'bad request', error: 'bad request' },
+        response: { status: 400, statusText: 'Bad Request' } as Response,
+      });
 
       const createData = generateMockCreateApiKeyData();
       await expect(createApiKey('project-1', createData)).rejects.toThrow(
-        APIRequestError,
-      );
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/projects/project-1/api-keys',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(createData),
-        },
+        /bad request/,
       );
     });
 
     it('should include the request body', async () => {
-      mockJson.mockResolvedValue({});
-      mockFetch.mockResolvedValue({ ok: true, json: mockJson });
+      mockPOST.mockResolvedValue({
+        data: generateMockFullApiKey(),
+        error: undefined,
+        response: { status: 201 } as Response,
+      });
 
       const createData = generateMockCreateApiKeyData();
       await createApiKey('project-1', createData);
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/projects/project-1/api-keys',
-        expect.objectContaining({
-          body: JSON.stringify(createData),
-        }),
+      expect(mockPOST).toHaveBeenCalledWith(
+        '/api/projects/{project}/api-keys',
+        expect.objectContaining({ body: createData }),
       );
     });
   });

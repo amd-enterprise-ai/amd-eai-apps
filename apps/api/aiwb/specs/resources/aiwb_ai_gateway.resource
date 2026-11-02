@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: MIT
 
 *** Settings ***
-Documentation       Business-logic keywords for the unified Envoy AI Gateway
-...                 (EAI-5889 / EAI-6040). Provides Given/When/Then steps for
+Documentation       Business-logic keywords for the unified Envoy AI Gateway.
+...                 Provides Given/When/Then steps for
 ...                 model discovery and OpenAI-compatible inference through the
 ...                 single gateway endpoint exposed by ai-gateway-discovery.
 ...
@@ -13,7 +13,7 @@ Documentation       Business-logic keywords for the unified Envoy AI Gateway
 ...                 the shared AIM and API-key keywords. The served model name
 ...                 is currently sourced from the per-AIM external endpoint via
 ...                 `An AIM model is running with api key`; this becomes a TODO
-...                 once EAI-6787 removes that route (see EAI-6834).
+...                 once that route is removed.
 Resource            resources/aiwb_common.resource
 Resource            resources/aiwb_aims.resource
 Resource            resources/aims/api_keys.resource
@@ -26,13 +26,16 @@ Library             Collections
 Library             String
 Library             Process
 Library             DateTime
+Library             GatewayAssertions
 
 
 *** Variables ***
 ${AI_GATEWAY_URL}            ${EMPTY}
 ${AIWB_NAMESPACE}            aiwb
-${HF_TOKEN_SECRET_NAME}      huggingface-token
 ${AIM_RESOURCE_OVERRIDE}     ${EMPTY}
+# Footprint reserved for a pinned AIM the catalog cannot place. Two GPUs is the largest
+# single-model footprint these suites deployed before quota was sized from the catalog.
+${OVERRIDE_FALLBACK_GPU_COUNT}    ${2}
 
 
 *** Keywords ***
@@ -89,42 +92,50 @@ The AI Gateway endpoint is available
     The AI Gateway endpoint
 
 The smallest deployable AIM is selected
-    [Documentation]    Pins TEST_AIM_NAME to the smallest non-gated Ready AIM on
-    ...    this cluster so the subsequent `An AIM model is running...` precondition
-    ...    deploys something usable. Without this step, the upstream selector
-    ...    picks the first alphabetical Ready AIM, which on some clusters is an
-    ...    8-GPU model (DeepSeek-R1) — far too expensive for a smoke test.
-    # Honor an explicit override (e.g. --variable AIM_RESOURCE_OVERRIDE:...)
-    # so a known-good model can be pinned on clusters where catalog profile
-    # provisioning is incomplete.
+    [Documentation]    Pins one exact deployable AIM/profile pair and its GPU count for gateway tests.
     ${override}=    Get Variable Value    ${AIM_RESOURCE_OVERRIDE}    ${EMPTY}
     IF    "${override}" != ""
-        VAR    ${TEST_AIM_NAME}    ${override}    scope=SUITE
-        Log    Using pinned AIM override: ${override}    INFO
-        RETURN
+        ${resource_name}    ${profile_name}    ${gpu_count}=    The pinned AIM override    ${override}
+    ELSE
+        ${resource_name}    ${profile_name}    ${gpu_count}=
+        ...    Smallest deployable AIM resource name, profile and GPU count
     END
-    ${resource_name}=    Smallest deployable AIM resource name
-    # SUITE scope so the upstream `An AIM exists in system` short-circuit
-    # (which compares ${already_set} != ${None}) actually fires — the
-    # short-circuit Get Variable Value otherwise resolves to None because
-    # the suite-level ${TEST_AIM_NAME} default takes precedence in some
-    # scope chains.
-    VAR    ${TEST_AIM_NAME}    ${resource_name}    scope=SUITE
+    VAR    ${TEST_AIM_NAME}    ${resource_name}    scope=TEST
+    VAR    ${TEST_AIM_PROFILE_NAME}    ${profile_name}    scope=TEST
+    VAR    ${TEST_AIM_GPU_COUNT}    ${gpu_count}    scope=TEST
 
-A HuggingFace token is available for AIM deployment
-    [Documentation]    Opt-in: if $HF_TOKEN is present in the environment, creates the
-    ...    HuggingFace secret in the project namespace and publishes its name via
-    ...    ${TEST_HF_TOKEN_SECRET} so the shared `Valid AIM deploy data is prepared`
-    ...    keyword includes hfToken in the deploy payload.
-    ...    When $HF_TOKEN is absent (e.g. open-model clusters), the step is a no-op —
-    ...    TEST_HF_TOKEN_SECRET is left unset and the AIM deploys without hfToken.
-    ${hf_token}=    Get Environment Variable    HF_TOKEN    default=${EMPTY}
-    IF    "${hf_token}" == ""
-        Log    HF_TOKEN not set — skipping HuggingFace secret creation; open models work without it    INFO
-        RETURN
+The pinned AIM override
+    [Documentation]    Resolves an operator-pinned AIM into a profile and GPU count.
+    ...    The override exists to keep these suites running on clusters where catalog
+    ...    profile provisioning is incomplete, so a catalog lookup that cannot place the
+    ...    pinned model must not fail the test. When the lookup fails, the model stays
+    ...    pinned, no profile is pinned with it, and quota reserves the documented
+    ...    fallback footprint — leaving profile choice to the deploy path, as before.
+    [Arguments]    ${override}
+    ${response}=    List AIMs    expected_status=200    status_filter=Ready    page_size=100
+    VAR    ${aims_list}    ${response.json()}[data]
+    ${profiles}=    All inference profiles
+    TRY
+        ${profile_name}    ${gpu_count}=    Get Deployable Aim Profile
+        ...    ${aims_list}    ${profiles}    ${override}
+    EXCEPT    AS    ${error}
+        VAR    ${warning}    Pinned AIM ${override} has no auto-selectable catalog profile
+        ...    (${error}); deploying without a pinned profile and reserving
+        ...    ${OVERRIDE_FALLBACK_GPU_COUNT} GPU
+        Log    ${warning}    WARN
+        VAR    ${profile_name}    ${None}
+        VAR    ${gpu_count}    ${OVERRIDE_FALLBACK_GPU_COUNT}
     END
-    HuggingFace token secret exists in namespace
-    VAR    ${TEST_HF_TOKEN_SECRET}    ${HF_TOKEN_SECRET_NAME}    scope=TEST
+    Log    Using pinned AIM override: ${override} (profile: ${profile_name}, ${gpu_count} GPU)    INFO
+    RETURN    ${override}    ${profile_name}    ${gpu_count}
+
+The gateway project has GPU quota available
+    [Documentation]    Applies gateway selection, including overrides, before sizing matching quota.
+    The smallest deployable AIM is selected
+    Set project quota for model GPU count    ${TEST_AIM_GPU_COUNT}
+
+# `A HuggingFace token is available for AIM deployment` and the secret helpers it uses
+# live in aiwb_common.resource (imported above), shared across AIM suites.
 
 # When-step keywords
 
@@ -137,7 +148,9 @@ The unified /v1/models endpoint is queried with a valid API key
     ${response}=    Get Models From AI Gateway    ${gateway}    api_key=${TEST_API_KEY_VALUE}
     ...    expected_status=any
     VAR    ${TEST_RESPONSE}    ${response}    scope=TEST
-    IF    ${response.status_code} == 200
+    # The gateway serves /v1/models from the ext_authz handler, which short-circuits with
+    # HTTP 203 (Non-Authoritative Information); a cluster without that handler returns 200.
+    IF    ${response.status_code} in [200, 203]
         ${body}=    Set Variable    ${response.json()}
         ${models}=    Get From Dictionary    ${body}    data    default=${None}
         VAR    ${TEST_GATEWAY_MODELS}    ${models}    scope=TEST
@@ -158,42 +171,105 @@ A chat completion request is sent to the AI Gateway for that model
     ...    api_key=${TEST_API_KEY_VALUE}    backend=${TEST_AIM_ID}    expected_status=any
     VAR    ${TEST_RESPONSE}    ${response}    scope=TEST
 
+A transcription request is sent to the AI Gateway without routing headers
+    [Documentation]    Sends a multipart /v1/audio/transcriptions request carrying no
+    ...    x-ai-eg-backend and no x-ai-eg-model, which is what a stock OpenAI client sends.
+    ...    With no routing header the request falls to the gateway's catch-all rule and is
+    ...    authorized on its body, so this is the path that exercises multipart parsing in the
+    ...    body-aware authorizer and in the endpoint picker.
+    ...    Requires: TEST_AIM_MODEL_ID, TEST_API_KEY_VALUE
+    ...    Sets: TEST_RESPONSE
+    Variable Should Exist    ${TEST_AIM_MODEL_ID}    msg=TEST_AIM_MODEL_ID is not set
+    Variable Should Exist    ${TEST_API_KEY_VALUE}    msg=TEST_API_KEY_VALUE is not set
+    ${gateway}=    The AI Gateway endpoint
+    ${response}=    Send Transcription To AI Gateway    ${gateway}    ${TEST_AIM_MODEL_ID}
+    ...    api_key=${TEST_API_KEY_VALUE}    set_model_header=${False}    expected_status=any
+    VAR    ${TEST_RESPONSE}    ${response}    scope=TEST
+
+A transcription request is sent to the AI Gateway for the other model with the authorized key
+    [Documentation]    Sends a multipart transcription request naming the OTHER model while
+    ...    presenting a key bound only to this suite's AIM, with no routing headers so the
+    ...    decision is made on the body. Proves per-model authorization still holds on the
+    ...    multipart path, which is parsed by different code than the JSON path.
+    ...    Requires: TEST_OTHER_MODEL_ID, TEST_API_KEY_VALUE
+    ...    Sets: TEST_RESPONSE
+    Variable Should Exist    ${TEST_OTHER_MODEL_ID}    msg=TEST_OTHER_MODEL_ID is not set
+    Variable Should Exist    ${TEST_API_KEY_VALUE}    msg=TEST_API_KEY_VALUE is not set
+    ${gateway}=    The AI Gateway endpoint
+    ${response}=    Send Transcription To AI Gateway    ${gateway}    ${TEST_OTHER_MODEL_ID}
+    ...    api_key=${TEST_API_KEY_VALUE}    set_model_header=${False}    expected_status=any
+    VAR    ${TEST_RESPONSE}    ${response}    scope=TEST
+
+The gateway does not reject the request as malformed
+    [Documentation]    Asserts the multipart body reached the backend rather than being refused
+    ...    inside the gateway.
+    ...
+    ...    This deliberately does not assert a transcription came back: the suite's AIM is a chat
+    ...    model with no audio endpoint, so it answers with an OpenAI error saying it does not
+    ...    serve that API. That is the correct outcome here and still proves the point, because
+    ...    both failures this guards against are produced by the gateway before any backend is
+    ...    reached — "invalid json body" from the body-aware authorizer, and "error unmarshaling
+    ...    request bodyMap" from the endpoint picker, each of which JSON-decoded the multipart
+    ...    body and failed on the leading "--" of its boundary.
+    ...
+    ...    Because a chat model refuses the audio path, its refusal alone could also be the
+    ...    gateway's catch-all "route-not-found" response (nothing routed). The two are told
+    ...    apart by body: every response the gateway generates itself is plain text, while the
+    ...    model server answers in the OpenAI envelope. That judgement lives in
+    ...    GatewayAssertions, which also records why Envoy's own upstream-timing header cannot
+    ...    carry it and what the body check can and cannot prove.
+    Variable Should Exist    ${TEST_RESPONSE}    msg=TEST_RESPONSE is not set
+    VAR    ${body}    ${TEST_RESPONSE.text}
+    # Checked first so a regression names the component that caused it rather than
+    # only reporting an unexpected status code.
+    Should Not Contain    ${body}    invalid json body
+    ...    msg=The body-aware authorizer JSON-decoded a multipart body: ${body}
+    Should Not Contain    ${body}    error unmarshaling request body
+    ...    msg=The endpoint picker JSON-decoded a multipart body: ${body}
+    # The catch-all's text is written by Envoy AI Gateway, not this repo, so match it loosely;
+    # the body-shape check below still fails the step if it is reworded.
+    Should Not Contain    ${body}    No matching route found    ignore_case=True
+    ...    msg=The request fell to the gateway's catch-all route instead of reaching the model: ${body}
+    Response Should Come From The Model    ${TEST_RESPONSE}
+
 A valid API key authorized for this model exists
-    [Documentation]    Creates a fresh API key and adds it to the deployed AIM's
-    ...    cluster-auth group, making it a valid credential for model-T. Stores the
+    [Documentation]    Creates a fresh API key and binds it to the deployed AIM
+    ...    (via aimIds), making it a valid credential for model-T. Stores the
     ...    value in TEST_OUTSIDER_API_KEY_VALUE without disturbing TEST_API_KEY or
     ...    TEST_API_KEY_VALUE. Used with "another model is available on the gateway"
-    ...    to test cross-model authorization (EAI-6805 regression).
-    Variable Should Exist    ${TEST_AIM_AUTH_GROUP_ID}
-    ...    msg=TEST_AIM_AUTH_GROUP_ID not set — ensure "An AIM model is running with api key" ran first
+    ...    to test cross-model authorization.
+    Variable Should Exist    ${TEST_AIM_ID}
+    ...    msg=TEST_AIM_ID not set — ensure "An AIM model is running with api key" ran first
     VAR    ${saved_key}    ${TEST_API_KEY}
     VAR    ${saved_key_value}    ${TEST_API_KEY_VALUE}
     Api key exists for user
-    VAR    ${outsider_id}    ${TEST_API_KEY}[id]
     VAR    ${outsider_value}    ${TEST_API_KEY_VALUE}
-    ${project}=    Get Project Namespace
-    api_keys_api.Add api key to group    ${outsider_id}    ${TEST_AIM_AUTH_GROUP_ID}
-    ...    project=${project}    expected_status=201
+    # Authorize the outsider key for the test AIM by binding it (aimIds) — not a group.
+    Api key is assigned to AIMS model    api_key=${TEST_API_KEY}    aim_id=${TEST_AIM_ID}
+    Key assignment should succeed
+    # The negative assertion is meaningful only after this key is accepted by its own model;
+    # otherwise an unpropagated binding would be rejected by every model and pass falsely.
+    Api key binding should take effect    api_key_value=${outsider_value}
     VAR    ${TEST_OUTSIDER_API_KEY_VALUE}    ${outsider_value}    scope=TEST
     VAR    ${TEST_API_KEY}    ${saved_key}    scope=TEST
     VAR    ${TEST_API_KEY_VALUE}    ${saved_key_value}    scope=TEST
 
 Another model is available on the gateway
-    [Documentation]    Discovers a model on the AI Gateway that is NOT the test AIM and
-    ...    stores it in TEST_OTHER_MODEL_ID. Fails clearly if no second model is deployed —
-    ...    the EAI-6805 regression test requires at least two AIMs on the same hostname so
-    ...    the buggy hostname-only route selection can pick the wrong one.
-    Variable Should Exist    ${TEST_AIM_MODEL_ID}    msg=TEST_AIM_MODEL_ID is not set
-    ${gateway}=    The AI Gateway endpoint
-    ${response}=    Get Models From AI Gateway    ${gateway}    api_key=${TEST_API_KEY_VALUE}
-    ...    expected_status=200
-    ${models}=    Get From Dictionary    ${response.json()}    data    default=@{EMPTY}
-    ${other_ids}=    Evaluate    [m['id'] for m in $models if m.get('id') != '${TEST_AIM_MODEL_ID}']
-    IF    len($other_ids) == 0
-        Fail
-        ...    No other models found on the gateway — EAI-6805 regression test needs at least two AIMs deployed on the same hostname
-    END
-    VAR    ${TEST_OTHER_MODEL_ID}    ${other_ids[0]}    scope=TEST
+    [Documentation]    Provisions a second, distinct AIM in the test project so the gateway
+    ...    serves at least two models, then records the second model's served name in
+    ...    TEST_OTHER_MODEL_ID. The cross-model regression needs two AIMs on the same hostname so
+    ...    the buggy hostname-only route selection has a wrong route to pick; deploying its own
+    ...    second AIM makes the scenario independent of cluster residue and test order rather
+    ...    than scraping /v1/models for a model some other test happened to leave behind.
+    ...    Reuses "A second model with its own key is available", which deploys the
+    ...    second-smallest deployable AIM (asserted distinct from the test AIM) and records its
+    ...    served model id in TEST_AIM_B_MODEL_ID, restoring the test AIM's state on exit.
+    A second model with its own key is available
+    Variable Should Exist    ${TEST_AIM_B_MODEL_ID}
+    ...    msg=TEST_AIM_B_MODEL_ID not set — the second AIM did not yield a served model id
+    Should Not Be Equal    ${TEST_AIM_B_MODEL_ID}    ${TEST_AIM_MODEL_ID}
+    ...    msg=Second AIM serves the same model as the test AIM; the cross-model test needs two DISTINCT models
+    VAR    ${TEST_OTHER_MODEL_ID}    ${TEST_AIM_B_MODEL_ID}    scope=TEST
     Log    Cross-model auth test will request: ${TEST_OTHER_MODEL_ID}    INFO
 
 A chat completion request is sent to the AI Gateway for the other model with the authorized key
@@ -246,8 +322,8 @@ The deployed AIM is listed among the available models
     [Documentation]    Verifies the gateway /v1/models response includes the served
     ...    model name for the currently deployed AIM.
     ...    Requires: TEST_RESPONSE (from the /v1/models query), TEST_AIM_MODEL_ID
-    Should Be Equal As Integers    ${TEST_RESPONSE.status_code}    200
-    ...    msg=/v1/models should return 200, got ${TEST_RESPONSE.status_code}
+    Should Be True    ${TEST_RESPONSE.status_code} in [200, 203]
+    ...    msg=/v1/models should return 200 or 203, got ${TEST_RESPONSE.status_code}
     Variable Should Exist    ${TEST_GATEWAY_MODELS}    msg=TEST_GATEWAY_MODELS not set — /v1/models did not return a parsable body
     Variable Should Exist    ${TEST_AIM_MODEL_ID}    msg=TEST_AIM_MODEL_ID is not set
     ${model_ids}=    Evaluate    [m.get('id') for m in $TEST_GATEWAY_MODELS]
@@ -258,7 +334,7 @@ The model returns a successful response
     [Documentation]    Verifies the chat completion response is 200 with an OpenAI-shaped body
     ...    and that the response came from the correct backend. vLLM echoes its own
     ...    served-model-name, not the requested model — a mismatch means the gateway
-    ...    routed to the wrong backend (catches cluster-auth misrouting bugs like EAI-6805).
+    ...    routed to the wrong backend (catches cluster-auth misrouting bugs).
     ...    Requires: TEST_RESPONSE, TEST_AIM_MODEL_ID
     Should Be Equal As Integers    ${TEST_RESPONSE.status_code}    200
     ...    msg=Expected 200, got ${TEST_RESPONSE.status_code}: ${TEST_RESPONSE.text}
@@ -319,7 +395,116 @@ No AI Gateway route targets backend
     ...    msg=AIGatewayRoute still targets backend ${aim_uuid} in namespace ${namespace}
 
 # ===========================================================================
-# EAI-7128 — same-model routing regression (Bug B)
+# Backend-UUID routing without the model header
+# ===========================================================================
+# A request that targets a backend by UUID (x-ai-eg-backend) but omits the
+# optional x-ai-eg-model header must still bind to that backend's apiKeyAuth.
+# Before the fix the backend route rule required x-ai-eg-model, so a model-less
+# backend request matched no backend rule and was authorized against the wrong
+# (or no) policy: the correct key was rejected and an unauthorized key could get
+# through. The fix adds a Host + x-ai-eg-backend rule (no model) so routing and
+# auth bind to the correct backend regardless of whether the model header is set.
+
+An API key not authorized for this model exists
+    [Documentation]    Creates a fresh API key that is NOT bound to the deployed AIM — a real
+    ...    gateway credential that is not authorized for this backend. Stored in
+    ...    TEST_UNAUTHORIZED_API_KEY_VALUE; the authorized TEST_API_KEY/_VALUE are preserved so the
+    ...    rest of the test still sees them.
+    VAR    ${saved_key}    ${TEST_API_KEY}
+    VAR    ${saved_key_value}    ${TEST_API_KEY_VALUE}
+    Api key exists for user
+    VAR    ${TEST_UNAUTHORIZED_API_KEY_VALUE}    ${TEST_API_KEY_VALUE}    scope=TEST
+    VAR    ${TEST_API_KEY}    ${saved_key}    scope=TEST
+    VAR    ${TEST_API_KEY_VALUE}    ${saved_key_value}    scope=TEST
+
+A chat completion is sent to the backend by UUID without the model header
+    [Documentation]    Sends a chat completion addressed to the AIM by backend UUID
+    ...    (x-ai-eg-backend) with x-ai-eg-model omitted (the model stays only in the body), using
+    ...    the authorized key. Exercises the backend-only routing/auth path.
+    ...    Requires: TEST_AIM_MODEL_ID, TEST_AIM_ID, TEST_API_KEY_VALUE
+    ...    Sets: TEST_RESPONSE
+    Variable Should Exist    ${TEST_AIM_ID}    msg=TEST_AIM_ID is not set
+    Variable Should Exist    ${TEST_API_KEY_VALUE}    msg=TEST_API_KEY_VALUE is not set
+    ${gateway}=    The AI Gateway endpoint
+    ${response}=    Send Chat Completion To AI Gateway    ${gateway}    ${TEST_AIM_MODEL_ID}
+    ...    api_key=${TEST_API_KEY_VALUE}    backend=${TEST_AIM_ID}    set_model_header=${False}
+    ...    expected_status=any
+    VAR    ${TEST_RESPONSE}    ${response}    scope=TEST
+
+A chat completion is sent to the backend by UUID without the model header using an unauthorized key
+    [Documentation]    Same backend-only routing path, but with a key not bound to this AIM. Must be
+    ...    rejected — without the backend-only rule this request matched no backend rule and slipped past the
+    ...    backend's apiKeyAuth, letting an unauthorized key through.
+    ...    Requires: TEST_AIM_ID, TEST_AIM_MODEL_ID, TEST_UNAUTHORIZED_API_KEY_VALUE
+    ...    Sets: TEST_RESPONSE
+    Variable Should Exist    ${TEST_UNAUTHORIZED_API_KEY_VALUE}
+    ...    msg=TEST_UNAUTHORIZED_API_KEY_VALUE not set — run "An API key not authorized for this model exists"
+    ${gateway}=    The AI Gateway endpoint
+    ${response}=    Send Chat Completion To AI Gateway    ${gateway}    ${TEST_AIM_MODEL_ID}
+    ...    api_key=${TEST_UNAUTHORIZED_API_KEY_VALUE}    backend=${TEST_AIM_ID}    set_model_header=${False}
+    ...    expected_status=any
+    VAR    ${TEST_RESPONSE}    ${response}    scope=TEST
+
+# ===========================================================================
+# Backend UUID wins over a mismatched x-ai-eg-model
+# ===========================================================================
+# A request that targets backend A by UUID must be authorized against A even
+# when x-ai-eg-model names a different, deployed model B. Before the wildcard
+# backend rule, the mismatched model header pulled the request onto B's route,
+# so B's SecurityPolicy authorized a request that x-ai-eg-backend still served
+# from A — a key valid only for B could invoke A. The fix makes the backend rule
+# match any x-ai-eg-model value, so it out-ranks B's model-only rule and A's own
+# apiKeyAuth authorizes. Needs two DISTINCT deployed models (A and B), each keyed.
+
+A second model with its own key is available
+    [Documentation]    Deploys a second, distinct AIM (model B) alongside the already-running AIM-A,
+    ...    creates an API key bound only to B, and records B's served model id — so a request can
+    ...    target backend A by UUID while naming model B in x-ai-eg-model.
+    ...    Requires: TEST_AIM_ID (A) and TEST_API_KEY/_VALUE (A's key) from
+    ...    "An AIM model is running with api key".
+    ...    Sets: TEST_AIM_B_ID, TEST_AIM_B_MODEL_ID, TEST_AIM_B_API_KEY_VALUE (A's key restored active).
+    A second AIM model is running
+    VAR    ${saved_key}    ${TEST_API_KEY}
+    VAR    ${saved_key_value}    ${TEST_API_KEY_VALUE}
+    Api key exists for user
+    Api key is assigned to AIMS model    api_key=${TEST_API_KEY}    aim_id=${TEST_AIM_B_ID}
+    Key assignment should succeed
+    VAR    ${TEST_AIM_B_API_KEY_VALUE}    ${TEST_API_KEY_VALUE}    scope=TEST
+    Api key binding should take effect
+    ...    host=${TEST_AIM_B_EXTERNAL_HOST}
+    ...    aim_id=${TEST_AIM_B_ID}
+    ...    api_key_value=${TEST_AIM_B_API_KEY_VALUE}
+    ${models}=    List models from external endpoint
+    ...    ${TEST_AIM_B_EXTERNAL_HOST}    ${TEST_AIM_B_ID}    ${TEST_AIM_B_API_KEY_VALUE}
+    ${first}=    Get From List    ${models}    0
+    VAR    ${TEST_AIM_B_MODEL_ID}    ${first}[id]    scope=TEST
+    VAR    ${TEST_API_KEY}    ${saved_key}    scope=TEST
+    VAR    ${TEST_API_KEY_VALUE}    ${saved_key_value}    scope=TEST
+
+A chat completion targets backend A by UUID naming model B, using model B's key
+    [Documentation]    backend=A (x-ai-eg-backend) + x-ai-eg-model=B + B's key. Must be rejected:
+    ...    B's key is not authorized for backend A. Body model stays A's, so serving would be A.
+    ...    Requires: TEST_AIM_ID (A), TEST_AIM_MODEL_ID (A), TEST_AIM_B_MODEL_ID, TEST_AIM_B_API_KEY_VALUE
+    ...    Sets: TEST_RESPONSE
+    ${gateway}=    The AI Gateway endpoint
+    ${response}=    Send Chat Completion To AI Gateway    ${gateway}    ${TEST_AIM_MODEL_ID}
+    ...    api_key=${TEST_AIM_B_API_KEY_VALUE}    backend=${TEST_AIM_ID}    model_header=${TEST_AIM_B_MODEL_ID}
+    ...    expected_status=any
+    VAR    ${TEST_RESPONSE}    ${response}    scope=TEST
+
+A chat completion targets backend A by UUID naming model B, using model A's key
+    [Documentation]    backend=A + x-ai-eg-model=B + A's key. Must be served by A: the backend header
+    ...    is authoritative and the mismatched model header is ignored (backend wins).
+    ...    Requires: TEST_AIM_ID (A), TEST_AIM_MODEL_ID (A), TEST_AIM_B_MODEL_ID, TEST_API_KEY_VALUE (A)
+    ...    Sets: TEST_RESPONSE
+    ${gateway}=    The AI Gateway endpoint
+    ${response}=    Send Chat Completion To AI Gateway    ${gateway}    ${TEST_AIM_MODEL_ID}
+    ...    api_key=${TEST_API_KEY_VALUE}    backend=${TEST_AIM_ID}    model_header=${TEST_AIM_B_MODEL_ID}
+    ...    expected_status=any
+    VAR    ${TEST_RESPONSE}    ${response}    scope=TEST
+
+# ===========================================================================
+# Same-model routing regression
 # ===========================================================================
 # When two AIMs serve the same model name (in two projects), a request that
 # targets a backend by UUID must reach that exact backend. Without precise
@@ -338,7 +523,7 @@ No AI Gateway route targets backend
 The same AIM model is deployed in a second project
     [Documentation]    Deploys the SAME catalog AIM (same served model name) into a fresh
     ...    second project so two backends share a model name on the gateway — the
-    ...    precondition for the EAI-7128 mis-routing bug. AIM-A must already be running
+    ...    precondition for the same-model mis-routing bug. AIM-A must already be running
     ...    (run "An AIM model is running with api key" first).
     ...
     ...    Records A-side coordinates for the metric comparison (TEST_AIM_A_ID /
@@ -365,11 +550,9 @@ The same AIM model is deployed in a second project
     VAR    ${saved_api_key}    ${TEST_API_KEY}
     VAR    ${saved_api_key_value}    ${TEST_API_KEY_VALUE}
 
-    # Stand up project B (same user) and give it GPU quota. gpu_count=1 matches the
-    # caller's project-A quota: both projects hold a live 1-GPU AIM simultaneously,
-    # so a 1-GPU footprint each keeps total demand within cluster quota headroom.
+    # Stand up project B (same user) and size it to the same selected model as project A.
     A Fresh Project With User Access Exists
-    Project quota is set to    gpu_count=1    cpu_milli_cores=8000    memory_bytes=68719476736
+    The project has GPU quota available
 
     # Deploy the SAME model into B (TEST_AIM_NAME is unchanged). This yields a new
     # backend UUID (TEST_AIM_ID = B) but the same served model name as A.
@@ -384,13 +567,17 @@ The same AIM model is deployed in a second project
     Api key is assigned to AIMS model
     Key assignment should succeed
     VAR    ${TEST_AIM_B_API_KEY_VALUE}    ${TEST_API_KEY_VALUE}    scope=TEST
+    Api key binding should take effect
+    ...    host=${TEST_AIM_EXTERNAL_HOST}
+    ...    aim_id=${TEST_AIM_B_ID}
+    ...    api_key_value=${TEST_AIM_B_API_KEY_VALUE}
 
     # Sanity: B serves the same model name as A (the whole premise of the bug).
     ${b_models}=    List models from external endpoint
     ...    ${TEST_AIM_EXTERNAL_HOST}    ${TEST_AIM_B_ID}    ${TEST_AIM_B_API_KEY_VALUE}
     ${b_first}=    Get From List    ${b_models}    0
     Should Be Equal    ${b_first}[id]    ${saved_model_id}
-    ...    msg=Second project's AIM serves a different model (${b_first}[id]) than A (${saved_model_id}); EAI-7128 needs the SAME model name in both projects
+    ...    msg=Second project's AIM serves a different model (${b_first}[id]) than A (${saved_model_id}); both projects must serve the SAME model name
 
     # Restore A-side context for the rest of the suite (TEST_PROJECT and
     # TEST_PROJECT_ID were both repointed at B by the fresh-project setup).
@@ -457,7 +644,7 @@ Only backend A served the request
     ...    ${TEST_AIM_A_ID}    ${TEST_AIM_A_NAMESPACE}    ${TEST_TOKENS_A_BEFORE}
     ...    ${TEST_AIM_B_ID}    ${TEST_AIM_B_NAMESPACE}    ${TEST_TOKENS_B_BEFORE}
 
-# Internal helpers (EAI-7128)
+# Internal helpers
 
 Baseline both backend token counters
     [Documentation]    Snapshots A's and B's cumulative generated-token counters into
@@ -490,7 +677,7 @@ Backend serves while peer stays idle
     Should Be True    ${target_after} > ${target_before}
     ...    msg=Intended backend ${target_id} generated no new tokens (${target_before} -> ${target_after}); request did not reach it
     Should Be Equal As Numbers    ${peer_after}    ${peer_before}
-    ...    msg=Peer backend ${peer_id} generated tokens (${peer_before} -> ${peer_after}); request was mis-routed (EAI-7128)
+    ...    msg=Peer backend ${peer_id} generated tokens (${peer_before} -> ${peer_after}); request was mis-routed
 
 Total generated tokens for backend
     [Documentation]    Returns a backend's cumulative generated-token count (vLLM

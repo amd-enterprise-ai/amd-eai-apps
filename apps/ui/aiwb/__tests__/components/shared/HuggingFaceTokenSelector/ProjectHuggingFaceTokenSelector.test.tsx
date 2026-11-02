@@ -18,26 +18,26 @@ vi.mock('@/lib/app/secrets', () => ({
 }));
 
 /**
- * Stand-in for the real shared `HuggingFaceTokenSelector` from
- * `@amdenterpriseai/components`. It surfaces the props that the project-scoped
- * wrapper threads through so the test can drive `onCreateToken` directly
- * without needing the real dropdown/dialog UI.
+ * Stand-in for the local `HuggingFaceTokenSelector`. It surfaces the props
+ * that the project-scoped wrapper threads through so the test can drive
+ * `onCreateToken` directly without needing the real dropdown/dialog UI.
  */
 let capturedProps: {
   existingTokens?: Array<{ displayName: string }>;
-  onCreateToken?: (input: { name: string; token: string }) => Promise<unknown>;
+  onCreateToken?: (input: {
+    displayName: string;
+    token: string;
+  }) => Promise<unknown>;
   isDisabled?: boolean;
 } = {};
 
-vi.mock('@amdenterpriseai/components', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@amdenterpriseai/components')>();
-  return {
-    ...actual,
+vi.mock(
+  '@/components/shared/HuggingFaceTokenSelector/HuggingFaceTokenSelector',
+  () => ({
     HuggingFaceTokenSelector: (props: {
       existingTokens: Array<{ displayName: string }>;
       onCreateToken: (input: {
-        name: string;
+        displayName: string;
         token: string;
       }) => Promise<unknown>;
       isDisabled?: boolean;
@@ -56,8 +56,8 @@ vi.mock('@amdenterpriseai/components', async (importOriginal) => {
         </div>
       );
     },
-  };
-});
+  }),
+);
 
 const NAMESPACE = 'demo-project';
 
@@ -130,7 +130,7 @@ describe('ProjectHuggingFaceTokenSelector', () => {
       expect(capturedProps.onCreateToken).toBeTypeOf('function');
     });
     await expect(
-      capturedProps.onCreateToken!({ name: 'hf-new', token: 'hf_x' }),
+      capturedProps.onCreateToken!({ displayName: 'hf-new', token: 'hf_x' }),
     ).rejects.toBeInstanceOf(APIRequestError);
     expect(createProjectSecret).not.toHaveBeenCalled();
   });
@@ -154,10 +154,12 @@ describe('ProjectHuggingFaceTokenSelector', () => {
     );
   });
 
-  it('creates a new HuggingFace secret and refreshes the token list', async () => {
+  it('optimistically adds a newly created HuggingFace secret to the token list', async () => {
     (fetchProjectSecrets as Mock).mockResolvedValue({ data: [] });
     (createProjectSecret as Mock).mockResolvedValue({
-      metadata: { name: 'hf-new' },
+      displayName: 'hf-new',
+      metadata: { name: 'wb-secret-abc12345' },
+      useCase: SecretUseCase.HUGGING_FACE,
     });
 
     renderSelector();
@@ -167,10 +169,10 @@ describe('ProjectHuggingFaceTokenSelector', () => {
     });
 
     const result = await capturedProps.onCreateToken!({
-      name: 'hf-new',
+      displayName: 'hf-new',
       token: 'hf_secret_value',
     });
-    expect(result).toEqual({ name: 'hf-new' });
+    expect(result).toEqual({ secretName: 'wb-secret-abc12345' });
 
     expect(createProjectSecret).toHaveBeenCalledTimes(1);
     const [callNamespace, payload] = (createProjectSecret as Mock).mock
@@ -179,7 +181,10 @@ describe('ProjectHuggingFaceTokenSelector', () => {
     expect(payload).toMatchObject({ useCase: SecretUseCase.HUGGING_FACE });
 
     await waitFor(() => {
-      expect(fetchProjectSecrets).toHaveBeenCalledTimes(2);
+      const rows = screen.getAllByTestId('hf-token-row');
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toHaveTextContent('hf-new');
+      expect(fetchProjectSecrets).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -194,7 +199,7 @@ describe('ProjectHuggingFaceTokenSelector', () => {
     });
 
     await expect(
-      capturedProps.onCreateToken!({ name: 'broken', token: 'hf_x' }),
+      capturedProps.onCreateToken!({ displayName: 'broken', token: 'hf_x' }),
     ).rejects.toBeInstanceOf(APIRequestError);
   });
 });

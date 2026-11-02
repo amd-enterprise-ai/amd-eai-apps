@@ -25,7 +25,7 @@ export const BlockCode: Story = () => (
 
 export const CustomClassName: Story = () => (
   <div className="flex w-full max-w-md flex-col gap-4 p-4">
-    <CodeBlock as="code" className="text-primary">
+    <CodeBlock as="code" className="text-accent">
       themed inline code
     </CodeBlock>
   </div>

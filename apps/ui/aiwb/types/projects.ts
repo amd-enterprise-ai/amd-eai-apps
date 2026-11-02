@@ -2,39 +2,20 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { WorkloadType } from '@amdenterpriseai/types';
-import { WorkloadStatus, ResourceType } from '@/types/enums/workloads';
-import { PaginatedList } from '@/types/pagination';
+import type { ResourceStatus } from '@/types/workloads';
+import type { components } from '@/types/api';
+import type { ModelProfileSummaryFields } from '@/types/aims';
 
-export interface ResourceMetrics {
-  id: string;
-  name: string;
-  displayName: string | null;
-  type: WorkloadType;
-  status: WorkloadStatus;
-  gpuCount: number | null;
-  templateGpuCount: number | null;
-  gpu: string | null;
-  acceleratorType: string | null;
-  metric: string | null;
-  precision: string | null;
-  vram: number | null;
-  createdAt: string | null;
-  createdBy: string | null;
-  resourceType: ResourceType;
-}
+export type ProjectsResponse =
+  components['schemas']['ListResponse_ProjectResponse_'];
 
-export type WorkloadMetricsResponse = PaginatedList<ResourceMetrics>;
-
-export interface WorkloadStatsResponse {
-  project: string;
-  total: number;
-  statusCounts: Array<{
-    status: WorkloadStatus;
-    count: number;
-  }>;
-}
-
-export interface ProjectsResponse {
-  data: { id: string; name: string }[];
-}
+// Schema WorkloadMetrics plus the AIMProfile-catalog fields joined client-side.
+export type EnrichedWorkloadMetrics = Omit<
+  components['schemas']['WorkloadMetrics'],
+  'status'
+> & {
+  // The aim detail page synthesizes a row from an AIMService whose status can be
+  // Degraded, which the wire WorkloadStatus union omits; widen to ResourceStatus
+  // so both the schema-sourced rows and that row fit without a cast.
+  status: ResourceStatus;
+} & ModelProfileSummaryFields;

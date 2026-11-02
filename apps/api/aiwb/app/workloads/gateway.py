@@ -104,6 +104,42 @@ async def get_workload_from_k8s(
     return None
 
 
+async def get_finetuning_workloads_annotations(
+    namespace: str,
+    workload_ids: list[UUID],
+) -> dict[UUID, dict[str, str]]:
+    """Return Kubernetes annotations indexed by fine-tuning workload ID."""
+    workload_ids = list(dict.fromkeys(workload_ids))
+    if not workload_ids:
+        return {}
+
+    try:
+        kube_client = get_kube_client()
+    except RuntimeError:
+        return {}
+
+    workload_id_selector = ",".join(str(workload_id) for workload_id in workload_ids)
+    try:
+        jobs = await kube_client.batch_v1.list_namespaced_job(
+            namespace=namespace,
+            label_selector=(
+                f"{WORKLOAD_TYPE_LABEL}={WorkloadType.FINE_TUNING.value},"
+                f"{WORKLOAD_ID_LABEL} in ({workload_id_selector})"
+            ),
+        )
+    except Exception:
+        logger.exception(f"Error reading fine-tuning workload annotations in namespace {namespace}")
+        return {}
+
+    annotations_by_workload: dict[UUID, dict[str, str]] = {}
+    for job in jobs.items:
+        labels = job.metadata.labels or {}
+        workload_id = parse_uuid(labels.get(WORKLOAD_ID_LABEL))
+        if workload_id is not None:
+            annotations_by_workload[workload_id] = job.metadata.annotations or {}
+    return annotations_by_workload
+
+
 def _workload_from_k8s_resource(resource: Any, status: WorkloadStatus, namespace: str, manifest: str = "") -> Workload:
     """Construct a transient Workload from a Kubernetes resource object.
 
@@ -114,11 +150,11 @@ def _workload_from_k8s_resource(resource: Any, status: WorkloadStatus, namespace
     Note on ``workload_type`` fallback: when ``WORKLOAD_TYPE_LABEL`` is absent,
     the resource is assumed to be ``FINE_TUNING``. This is a historical
     compatibility default — every K8s resource produced by AIWB stamps the
-    label, but pre-EAI-6359 workloads (which were only ever fine-tuning jobs)
+    label, but older workloads (which were only ever fine-tuning jobs)
     may lack it. Type-scoped endpoints that gate on ``workload.type`` are
     therefore weaker than they appear for label-less legacy resources.
 
-    TODO(EAI-6359): drop the FINE_TUNING fallback once all legacy workloads
+    TODO: drop the FINE_TUNING fallback once all legacy workloads
     have been backfilled with the label, so missing-label resources surface
     as a real error rather than being silently classified.
     """
@@ -134,7 +170,7 @@ def _workload_from_k8s_resource(resource: Any, status: WorkloadStatus, namespace
 
     created_at = resource.metadata.creation_timestamp or datetime.now(UTC)
 
-    return Workload(
+    workload = Workload(
         id=parse_uuid(workload_id),
         name=resource.metadata.name,
         display_name=display_name,
@@ -149,6 +185,8 @@ def _workload_from_k8s_resource(resource: Any, status: WorkloadStatus, namespace
         updated_at=created_at,
         manifest=manifest,
     )
+    workload.annotations = annotations
+    return workload
 
 
 async def get_workload_canonical_name(workload_id: UUID, namespace: str) -> str | None:

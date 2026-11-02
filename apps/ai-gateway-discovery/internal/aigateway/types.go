@@ -20,6 +20,17 @@ var (
 		Kind:    "AIGatewayRoute",
 	}
 
+	// SecurityPolicyGVK is the Envoy Gateway SecurityPolicy used to enforce API-key
+	// auth on a model's generated HTTPRoute. SecurityPolicy targetRefs accept only
+	// Gateway/HTTPRoute/GRPCRoute — not AIGatewayRoute — so the policy targets the
+	// HTTPRoute the AI Gateway generates (same name as the AIGatewayRoute), which is
+	// itself parented to the ai-gateway Gateway.
+	SecurityPolicyGVK = schema.GroupVersionKind{
+		Group:   "gateway.envoyproxy.io",
+		Version: "v1alpha1",
+		Kind:    "SecurityPolicy",
+	}
+
 	// InferencePoolGVK is the gateway-api-inference-extension InferencePool resource.
 	InferencePoolGVK = schema.GroupVersionKind{
 		Group:   "inference.networking.k8s.io",
@@ -33,6 +44,15 @@ var (
 		Group:   "serving.kserve.io",
 		Version: "v1beta1",
 		Kind:    "InferenceService",
+	}
+
+	// ReferenceGrantGVK is the Gateway API ReferenceGrant, used to allow the per-model catch-all
+	// SecurityPolicy (in a workload namespace) to reference this controller's ext_authz Service
+	// in another namespace.
+	ReferenceGrantGVK = schema.GroupVersionKind{
+		Group:   "gateway.networking.k8s.io",
+		Version: "v1beta1",
+		Kind:    "ReferenceGrant",
 	}
 )
 

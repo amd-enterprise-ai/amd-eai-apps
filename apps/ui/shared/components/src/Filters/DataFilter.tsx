@@ -5,6 +5,7 @@
 import { Select, SelectItem } from '@amdenterpriseai/components';
 import { cn } from '@heroui/react';
 import {
+  type ComponentProps,
   createRef,
   useCallback,
   useEffect,
@@ -117,6 +118,7 @@ export const DataFilter = ({
               )}
               aria-label={filter.label}
               placeholder={filter.placeholder}
+              variant={filter.variant}
               onValueChange={(value) => {
                 // Keep state for all filter values
                 setFilterValues((prev) => {
@@ -129,7 +131,6 @@ export const DataFilter = ({
                   return { ...prev, [key]: [trimmed] };
                 });
               }}
-              canClear={false}
               ref={(() => {
                 if (!debounceInputRef.current[key]) {
                   debounceInputRef.current[key] = createRef<{
@@ -146,6 +147,7 @@ export const DataFilter = ({
           return (
             <Select
               key={`select-filter-${filter.name}-${String(key)}`}
+              variant="primary"
               selectionMode={
                 filter.allowMultipleSelection ? 'multiple' : undefined
               }
@@ -173,7 +175,10 @@ export const DataFilter = ({
             >
               {filter?.fields
                 ? filter.fields.map((field) => (
-                    <SelectItem key={String(field.key)} {...field.props}>
+                    <SelectItem
+                      key={String(field.key)}
+                      {...(field.props as ComponentProps<typeof SelectItem>)}
+                    >
                       {field.label}
                     </SelectItem>
                   ))

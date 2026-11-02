@@ -14,7 +14,7 @@ from ..messaging.sender import MessageSender
 from ..projects.models import Project
 from ..projects.repository import get_projects_in_cluster
 from ..utilities.enums import GPUVendor
-from .constants import DEFAULT_CATCH_ALL_QUOTA_NAME
+from .constants import DEFAULT_CATCH_ALL_QUOTA_NAME, QUOTA_FAILURE_REASON_UNSPECIFIED
 from .enums import QuotaStatus
 from .messaging import ClusterQuotaAllocation, ClusterQuotasFailureMessage, ClusterQuotasStatusMessage
 from .models import Quota
@@ -26,6 +26,7 @@ from .utils import (
     does_quota_match_allocation,
     format_quotas_allocation_message,
     have_quota_resources_changed,
+    is_within_provisioning_grace,
     quota_failure_message_mismatch,
     quota_failure_message_missing,
     validate_quota_against_available_cluster_resources,
@@ -147,10 +148,18 @@ async def update_cluster_quotas_from_allocations(
             continue
 
         if does_quota_match_allocation(quota, quota_allocation):
-            if quota.status != QuotaStatus.READY:
+            # A quota that is already READY but still carries a reason recovered before reasons
+            # were cleared on recovery, so repair it here: without this the matching branch never
+            # runs again for it and the stale reason stays in the project's status text forever.
+            if quota.status != QuotaStatus.READY or quota.status_reason is not None:
                 await update_quota_status(session, quota, QuotaStatus.READY, None, "system", message.updated_at)
 
                 await update_project_status_from_components(kc_admin, session, quota.project)
+        elif is_within_provisioning_grace(quota, message.updated_at):
+            logger.debug(
+                f"Quota {quota.id} still carries its previous allocation in the snapshot but is within "
+                "its provisioning grace period; leaving it PENDING."
+            )
         else:
             await update_quota_status(
                 session,
@@ -164,6 +173,12 @@ async def update_cluster_quotas_from_allocations(
             await update_project_status_from_components(kc_admin, session, quota.project)
 
     for quota in quotas_by_project_name.values():
+        if is_within_provisioning_grace(quota, message.updated_at):
+            logger.debug(
+                f"Quota {quota.id} is absent from the snapshot but still within its provisioning "
+                "grace period; leaving it PENDING."
+            )
+            continue
         if quota.status not in [QuotaStatus.DELETING, QuotaStatus.DELETED]:
             quota_update = QuotaUpdate(
                 cpu_milli_cores=0,
@@ -176,7 +191,10 @@ async def update_cluster_quotas_from_allocations(
                 quota,
                 quota_update,
                 QuotaStatus.FAILED,
-                quota.status_reason if quota.status_reason else quota_failure_message_missing(quota),
+                # The reason describes what the snapshot just showed, not what the quota happened
+                # to be failing for before: a quota that disappears from the cluster has been
+                # removed, whatever it was failing for earlier.
+                quota_failure_message_missing(quota),
                 "system",
                 message.updated_at,
             )
@@ -221,7 +239,8 @@ async def update_pending_quotas_to_failed(
             session=session,
             quota=project.quota,
             status=QuotaStatus.FAILED,
-            status_reason=message.reason,
+            # The cluster may report a failure without a reason; a failed quota still needs one.
+            status_reason=message.reason or QUOTA_FAILURE_REASON_UNSPECIFIED,
             updater="system",
             updated_at=message.updated_at,
         )

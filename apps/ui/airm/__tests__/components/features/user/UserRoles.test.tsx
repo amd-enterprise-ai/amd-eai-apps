@@ -88,19 +88,19 @@ describe('UserRoles', () => {
     await act(() => render(<UserRoles user={mockUser} />, { wrapper }));
 
     const editButton = screen.getByLabelText(
-      'detail.projectsAndRoles.roles.actions.edit',
+      'detail.projectsAndRoles.roles.actions.edit.title',
     );
 
     await act(() => {
       fireEvent.click(editButton);
     });
 
-    const selectTrigger = screen.getAllByLabelText(
-      'detail.projectsAndRoles.roles.form.role.label',
-    );
-
     await act(() => {
-      fireEvent.click(selectTrigger[1]);
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /detail.projectsAndRoles.roles.form.role.label/,
+        }),
+      );
     });
 
     const selectOption = screen.getAllByText(

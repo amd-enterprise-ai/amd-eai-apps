@@ -106,7 +106,7 @@ Assign api key to deployed AIMS model
     [Tags]    api-keys    assign    aims    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And user is authenticated
     And api key exists for user
     And an AIM model is running
@@ -115,21 +115,30 @@ Assign api key to deployed AIMS model
     And AIMS model access works with api key
     And key-model mapping should be visible in management interface
 
-Manage api key group memberships
-    [Documentation]    Verify the api-key /groups sub-resource: list, add, remove.
-    [Tags]    api-keys    groups    management    gpu
+Manage api key model bindings
+    [Documentation]    Verify the api-key bind/unbind lifecycle via PATCH bindings.
+    ...
+    ...    The /groups sub-resource is gone; binding is now done via PATCH api-keys/{id}
+    ...    with aimIds. The details response exposes the current bindings as the groups
+    ...    field (workload IDs the key is bound to).
+    ...
+    ...    Steps:
+    ...    1. Create key — verify groups is initially empty
+    ...    2. Bind to running AIM via PATCH aimIds — verify AIM appears in groups
+    ...    3. Unbind (set aimIds=[]) — verify groups is empty again
+    [Tags]    api-keys    bindings    management    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And an AIM model is running
     And user is authenticated
     And api key exists for user
-    When the api-key's group memberships are listed
-    Then the api-key has no group memberships
-    When the api-key is added to the AIM's auth group
-    Then the api-key has that group in its memberships
-    When the api-key is removed from the AIM's auth group
-    Then the api-key has no group memberships
+    Then api key should have no model bindings
+    When api key is assigned to AIMS model
+    Then key assignment should succeed
+    And api key should be bound to the AIM
+    When api key bindings are cleared
+    Then api key should have no model bindings
 
 Access AIMS model with valid api key
     [Documentation]    Verify that an AIMS model can be accessed with a valid API key
@@ -141,7 +150,7 @@ Access AIMS model with valid api key
     [Tags]    api-keys    access    aims    positive    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And an AIM model is running with api key
     When request is made to AIMS model with valid api key
     Then request should succeed
@@ -165,7 +174,7 @@ Access AIMS model with invalid api key
     [Tags]    api-keys    access    aims    negative    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And an AIM model is running with api key
     And AIMS model access works with api key
     When request is made to AIMS model with invalid api key
@@ -185,7 +194,7 @@ Access AIMS model without api key
     [Tags]    api-keys    access    aims    negative    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And an AIM model is running with api key
     When request is made to AIMS model without api key
     Then request should be rejected as unauthorized
@@ -196,7 +205,7 @@ Assign multiple keys to single AIMS model
     [Tags]    api-keys    assign    aims    multiple    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And an AIM model is running
     And user is authenticated
 
@@ -245,7 +254,7 @@ Access AIMS model with revoked api key
     [Tags]    api-keys    access    aims    negative    revoke    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And an AIM model is running with api key
     And AIMS model access works with api key
     When api key is revoked
@@ -256,12 +265,12 @@ Access AIMS model with revoked api key
 
 Model redeployment preserves key but breaks binding
     [Documentation]    Verify that AIM redeployment breaks the key-to-model binding.
-    ...    After redeployment, the AIM gets a new cluster auth group ID.
-    ...    The key remains bound to the OLD group, so the binding is stale.
+    ...    Redeployment creates a new AIM (new workload id). The key remains bound to
+    ...    the OLD id, so the binding is stale.
     [Tags]    api-keys    deployment    mapping    aims    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And an AIM model is running with api key
     And AIMS model access works with api key
     When AIM is undeployed
@@ -273,63 +282,7 @@ Model redeployment preserves key but breaks binding
 # infrastructure support (multiple AIM models available, enough GPU quota for two
 # simultaneous deployments, and cleanup for second deployment).
 
-# Phase 4 — Renewal
-
-Renew renewable API key
-    [Documentation]    Verify that a renewable API key's lease can be extended
-    ...
-    ...    Steps:
-    ...    1. Ensure project and authentication
-    ...    2. Create a renewable API key
-    ...    3. Renew the key's lease
-    ...    4. Verify renewal succeeded with leaseDuration in response
-    [Tags]    api-keys    renewal    management
-
-    Given a ready project with user access exists
-    And user is authenticated
-    And api key exists for user
-    When api key is renewed
-    Then api key renewal should succeed
-
-Access AIMS model after key renewal
-    [Documentation]    Verify that an AIMS model remains accessible after key renewal
-    ...
-    ...    The key value does not change on renewal — only the lease is extended.
-    ...    Model access should continue working with the same key.
-    ...
-    ...    Steps:
-    ...    1. Deploy AIMS model with API key
-    ...    2. Renew the API key
-    ...    3. Verify renewal succeeded
-    ...    4. Verify AIMS model still accepts the same key
-    [Tags]    api-keys    renewal    aims    gpu
-
-    Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
-    And an AIM model is running with api key
-    When api key is renewed
-    Then api key renewal should succeed
-    And AIMS model access works with api key
-
-Renew non-renewable API key fails
-    [Documentation]    Verify that a non-renewable API key cannot be renewed
-    ...
-    ...    Keys created with renewable=False should be rejected by the renewal endpoint.
-    ...
-    ...    Steps:
-    ...    1. Create a non-renewable API key
-    ...    2. Attempt to renew it
-    ...    3. Verify renewal is rejected
-    [Tags]    api-keys    renewal    negative
-
-    Given a ready project with user access exists
-    And user is authenticated
-    When non-renewable api key is created
-    Then api key should be created successfully
-    When non-renewable api key renewal is attempted
-    Then api key renewal should fail with expected error
-
-# Phase 5 — Cleanup (permanent AIM deletion)
+# Phase 4 — Cleanup (permanent AIM deletion)
 
 Remove AIMS model with active key mapping
     [Documentation]    Verify behavior when AIMS model is removed with active key mapping
@@ -342,14 +295,14 @@ Remove AIMS model with active key mapping
     [Tags]    api-keys    deployment    aims    cleanup    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And an AIM model is running with api key
     When AIMS model is permanently deleted
     Then api key should show no active mappings
     And key status should indicate resource removed
     And api key should remain valid for other uses
 
-# Phase 6 — Multi-AIM regression (two AIMs deployed simultaneously)
+# Phase 5 — Multi-AIM regression (two AIMs deployed simultaneously)
 
 Inference is authorized per model when two AIMs share the workloads host
     [Documentation]    Regression test for the cluster-auth hostname-only route-selection
@@ -369,7 +322,7 @@ Inference is authorized per model when two AIMs share the workloads host
     [Tags]    api-keys    inference    negative    positive    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And user is authenticated
     And an AIM model is running
     And a second AIM model is running

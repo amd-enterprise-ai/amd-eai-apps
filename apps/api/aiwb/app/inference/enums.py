@@ -10,10 +10,10 @@ from enum import StrEnum
 class InferenceCapability(StrEnum):
     """Capability filter values accepted by the inference list endpoint.
 
-    Today only ``chat`` is meaningful — it narrows the list to deployments
-    whose model is tagged for chat completions and whose serving stack is
-    fully ready. Adding new capabilities here lets clients filter for them
-    without endpoint proliferation.
+    Each value narrows the list to fully-ready deployments whose model
+    advertises that capability via its catalog tags. Adding new capabilities
+    here lets clients filter for them without endpoint proliferation.
     """
 
     CHAT = "chat"
+    TRANSCRIPTION = "transcription"

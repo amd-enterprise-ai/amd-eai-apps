@@ -27,16 +27,16 @@
         "title": "Project"
       },
       "gpuAllocation": {
-        "title": "GPU Allocation"
+        "title": "GPU allocation"
       },
       "gpuUtilization": {
-        "title": "GPU Utilization"
+        "title": "GPU utilization"
       },
       "running": {
-        "title": "Running Workloads"
+        "title": "Running workloads"
       },
       "pending": {
-        "title": "Pending Workloads"
+        "title": "Pending workloads"
       },
       "actions": {
         "title": ""
@@ -65,15 +65,15 @@
     },
     "cards": {
       "gpuUtilization": {
-        "title": "GPU Utilization",
+        "title": "GPU utilization",
         "tooltip": "Number of GPUs currently in use."
       },
       "runningWorkloads": {
-        "title": "Running Workloads",
+        "title": "Running workloads",
         "tooltip": "Number of running workloads in all the clusters."
       },
       "pendingWorkloads": {
-        "title": "Pending Workloads",
+        "title": "Pending workloads",
         "tooltip": "Number of pending workloads in all the clusters."
       }
     },

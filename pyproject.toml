@@ -2,6 +2,17 @@
 #
 # SPDX-License-Identifier: MIT
 
+# uv requires a `requires-python` floor at the repo root. Without one it warns on
+# every `uv run` or `uv sync`, substitutes a default that varies by uv version,
+# and silently rewrites the tracked root uv.lock whenever that default differs
+# from what the lock records. `name` and `version` exist only because uv refuses
+# to parse a `[project]` table without them; nothing at the root is built or
+# published.
+[project]
+name = "core-workspace"
+version = "0.0.0"
+requires-python = ">=3.13"
+
 [tool.mypy]
 python_version = "3.13"
 warn_unused_configs = true

@@ -83,18 +83,6 @@ make docker-up    # Start Docker services (PostgreSQL, etc.)
 make docker-down  # Stop and remove Docker services
 ```
 
-### AI Assistant Rules
-
-This project uses a hierarchical AI rules system to provide context to AI coding assistants (Cursor, Claude, GitHub Copilot).
-
-Rules are split across `AGENTS.md` files at different levels:
-
-- `/AGENTS.md` - General (git, Jira, PRs)
-- `/apps/api/AGENTS.md` - FastAPI (async, Pydantic, testing)
-- `/apps/api/aiwb/AGENTS.md` - AIWB-specific (k8s-first, layers)
-
-Cursor and Claude Code discover these files natively via nested directory lookup. Run `make ai-rules` from the repo root to generate `CLAUDE.md` symlinks and `.github/copilot-instructions.md`.
-
 ### Environment Variables
 
 Create a `.env` file (copy from `.env.example`). Key configurations include:
@@ -108,12 +96,32 @@ Create a `.env` file (copy from `.env.example`). Key configurations include:
 - **Keycloak/Auth**: OpenID Connect client credentials (required for user authentication)
 - **MinIO**: Object storage endpoint and credentials (for dataset and model storage)
 - **Kubernetes**: Cluster access configuration for workload deployment
-- **Cluster Auth**: Optional integration for AIM access control and API key management
-  - `CLUSTER_AUTH_ENABLED`: `true` or `false` (default: `true`)
-  - When `true` (default): A cluster-auth group is created for each AIM deployment and stamped as the `cluster-auth/allowed-group` annotation on the `AIMService` resource. The cluster-auth proxy uses this annotation to enforce that only API keys bound to the matching group can call the AIM's external endpoint. Requires `CLUSTER_AUTH_URL` and `CLUSTER_AUTH_ADMIN_TOKEN` to be set.
-  - When `false`: AIMs are deployed without access restrictions — any client can reach AIM inference endpoints. API key endpoints (`/projects/{project}/api-keys`) return **503 Service Unavailable**.
 
 See `.env.example` for complete configuration options.
+
+### Deleted Project Cleanup
+
+AIWB can reclaim API keys, dataset records, and storage objects left behind when a project is
+deleted. Cleanup is disabled by default because reclamation is irreversible.
+
+Configure scheduled cleanup with:
+
+- `DELETED_PROJECT_CLEANUP_ENABLED`: Set to `true` to enable the hourly poller.
+- `DELETED_PROJECT_CLEANUP_INTERVAL_SECONDS`: Interval between cleanup runs (default: `3600`).
+- `DELETED_PROJECT_CLEANUP_SKEW_MARGIN_SECONDS`: Timestamp safety margin for reused project names
+  (default: `3600`).
+
+To run cleanup immediately instead of waiting for the poller:
+
+```bash
+uv run reclaim-orphans --dry-run   # preview; deletes nothing
+uv run reclaim-orphans             # reclaim
+```
+
+The command requires database, Kubernetes and MinIO access, plus OpenBao to reclaim. It refuses
+to reclaim without OpenBao credentials, or when no Kubernetes namespaces are visible. `--dry-run`
+reaches the same verdicts through the same traversal and reports them without deleting anything,
+so what it names is what a real run would remove.
 
 ### API Endpoints
 

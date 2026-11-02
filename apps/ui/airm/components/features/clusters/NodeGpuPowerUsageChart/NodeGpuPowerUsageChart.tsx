@@ -90,7 +90,7 @@ export const NodeGpuPowerUsageChart: React.FC<Props> = ({
   const showNoData = !powerUsageQuery.isLoading && devicesToShow.length === 0;
 
   return (
-    <Card className="border border-default-200 shadow-sm rounded-sm dark:bg-default-100 min-h-[120px]">
+    <Card className="min-h-[120px]">
       <CardHeader className="pb-2">
         <span className="text-sm font-semibold text-foreground">
           {t('clusters:nodes.detail.deviceMetrics.gpuPowerConsumption.title')}
@@ -98,7 +98,7 @@ export const NodeGpuPowerUsageChart: React.FC<Props> = ({
       </CardHeader>
       <CardBody className="pt-0 mt-4">
         {showNoData ? (
-          <p className="text-default-500 text-sm">
+          <p className="text-muted text-sm">
             {t('clusters:nodes.detail.deviceMetrics.noPowerData')}
           </p>
         ) : (
@@ -124,7 +124,6 @@ export const NodeGpuPowerUsageChart: React.FC<Props> = ({
                 );
               }}
               isLoading={isLoading}
-              loadingText={t('common:loading')}
             />
             {(isLoading || chartCategories.length > 0) && (
               <DynamicValueLegend

@@ -24,6 +24,7 @@ type BaseUser = {
 export type User = BaseUser & {
   firstName: string;
   lastName: string;
+  createdAt?: string;
   lastActiveAt?: string;
 };
 

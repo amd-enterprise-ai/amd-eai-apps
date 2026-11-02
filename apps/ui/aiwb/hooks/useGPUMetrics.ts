@@ -9,17 +9,17 @@ import { useProject } from '@/contexts/ProjectContext';
 import type {
   TimeRangePeriod,
   TimeSeriesAllocationData,
-  TimeSeriesResponse,
 } from '@amdenterpriseai/types';
 
 import { getCurrentTimeRange } from '@amdenterpriseai/utils/app';
 import { getTimeseriesMetric } from '@/lib/app/metrics';
+import type { components } from '@/types/api';
 
 interface WorkloadMetricsParams {
   workloadId: string;
   namespace: string;
   timePeriod: TimeRangePeriod;
-  metricName: string;
+  metricName: components['schemas']['MetricName'];
 }
 
 interface DashboardMetricsParams {
@@ -51,40 +51,42 @@ export function useGPUMetrics(
   const isWorkload = config.type === 'workload';
 
   // Only fetch when in workload mode
-  const { data: workloadData, isLoading: workloadLoading } =
-    useQuery<TimeSeriesResponse>({
-      queryKey: [
-        'project',
-        activeProject,
-        'workload',
-        isWorkload ? config.params.workloadId : '',
-        'metrics',
-        isWorkload ? config.params.metricName : '',
-        isWorkload ? config.params.timePeriod : '',
-      ],
-      queryFn: () => {
-        if (!isWorkload) {
-          throw new Error('Query should not run in dashboard mode');
-        }
+  const { data: workloadData, isLoading: workloadLoading } = useQuery({
+    queryKey: [
+      'project',
+      activeProject,
+      'workload',
+      isWorkload ? config.params.workloadId : '',
+      'metrics',
+      isWorkload ? config.params.metricName : '',
+      isWorkload ? config.params.timePeriod : '',
+    ],
+    queryFn: () => {
+      if (!isWorkload) {
+        throw new Error('Query should not run in dashboard mode');
+      }
 
-        const { workloadId, namespace, timePeriod, metricName } = config.params;
-        const { start, end } = getCurrentTimeRange(timePeriod);
+      const { workloadId, namespace, timePeriod, metricName } = config.params;
+      const { start, end } = getCurrentTimeRange(timePeriod);
 
-        return getTimeseriesMetric({
-          workloadId,
-          namespace,
-          start,
-          end,
-          metric: metricName,
-        });
-      },
-      enabled: isWorkload,
-    });
+      return getTimeseriesMetric({
+        workloadId,
+        namespace,
+        start,
+        end,
+        metric: metricName,
+      });
+    },
+    enabled: isWorkload,
+  });
 
   // Transform data based on mode
   const chartData: TimeSeriesAllocationData = useMemo(() => {
     if (isWorkload) {
-      const values = workloadData?.data?.[0]?.values ?? [];
+      const values = (workloadData?.data?.[0]?.values ?? []).map((point) => ({
+        timestamp: point.timestamp,
+        value: point.value ?? null,
+      }));
       return { numerator: values, denominator: [] };
     }
     return config.params.data;

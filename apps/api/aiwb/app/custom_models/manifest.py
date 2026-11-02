@@ -127,6 +127,20 @@ def upsert_manifest_documents(
     return merged
 
 
+def remove_manifest_documents(
+    existing: Iterable[ManifestDocument],
+    identities: set[tuple[str, str]],
+) -> list[ManifestDocument]:
+    """Drop documents whose ``(kind, metadata.name)`` is in ``identities``; order preserved.
+
+    The inverse of :func:`upsert_manifest_documents`: used when a CR is deleted
+    so its stale mirror document does not linger in the manifest. Documents not
+    named in ``identities`` (notably the AIMModel scaffold) are left untouched,
+    so the returned list keeps the manifest reapplyable.
+    """
+    return [doc for doc in existing if _document_identity(doc) not in identities]
+
+
 # A manifest update is a non-atomic read → upsert → write against a shared S3
 # object. Without serialization, two concurrent writers can both read the same
 # prior state and the later upload overwrites the earlier writer's documents.
@@ -203,4 +217,27 @@ async def write_manifest_to_s3(
         await asyncio.to_thread(minio_client.upload_object, bucket_name=bucket, object_name=key, data=payload)
     except S3Error as e:
         logger.error(f"Failed to write manifest at {bucket}/{key}: {e}")
+        raise map_s3_error_to_domain_exception(e, f"custom-model manifest at {bucket}/{key}") from e
+
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=MINIO_MIN_WAIT, max=MINIO_MAX_WAIT),
+    stop=stop_after_attempt(MINIO_MAX_ATTEMPTS),
+    reraise=True,
+)
+async def delete_manifest_from_s3(
+    minio_client: MinioClient,
+    bucket: str,
+    key: str,
+) -> None:
+    """Remove the manifest object entirely.
+
+    Needed because ``serialize_manifest`` refuses an empty document list: when
+    the last document is dropped, deleting the object is the only way to clear
+    the mirror rather than leave stale content behind.
+    """
+    try:
+        await asyncio.to_thread(minio_client.delete_object, bucket_name=bucket, object_name=key)
+    except S3Error as e:
+        logger.error(f"Failed to delete manifest at {bucket}/{key}: {e}")
         raise map_s3_error_to_domain_exception(e, f"custom-model manifest at {bucket}/{key}") from e

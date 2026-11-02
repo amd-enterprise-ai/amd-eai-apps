@@ -4,6 +4,7 @@
 
 import {
   IconAffiliate,
+  IconCpu,
   IconEye,
   IconRocket,
   IconTrash,
@@ -24,11 +25,13 @@ import {
 } from '@/lib/app/models';
 import {
   AIM_MODEL_NAME_LABEL,
+  AIM_MODEL_SOURCE_DESCRIPTION_ANNOTATION,
+  AIM_MODEL_TRAINING_OUTPUT_ANNOTATION,
   AIM_MODEL_WORKLOAD_ID_LABEL,
-  AIMModel,
   AIMService,
-  AIMStatus,
 } from '@/types/aims';
+import type { components } from '@/types/api';
+import { SUBMITTER_ANNOTATION } from '@/types/artifacts';
 import { ModelFinetuneParams } from '@/types/models';
 import { resolveBaseModelSource } from '@/lib/app/aims';
 import { listAllWorkloads } from '@/lib/app/workloads';
@@ -42,48 +45,74 @@ import {
   ActionButton,
   ActionsToolbar,
   ClientSideDataTable,
+  DateDisplay,
+  LinkToast,
   NoDataDisplay,
   StatusDisplay,
 } from '@amdenterpriseai/components';
 import { ActionItem, TableColumns } from '@amdenterpriseai/types';
 import { FilterComponentType } from '@amdenterpriseai/types';
-import { ModelsTableField } from '@/types/enums/models-table-fields';
 import { SortDirection } from '@amdenterpriseai/types';
-import { WorkloadType } from '@amdenterpriseai/types';
-import { WorkloadStatus } from '@/types/enums/workloads';
+import type { ResourceStatus } from '@/types/workloads';
 import { ClientSideDataFilter, FilterValueMap } from '@amdenterpriseai/types';
 import { FinetunableModel, Model } from '@/types/models';
 
 import DeleteModelModal from '@/components/features/models/DeleteModelModal';
 import { DeployCustomAIMDrawer } from '@/components/features/models/DeployCustomAIMDrawer';
-import FinetuneDrawer from '@/components/features/models/FinetuneDrawer';
+import { FinetuneWizard } from '@/components/features/models/FinetuneWizard';
+import { TruncatedDescription } from '@/components/shared/TruncatedDescription';
 import ModelDetailsModal from '@/components/features/models/ModelDetailsModal';
 import DeleteWorkloadModal from '@/components/features/workloads/DeleteWorkloadModal';
 
 import { useProject } from '@/contexts/ProjectContext';
 import { useRouter } from 'next/router';
-import { Workload } from '@/types/workloads';
+import type { Workload } from '@/types/workloads';
+
+const ModelsTableField = {
+  NAME: 'name',
+  CREATED_AT: 'createdAt',
+  CREATED_BY: 'createdBy',
+  ONBOARDING_STATUS: 'onboardingStatus',
+  STATUS: 'status',
+  WORKLOADS: 'workloads',
+} as const;
+
+type ModelsTableField =
+  (typeof ModelsTableField)[keyof typeof ModelsTableField];
 
 type ModelRow = Model & {
+  description?: string;
+  output?: string | null;
   source: 'model' | 'workload';
+};
+
+const fineTuningTypeTranslationKeys: Record<
+  string,
+  | 'list.fineTuningTypes.full'
+  | 'list.fineTuningTypes.lora'
+  | 'list.fineTuningTypes.merged'
+> = {
+  full: 'list.fineTuningTypes.full',
+  lora: 'list.fineTuningTypes.lora',
+  merged: 'list.fineTuningTypes.merged',
 };
 
 // Mirror the statuses fetched by the workloads query below: STARTING is a
 // real fine-tuning state and must be visible by default, otherwise jobs that
 // have left PENDING but haven't reached RUNNING get hidden in the UI even
 // though the server returned them.
-const defaultStatusSet = [
-  WorkloadStatus.PENDING,
-  WorkloadStatus.STARTING,
-  WorkloadStatus.RUNNING,
-  WorkloadStatus.COMPLETE,
-  WorkloadStatus.FAILED,
+const defaultStatusSet: ResourceStatus[] = [
+  'Pending',
+  'Starting',
+  'Running',
+  'Complete',
+  'Failed',
 ];
 
 const convertFilterValueMap = (
   filters: FilterValueMap,
-): ClientSideDataFilter<Model>[] => {
-  const newFilters: ClientSideDataFilter<Model>[] = [];
+): ClientSideDataFilter<ModelRow>[] => {
+  const newFilters: ClientSideDataFilter<ModelRow>[] = [];
   if (filters?.search) {
     newFilters.push({
       field: 'name',
@@ -134,7 +163,7 @@ const FineTuneModels = () => {
   const deleteModelDisclosure = useOverlayState();
   const deleteWorkloadDisclosure = useOverlayState();
 
-  const [filters, setFilters] = useState<ClientSideDataFilter<Model>[]>(
+  const [filters, setFilters] = useState<ClientSideDataFilter<ModelRow>[]>(
     convertFilterValueMap({
       status: defaultStatusSet,
     }),
@@ -147,7 +176,7 @@ const FineTuneModels = () => {
     refetch: refetchModels,
     error: modelsError,
     dataUpdatedAt: modelsDataUpdatedAt,
-  } = useQuery<AIMModel[]>({
+  } = useQuery<components['schemas']['AIMModelResource'][]>({
     queryKey: ['project', activeProject, 'models', 'fine-tuned'],
     queryFn: () => listAllProjectFineTunedModels(activeProject!),
     refetchInterval: 30000,
@@ -158,6 +187,7 @@ const FineTuneModels = () => {
     () =>
       (rawModels ?? []).map((item) => {
         const labels = item.metadata.labels ?? {};
+        const annotations = item.metadata.annotations ?? {};
         const sourceModelSource = resolveBaseModelSource(item);
         const sourceModelId = sourceModelSource?.modelId || '';
         // Fall back to the source recipe when the model's own image metadata
@@ -173,23 +203,26 @@ const FineTuneModels = () => {
           id: labels[AIM_MODEL_WORKLOAD_ID_LABEL],
           name: labels[AIM_MODEL_NAME_LABEL] || item.metadata.name,
           canonicalName: sourceModelId,
+          description: annotations[AIM_MODEL_SOURCE_DESCRIPTION_ANNOTATION],
           sourceUri: sourceModelSource?.sourceUri,
           resourceName: item.metadata.name,
+          createdBy: annotations[SUBMITTER_ANNOTATION],
           hfTokenRequired,
+          output: annotations[AIM_MODEL_TRAINING_OUTPUT_ANNOTATION],
           source: 'model' as const,
           status: (() => {
-            switch (item.status?.status as AIMStatus | string) {
-              case AIMStatus.READY:
-                return WorkloadStatus.COMPLETE;
-              case AIMStatus.FAILED:
-              case AIMStatus.DEGRADED:
-                return WorkloadStatus.FAILED;
+            switch (item.status?.status) {
+              case 'Ready':
+                return 'Complete';
+              case 'Failed':
+              case 'Degraded':
+                return 'Failed';
               default:
-                return WorkloadStatus.PENDING;
+                return 'Pending';
             }
           })(),
           workloadId: labels[AIM_MODEL_WORKLOAD_ID_LABEL],
-          createdAt: item.metadata?.creationTimestamp,
+          createdAt: item.metadata?.creationTimestamp ?? undefined,
         };
       }),
     [rawModels, finetunableModels],
@@ -207,15 +240,9 @@ const FineTuneModels = () => {
       if (!activeProject) return [];
 
       return await listAllWorkloads(activeProject, {
-        type: [WorkloadType.FINE_TUNING],
+        workloadType: ['FINE_TUNING'],
         // No need to show the deleted workloads in the table.
-        status: [
-          WorkloadStatus.PENDING,
-          WorkloadStatus.STARTING,
-          WorkloadStatus.RUNNING,
-          WorkloadStatus.COMPLETE,
-          WorkloadStatus.FAILED,
-        ],
+        statusFilter: ['Pending', 'Starting', 'Running', 'Complete', 'Failed'],
       });
     },
     refetchInterval: 30000, // Refetch every 30 seconds
@@ -297,7 +324,7 @@ const FineTuneModels = () => {
       }
       // Synthesized rows here represent in-progress FINE_TUNING workloads
       // (see inProgressFinetuningModels above), so cancel via the fine-tuning
-      // capability endpoint. Generic /workloads DELETE was removed in EAI-6313.
+      // capability endpoint. Generic /workloads DELETE was removed.
       await cancelFineTuningJob(id, activeProject);
     },
     onSuccess: () => {
@@ -357,25 +384,33 @@ const FineTuneModels = () => {
       }
       return finetuneModel(variables.id, variables.params, activeProject);
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      const isLora = variables.params.output === 'adapter';
       queryClient.invalidateQueries({
         queryKey: ['project', activeProject, 'models'],
       });
+      if (isLora) {
+        queryClient.invalidateQueries({
+          queryKey: ['project', activeProject, 'artifacts'],
+        });
+      }
       toast.success(
-        t(
-          'customModels.list.actions.finetune.notification.success',
-          'Adapter fine-tuning started',
-        ),
+        <LinkToast
+          message={t('finetuneWizard.notifications.success')}
+          href={projectPath(
+            isLora ? '/fine-tuning/loras' : '/fine-tuning/models',
+          )}
+          linkLabel={t(
+            isLora
+              ? 'finetuneWizard.notifications.viewLoras'
+              : 'finetuneWizard.notifications.viewModels',
+          )}
+        />,
       );
       finetuneDisclosure.onClose();
     },
     onError: (error) => {
-      toast.error(
-        t(
-          'customModels.list.actions.finetune.notification.error',
-          'Error fine-tuning model',
-        ),
-      );
+      toast.error(t('finetuneWizard.notifications.error'));
       console.error('Error fine-tuning model:', error);
     },
   });
@@ -396,17 +431,17 @@ const FineTuneModels = () => {
     if (workloads) {
       workloads.forEach((workload) => {
         if (
-          workload.type === WorkloadType.FINE_TUNING &&
-          (workload.status === WorkloadStatus.STARTING ||
-            workload.status === WorkloadStatus.PENDING ||
-            workload.status === WorkloadStatus.RUNNING)
+          workload.type === 'FINE_TUNING' &&
+          (workload.status === 'Starting' ||
+            workload.status === 'Pending' ||
+            workload.status === 'Running')
         ) {
           countMap.set(workload.id, (countMap.get(workload.id) || 0) + 1);
         }
       });
     }
     aimServices.forEach((aim) => {
-      const modelName = aim.spec.model?.name;
+      const modelName = aim.spec?.model?.name;
       if (modelName) {
         countMap.set(modelName, (countMap.get(modelName) || 0) + 1);
       }
@@ -424,22 +459,37 @@ const FineTuneModels = () => {
     return workloads
       .filter(
         (w) =>
-          w.type === WorkloadType.FINE_TUNING &&
-          w.status !== WorkloadStatus.COMPLETE &&
+          w.type === 'FINE_TUNING' &&
+          w.status !== 'Complete' &&
+          w.annotations?.[AIM_MODEL_TRAINING_OUTPUT_ANNOTATION] !== 'lora' &&
           !completedResourceNames.has(w.name),
       )
       .map((w) => ({
+        id: w.id,
         name: w.displayName || w.name,
         canonicalName: '',
+        description: w.annotations?.[AIM_MODEL_SOURCE_DESCRIPTION_ANNOTATION],
+        createdAt: w.createdAt,
+        createdBy: w.createdBy ?? undefined,
         resourceName: w.name,
         source: 'workload' as const,
         status: w.status,
         workloadId: w.id,
+        output: w.annotations?.[AIM_MODEL_TRAINING_OUTPUT_ANNOTATION],
       }));
   }, [workloads, models]);
 
   const filteredModels = useMemo(() => {
-    const allModels = [...inProgressFinetuningModels, ...(models ?? [])];
+    const completedModels = (models ?? []).map((model) => {
+      const matchingWorkload = workloads?.find(
+        (workload) => workload.id === model.workloadId,
+      );
+      return {
+        ...model,
+        createdBy: model.createdBy ?? matchingWorkload?.createdBy ?? undefined,
+      };
+    });
+    const allModels = [...inProgressFinetuningModels, ...completedModels];
     if (allModels.length === 0) return [];
 
     const filteredModels = getFilteredData(allModels, filters);
@@ -457,7 +507,7 @@ const FineTuneModels = () => {
 
       return result;
     }, []);
-  }, [models, inProgressFinetuningModels, filters, workloadsCount]);
+  }, [models, workloads, inProgressFinetuningModels, filters, workloadsCount]);
 
   const {
     isOpen: isModelDetailsModalOpen,
@@ -466,29 +516,29 @@ const FineTuneModels = () => {
   } = useOverlayState();
 
   const [modelBeingSelected, setModelBeingSelected] = useState<
-    AIMModel | undefined
+    components['schemas']['AIMModelResource'] | undefined
   >(undefined);
 
   const statusFilterItems = useMemo(
     () => [
       {
-        key: WorkloadStatus.PENDING,
+        key: 'Pending',
         label: t('status.pending'),
       },
       {
-        key: WorkloadStatus.STARTING,
+        key: 'Starting',
         label: t('status.starting'),
       },
       {
-        key: WorkloadStatus.RUNNING,
+        key: 'Running',
         label: t('status.running'),
       },
       {
-        key: WorkloadStatus.COMPLETE,
+        key: 'Complete',
         label: t('status.complete'),
       },
       {
-        key: WorkloadStatus.FAILED,
+        key: 'Failed',
         label: t('status.failed'),
       },
     ],
@@ -509,18 +559,27 @@ const FineTuneModels = () => {
     {
       key: ModelsTableField.NAME,
       sortable: true,
-    },
-    {
-      key: ModelsTableField.CANONICAL_NAME,
-      sortable: true,
+      className: 'w-full min-w-64 max-w-0',
     },
     {
       key: ModelsTableField.STATUS,
       sortable: true,
+      className: 'w-0 whitespace-nowrap',
     },
     {
       key: ModelsTableField.WORKLOADS,
       sortable: true,
+      className: 'w-0 whitespace-nowrap',
+    },
+    {
+      key: ModelsTableField.CREATED_AT,
+      sortable: true,
+      className: 'w-0 whitespace-nowrap',
+    },
+    {
+      key: ModelsTableField.CREATED_BY,
+      sortable: true,
+      className: 'w-0 whitespace-nowrap',
     },
   ];
 
@@ -548,7 +607,7 @@ const FineTuneModels = () => {
       },
     ];
 
-    if (item.status === WorkloadStatus.COMPLETE) {
+    if (item.status === 'Complete') {
       if (item.source === 'model' && item.id) {
         actionsList.push({
           key: 'finetune',
@@ -587,14 +646,58 @@ const FineTuneModels = () => {
   const customRenderers: Partial<
     Record<ModelsTableField, (item: ModelRow) => React.ReactNode | string>
   > = {
-    [ModelsTableField.CANONICAL_NAME]: (item: ModelRow) =>
-      item.canonicalName || <NoDataDisplay />,
+    [ModelsTableField.NAME]: (item: ModelRow) => {
+      const description = item.description?.trim();
+      const canonicalName = item.canonicalName?.trim();
+      const translationKey =
+        fineTuningTypeTranslationKeys[item.output ?? 'full'];
+      const fineTuningType = translationKey
+        ? tCustomModels(translationKey)
+        : undefined;
+      const hasMetadata = canonicalName || fineTuningType;
+
+      return (
+        <div className="flex min-w-0 flex-col gap-1">
+          <span>{item.name}</span>
+          {description ? (
+            <TruncatedDescription description={description} />
+          ) : null}
+          {hasMetadata ? (
+            <span className="flex min-w-0 items-center gap-1 text-xs text-muted">
+              {canonicalName ? (
+                <span className="inline-flex shrink-0 items-center gap-0.5">
+                  <IconCpu size={14} aria-hidden />
+                  {canonicalName}
+                </span>
+              ) : null}
+              {canonicalName && fineTuningType ? (
+                <span aria-hidden>•</span>
+              ) : null}
+              {fineTuningType ? (
+                <span className="inline-flex shrink-0 items-center gap-0.5">
+                  <IconAffiliate size={14} aria-hidden />
+                  {fineTuningType}
+                </span>
+              ) : null}
+            </span>
+          ) : null}
+        </div>
+      );
+    },
     [ModelsTableField.STATUS]: (item: ModelRow) => (
       <StatusDisplay
-        type={item[ModelsTableField.STATUS] as WorkloadStatus}
+        type={item[ModelsTableField.STATUS] as ResourceStatus}
         variants={getWorkloadStatusVariants(tWorkloads)}
       />
     ),
+    [ModelsTableField.CREATED_AT]: (item: ModelRow) =>
+      item.createdAt ? (
+        <DateDisplay date={item.createdAt} />
+      ) : (
+        <NoDataDisplay />
+      ),
+    [ModelsTableField.CREATED_BY]: (item: ModelRow) =>
+      item.createdBy || <NoDataDisplay />,
   };
 
   const filterConfig = useMemo(
@@ -618,7 +721,7 @@ const FineTuneModels = () => {
   );
 
   const handleFilterChange = (filters: FilterValueMap) => {
-    const newFilters: ClientSideDataFilter<Model>[] =
+    const newFilters: ClientSideDataFilter<ModelRow>[] =
       convertFilterValueMap(filters);
     setFilters(newFilters);
   };
@@ -705,21 +808,26 @@ const FineTuneModels = () => {
         />
       )}
 
-      <FinetuneDrawer
-        isOpen={finetuneDisclosure.isOpen}
-        onOpenChange={finetuneDisclosure.onOpenChange}
-        model={modelToFinetune}
-        finetunableModels={finetunableModels ?? []}
-        onConfirmAction={({
-          id,
-          params,
-        }: {
-          id: string;
-          params: ModelFinetuneParams;
-        }) => {
-          finetuneModelMutation.mutate({ id, params });
-        }}
-      />
+      {finetuneDisclosure.isOpen && activeProject ? (
+        <FinetuneWizard
+          onClose={finetuneDisclosure.onClose}
+          model={modelToFinetune}
+          finetunableModels={finetunableModels ?? []}
+          onConfirmAction={async ({
+            id,
+            params,
+          }: {
+            id: string;
+            params: ModelFinetuneParams;
+          }) => {
+            try {
+              await finetuneModelMutation.mutateAsync({ id, params });
+            } catch {
+              // The mutation's onError handler surfaces the failure to the user.
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 };

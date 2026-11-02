@@ -14,7 +14,7 @@ This directory contains the Next.js-based frontend applications for AMD enterpri
 apps/ui/
 ├── airm/          # AI Resource Manager UI
 ├── aiwb/          # AI Workbench UI
-└── shared/        # Shared components, utilities, and services
+└── shared/        # Shared components and utilities
 ```
 
 ## Applications
@@ -34,7 +34,7 @@ apps/ui/
 ## Prerequisites
 
 - **Node.js**: 18.x or later
-- **pnpm**: 10.18.3 or later (managed by packageManager)
+- **pnpm**: whatever the `packageManager` pin in `apps/ui/package.json` names — run it through corepack rather than an ambient install, so regenerating the lockfile uses the pinned version
 - **Package Manager**: This project uses pnpm workspaces
 
 ## Getting Started
@@ -141,15 +141,43 @@ The `shared/` directory contains reusable code across applications:
 
 - **assets**: Images, fonts, and static resources
 - **components**: Reusable React components
-- **contexts**: Shared React contexts
 - **hooks**: Custom React hooks
 - **layouts**: Common layout components
-- **services**: API clients and service layers
+- **scripts**: Code generation scripts
 - **tailwind-config**: Shared Tailwind configuration
 - **types**: TypeScript type definitions
 - **utils**: Utility functions and helpers
 
 ## Development Guidelines
+
+### Shared Component Translations
+
+Translations owned by `@amdenterpriseai/components` live in
+`shared/components/locales/`. Each app resolves the `sharedComponents`
+namespace from that directory through its `next-i18next.config.js`; do not add
+copies under an app's `public/locales/`. App-owned strings remain in the app's
+feature namespace, even when the English text matches a shared-component
+string.
+
+`sharedComponents.json` is grouped by what a string is for (`actions`, `data`,
+`status`, `menu`) rather than by owning component, so text reused across
+components stays in one place. Add a component-named group only when the
+strings are specific to that component, as `TagInput` and `FormFileUpload` are.
+
+Pages must load translations through the app's `getPageTranslations` helper,
+which always serializes `common` and `sharedComponents` for client hydration.
+Direct `serverSideTranslations` imports in pages fail the namespace check.
+Keep each config's explicit `ns` list in sync when adding a namespace; app
+typechecks validate those lists, that the helper's defaults match
+`DEFAULT_PAGE_NAMESPACES`, that every namespace resolved from the shared locale
+root is listed in `SHARED_NAMESPACES`, and that every namespace a page requests
+exists.
+
+The shared config scripts and the shared locale root must reach the production
+image as whole directories, because the modules inside each require their
+siblings. Copying individual files instead ships a module without its
+dependency, which surfaces only as a runtime `MODULE_NOT_FOUND` in the
+container; the namespace check fails the build if a Dockerfile narrows them.
 
 ### Adding a New Shared Component
 

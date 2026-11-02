@@ -12,6 +12,7 @@ from fastapi import UploadFile
 from minio.error import S3Error
 
 from api_common.exceptions import ExternalServiceError, ForbiddenException, NotFoundException, ValidationException
+from api_common.slugs import slugify
 from app.datasets.models import Dataset
 from app.datasets.utils import (
     clean_s3_path,
@@ -19,7 +20,6 @@ from app.datasets.utils import (
     derive_name_from_path,
     download_from_s3_stream,
     get_object_key,
-    slugify,
     sync_dataset_to_s3,
     validate_jsonl,
     verify_s3_sync,

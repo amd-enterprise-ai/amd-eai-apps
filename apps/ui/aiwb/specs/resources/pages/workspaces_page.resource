@@ -14,10 +14,11 @@ Resource            workloads_page.resource
 
 *** Variables ***
 ${WORKSPACES_PATH}                      /workspaces
-${DEPLOY_DRAWER_SELECTOR}               [role="dialog"]
-${DEPLOY_DRAWER_DEPLOY_BTN}             [role="dialog"] button:has-text("Deploy")
-${DEPLOY_DRAWER_CANCEL_BTN}             [role="dialog"] button:has-text("Cancel")
-${WORKSPACE_SEARCH_SELECTOR}            input[placeholder="Search workspaces"]
+${DEPLOY_WIZARD_SELECTOR}               [role="dialog"]
+${DEPLOY_WIZARD_NEXT_BTN}               [role="dialog"] button:has-text("Next")
+${DEPLOY_WIZARD_SUBMIT_BTN}             [role="dialog"] button:has-text("Submit")
+${DEPLOY_WIZARD_CANCEL_BTN}             [role="dialog"] button:has-text("Cancel")
+${WORKSPACE_SEARCH_SELECTOR}            main input[placeholder="Search"]
 ${DELETE_MENU_ITEM}                     [role="menuitem"]:has-text("Delete")
 ${CONFIRMATION_MODAL_SELECTOR}          [data-testid="confirmation-modal"]
 ${CONFIRM_DELETE_BTN}                   [data-testid="confirm-button"]
@@ -56,36 +57,51 @@ Click Deploy Button On Workspace Card
     Wait For Elements State    ${deploy_btn}    visible    timeout=10s
     Click    ${deploy_btn}
 
-Wait For Deploy Drawer
-    [Documentation]    Waits for the workspace deploy drawer (dialog) to become visible
-    ...                and for the form fields to fully load.
+Wait For Deploy Wizard
+    [Documentation]    Waits for the workspace deploy wizard to become ready.
 
-    VAR    ${drawer}    css=${DEPLOY_DRAWER_SELECTOR}
-    Wait For Elements State    ${drawer}    visible    timeout=15s
-    # Wait for the deploy button in footer which indicates form is ready
-    VAR    ${deploy_btn}    css=${DEPLOY_DRAWER_DEPLOY_BTN}
-    Wait For Elements State    ${deploy_btn}    visible    timeout=30s
+    VAR    ${wizard}    css=${DEPLOY_WIZARD_SELECTOR}
+    Wait For Elements State    ${wizard}    visible    timeout=15s
+    VAR    ${next_btn}    css=${DEPLOY_WIZARD_NEXT_BTN}
+    Wait For Elements State    ${next_btn}    enabled    timeout=30s
 
-Get Deploy Drawer Workload Name
-    [Documentation]    Returns the auto-generated workload name from the deploy drawer.
+Wait For Deploy Wizard Settings
+    [Documentation]    Waits for the selected workspace details and image field to become visible.
+
+    VAR    ${details}    css=[data-testid="deploy-workspace-wizard-catalog-header"]
+    Wait For Elements State    ${details}    visible    timeout=15s
+    VAR    ${image}    css=${DEPLOY_WIZARD_SELECTOR} input[aria-label="Container image"]
+    Wait For Elements State    ${image}    visible    timeout=15s
+
+Advance Deploy Wizard
+    [Documentation]    Advances the workspace deploy wizard to its next step.
+
+    VAR    ${next_btn}    css=${DEPLOY_WIZARD_NEXT_BTN}
+    Wait For Elements State    ${next_btn}    enabled    timeout=30s
+    Click    ${next_btn}
+
+Get Deploy Wizard Workload Name
+    [Documentation]    Returns the default workload name from the target step.
     ...                Uses Get Property to read the input value attribute.
 
-    VAR    ${input}    css=${DEPLOY_DRAWER_SELECTOR} input >> nth=0
+    VAR    ${input}    css=${DEPLOY_WIZARD_SELECTOR} input[aria-label="Workload name"]
     Wait For Elements State    ${input}    visible    timeout=10s
     ${value}=    Get Property    ${input}    value
     RETURN    ${value}
 
-Click Deploy In Drawer
-    [Documentation]    Clicks the Deploy button inside the deploy drawer to submit the form.
+Submit Deploy Wizard
+    [Documentation]    Advances to the check step and submits the workspace deployment.
 
-    VAR    ${deploy_btn}    css=${DEPLOY_DRAWER_DEPLOY_BTN}
-    Click    ${deploy_btn}
+    Advance deploy wizard
+    VAR    ${submit_btn}    css=${DEPLOY_WIZARD_SUBMIT_BTN}
+    Wait For Elements State    ${submit_btn}    enabled    timeout=30s
+    Click    ${submit_btn}
 
-Wait For Deploy Drawer To Close
-    [Documentation]    Waits for the deploy drawer to close after deployment submission.
+Wait For Deploy Wizard To Close
+    [Documentation]    Waits for the deploy wizard to close after submission.
 
-    VAR    ${drawer}    css=${DEPLOY_DRAWER_SELECTOR}
-    Wait For Elements State    ${drawer}    detached    timeout=30s
+    VAR    ${wizard}    css=${DEPLOY_WIZARD_SELECTOR}
+    Wait For Elements State    ${wizard}    detached    timeout=30s
 
 Open Image Pull Secrets Dropdown
     [Documentation]    Clicks the imagePullSecrets dropdown trigger to expand options.
@@ -98,6 +114,22 @@ Open Image Pull Secrets Dropdown
     VAR    ${listbox}    css=ul[role="listbox"][data-slot="listbox"]
     Wait For Elements State    ${listbox}    visible    timeout=10s
 
+Select Image Pull Secret Option
+    [Documentation]    Toggles an option in the open imagePullSecrets dropdown by its visible label.
+    ...                The dropdown is multi-select, so it stays open after each selection.
+    [Arguments]    ${option_label}
+
+    VAR    ${option}    css=ul[role="listbox"][data-slot="listbox"] [role="option"]:has-text("${option_label}")
+    Wait For Elements State    ${option}    visible    timeout=10s
+    Click    ${option}
+
+Close Image Pull Secrets Dropdown
+    [Documentation]    Closes the open imagePullSecrets dropdown without leaving the deploy wizard.
+
+    Keyboard Key    press    Escape
+    VAR    ${listbox}    css=ul[role="listbox"][data-slot="listbox"]
+    Wait For Elements State    ${listbox}    detached    timeout=10s
+
 Get Image Pull Secrets Options Text
     [Documentation]    Returns the text content of all visible options in the imagePullSecrets dropdown.
 
@@ -105,13 +137,13 @@ Get Image Pull Secrets Options Text
     ${text}=    Get Text    ${listbox}
     RETURN    ${text}
 
-Close Deploy Drawer
-    [Documentation]    Closes the deploy drawer by clicking Cancel.
+Close Deploy Wizard
+    [Documentation]    Closes the deploy wizard by clicking Cancel.
 
-    VAR    ${cancel}    css=${DEPLOY_DRAWER_CANCEL_BTN}
+    VAR    ${cancel}    css=${DEPLOY_WIZARD_CANCEL_BTN}
     Click    ${cancel}
-    VAR    ${drawer}    css=${DEPLOY_DRAWER_SELECTOR}
-    Wait For Elements State    ${drawer}    detached    timeout=10s
+    VAR    ${wizard}    css=${DEPLOY_WIZARD_SELECTOR}
+    Wait For Elements State    ${wizard}    detached    timeout=10s
 
 Check Workspace Catalog Has Cards
     [Documentation]    Returns the number of visible workspace cards on the page.
@@ -222,6 +254,14 @@ Confirm Delete In Modal
     VAR    ${confirm}    css=${CONFIRM_DELETE_BTN}
     Click    ${confirm}
     Wait For Elements State    ${modal}    detached    timeout=15s
+
+Get Delete Confirmation Modal Text
+    [Documentation]    Returns the text content of the currently visible delete confirmation modal.
+
+    VAR    ${modal}    css=${CONFIRMATION_MODAL_SELECTOR}
+    Wait For Elements State    ${modal}    visible    timeout=10s
+    ${text}=    Get Text    ${modal}
+    RETURN    ${text}
 
 Get Actions Menu Items Text
     [Documentation]    Returns the combined text of all items in the currently open actions menu.

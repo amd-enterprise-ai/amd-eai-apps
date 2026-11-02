@@ -17,6 +17,7 @@ from app.custom_models.manifest import (
     manifest_write_lock,
     parse_manifest,
     read_manifest_from_s3,
+    remove_manifest_documents,
     serialize_manifest,
     upsert_manifest_documents,
     write_manifest_to_s3,
@@ -201,7 +202,7 @@ def test_upsert_manifest_documents_rejects_non_string_identity_in_new_documents(
 def test_upsert_manifest_documents_appends_new_document() -> None:
     """The AIMProfile document is appended when the manifest scaffold
     initially contains only the AIMModel — this is the first-time onboard
-    path that EAI-6340 implements."""
+    path."""
     existing = [_aim_model_document()]
     template = _aim_profile_document()
 
@@ -213,7 +214,7 @@ def test_upsert_manifest_documents_appends_new_document() -> None:
 def test_upsert_manifest_documents_replaces_existing_document_by_identity() -> None:
     """Re-onboarding the same model must update the AIMProfile
     document in place rather than appending a duplicate — that's the
-    idempotency requirement in EAI-6340's acceptance criteria."""
+    idempotency requirement for onboarding."""
     initial_template = _aim_profile_document(image_ref="amdenterpriseai/aim-base:0.10")
     updated_template = _aim_profile_document(image_ref="amdenterpriseai/aim-base:0.11")
 
@@ -282,6 +283,37 @@ def test_upsert_manifest_documents_collapses_duplicates_even_without_new_documen
     assert template_docs[0]["metadata"]["annotations"]["aim.eai.amd.com/deployment-image-ref"] == (
         "amdenterpriseai/aim-base:0.10-dup"
     )
+
+
+def test_remove_manifest_documents_drops_matching_identity() -> None:
+    """A deleted profile's mirror document is dropped while the AIMModel scaffold stays."""
+    aim_model = _aim_model_document()
+    profile = _aim_profile_document(name="llama-3-8b-named")
+
+    remaining = remove_manifest_documents([aim_model, profile], identities={("AIMProfile", "llama-3-8b-named")})
+
+    assert remaining == [aim_model]
+
+
+def test_remove_manifest_documents_is_noop_when_identity_absent() -> None:
+    """Removing an identity not present leaves the manifest unchanged."""
+    aim_model = _aim_model_document()
+    profile = _aim_profile_document()
+
+    remaining = remove_manifest_documents([aim_model, profile], identities={("AIMProfile", "not-in-manifest")})
+
+    assert remaining == [aim_model, profile]
+
+
+def test_remove_manifest_documents_preserves_order_of_survivors() -> None:
+    """Surviving documents keep their original order after a removal."""
+    aim_model = _aim_model_document()
+    keep = _aim_profile_document(name="keep-me")
+    drop = _aim_profile_document(name="drop-me")
+
+    remaining = remove_manifest_documents([aim_model, keep, drop], identities={("AIMProfile", "drop-me")})
+
+    assert remaining == [aim_model, keep]
 
 
 async def test_read_manifest_from_s3_returns_empty_list_when_object_missing() -> None:

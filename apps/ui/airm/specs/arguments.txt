@@ -17,13 +17,16 @@
 # 1. Local specs (resources/, libraries/)
 # 2. AIWB UI specs (shared browser setup, login resources)
 # 3. AIRM API specs (airm_projects.resource, authorization, deployment, etc.)
-# 4. Shared testing infrastructure (common.resource, TestPrefix, KubeconfigAuth, etc.)
+# 4. AIRM API spec libraries (StorageCredentials, SecretLookup, etc.)
+# 5. Shared testing infrastructure (common.resource, TestPrefix, KubeconfigAuth, etc.)
 --pythonpath
 .
 --pythonpath
 ../../../ui/aiwb/specs
 --pythonpath
 ../../../api/airm/specs
+--pythonpath
+../../../api/airm/specs/libraries
 --pythonpath
 ../../../../testing
 --pythonpath

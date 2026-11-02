@@ -27,6 +27,7 @@ from ..aims.constants import (
     AIM_PROFILE_PLURAL,
     AIM_PROFILE_ROLE_BASE,
     AIM_PROFILE_ROLE_LABEL,
+    AIM_PROFILE_SOURCE_MODEL_LABEL,
 )
 from ..aims.crds import AIMProfileResource
 from ..dispatch.kube_client import KubernetesClient
@@ -41,6 +42,8 @@ async def list_aim_profiles(
     kube_client: KubernetesClient,
     namespace: str,
     model_name: str | None = None,
+    *,
+    strict: bool = False,
 ) -> list[AIMProfileResource]:
     """List namespace-scoped AIMProfile resources (v1alpha2).
 
@@ -50,6 +53,9 @@ async def list_aim_profiles(
         model_name: Optional AIMModel CR name; when provided only profiles
             stamped with the ``aim.eai.amd.com/model.name=<model_name>``
             label are returned.
+        strict: Raise ``ExternalServiceError`` on Kubernetes or parse failures.
+            Read endpoints with a documented 502 contract enable this; existing
+            model-overview callers retain their graceful empty-list fallback.
 
     Returns:
         List of AIMProfile resources; empty list on a 404 (CRD absent in
@@ -67,12 +73,16 @@ async def list_aim_profiles(
             label_selector=label_selector,
         )
     except ApiException as e:
-        if e.status == 404:
+        if e.status == 404 and not strict:
             return []
         logger.exception(f"Failed to list AIMProfiles in namespace {namespace}: {e}")
+        if strict:
+            raise ExternalServiceError(f"Failed to list AIMProfiles in namespace '{namespace}': {e.reason}") from e
         return []
     except Exception as e:
         logger.exception(f"Failed to list AIMProfiles in namespace {namespace}: {e}")
+        if strict:
+            raise ExternalServiceError(f"Failed to list AIMProfiles in namespace '{namespace}': {e}") from e
         return []
 
     profiles: list[AIMProfileResource] = []
@@ -81,6 +91,8 @@ async def list_aim_profiles(
             profiles.append(AIMProfileResource.model_validate(item))
         except Exception as e:
             logger.error(f"Failed to parse AIMProfile: {e}")
+            if strict:
+                raise ExternalServiceError(f"Failed to parse AIMProfile in namespace '{namespace}': {e}") from e
             continue
     logger.debug(f"Found {len(profiles)} AIMProfiles for model {model_name or 'all'} in {namespace}")
     return profiles
@@ -89,16 +101,31 @@ async def list_aim_profiles(
 async def list_base_role_profiles(
     kube_client: KubernetesClient,
     namespace: str,
+    *,
+    model_name: str | None = None,
+    strict: bool = False,
 ) -> list[AIMProfileResource]:
     """List the namespace's base-role AIMProfiles (emitted by the base-image model).
 
     A BYOM model derives its runtime profiles from these, so their distinct
     accelerator/precision/count values are the runtime options a custom model
     will actually support — the onboard-time analogue of the deploy wizard's
-    Ready-profile options. Returns an empty list on 404 or any error so the
-    wizard degrades to static defaults instead of failing.
+    Ready-profile options.
+
+    ``model_name`` narrows to one producing base-image model. A namespace holds
+    one base model per image family, so callers that care which base image the
+    values describe — rather than what the namespace offers overall — must pass
+    it; the role label alone spans every family present.
+
+    With ``strict`` off (the default) a 404 (CRD absent) or any Kubernetes/parse
+    failure degrades to an empty list so the onboard wizard can fall back to
+    static defaults. The create-profile path sets ``strict=True`` so a real infra
+    failure raises ``ExternalServiceError`` (a 502) instead of an empty list that
+    ``_resolve_single_base_profile`` would misread as "zero base profiles" (a 400).
     """
     label_selector = f"{AIM_PROFILE_ROLE_LABEL}={AIM_PROFILE_ROLE_BASE}"
+    if model_name:
+        label_selector += f",{AIM_PROFILE_SOURCE_MODEL_LABEL}={model_name}"
     try:
         result = await kube_client.custom_objects.list_namespaced_custom_object(
             group=AIM_API_GROUP,
@@ -108,12 +135,18 @@ async def list_base_role_profiles(
             label_selector=label_selector,
         )
     except ApiException as e:
-        if e.status == 404:
+        if e.status == 404 and not strict:
             return []
         logger.exception(f"Failed to list base-role AIMProfiles in namespace {namespace}: {e}")
+        if strict:
+            raise ExternalServiceError(
+                f"Failed to list base-role AIMProfiles in namespace '{namespace}': {e.reason}"
+            ) from e
         return []
     except Exception as e:
         logger.exception(f"Failed to list base-role AIMProfiles in namespace {namespace}: {e}")
+        if strict:
+            raise ExternalServiceError(f"Failed to list base-role AIMProfiles in namespace '{namespace}': {e}") from e
         return []
 
     profiles: list[AIMProfileResource] = []
@@ -122,6 +155,10 @@ async def list_base_role_profiles(
             profiles.append(AIMProfileResource.model_validate(item))
         except Exception as e:
             logger.error(f"Failed to parse base-role AIMProfile: {e}")
+            if strict:
+                raise ExternalServiceError(
+                    f"Failed to parse base-role AIMProfile in namespace '{namespace}': {e}"
+                ) from e
             continue
     logger.debug(f"Found {len(profiles)} base-role AIMProfiles in {namespace}")
     return profiles
@@ -155,9 +192,12 @@ async def find_aim_profile_for_model(
     items = result.get("items", [])
     if not items:
         return None
-    # aim-engine emits a single default profile per AIMModel; if multiple
-    # show up (e.g. tooling pre-created one) any match works for the
-    # image-ref annotation since they all reference the same model.
+    # A model may have several derived profiles (Default plus narrowed sets).
+    # This helper only reports *existence* of any derived profile for the model
+    # (its sole remaining callers are the onboard wait poll and the non-custom
+    # deploy path); it does not attempt to identify the effective one. Callers
+    # that need the specific profile deploy would pin resolve it via the
+    # AIMProfileSet composer (effective_profile_for_set), not from this list.
     return AIMProfileResource.model_validate(items[0])
 
 

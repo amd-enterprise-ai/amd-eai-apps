@@ -72,11 +72,12 @@ export const GpuDeviceSelect: React.FC<Props> = ({
     <Select
       aria-label={t('clusters:nodes.detail.deviceMetrics.gpuDevice.label')}
       className="min-w-64"
+      variant="primary"
       selectionMode="multiple"
       selectedKeys={selectedGpuDevices}
       onSelectionChange={handleSelectionChange}
       disallowEmptySelection
-      startContent={<IconCpu size={16} className="text-default-400 shrink-0" />}
+      startContent={<IconCpu size={16} className="text-muted shrink-0" />}
       renderValue={renderValue}
     >
       {gpuDeviceOptions.map((opt) => (
@@ -85,7 +86,7 @@ export const GpuDeviceSelect: React.FC<Props> = ({
           textValue={opt.label}
           startContent={
             opt.key === ALL_DEVICES_KEY ? (
-              <IconCpu size={16} className="text-default-400 shrink-0" />
+              <IconCpu size={16} className="text-muted shrink-0" />
             ) : (
               <span
                 className={`size-2 rounded-sm shrink-0 ${getChartColorBg(

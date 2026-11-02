@@ -18,9 +18,8 @@ import {
   Resolver,
   UseFormReturn,
 } from 'react-hook-form';
-import { ActionButton, CloseButton } from '../Buttons';
+import { ActionButton } from '../Buttons';
 import ManagedForm from '../ManagedForm/ManagedForm';
-import { BACKDROP, CLASSES, MOTION_PROPS } from './constants';
 
 import { type ZodType, type ZodTypeDef } from 'zod';
 
@@ -33,10 +32,19 @@ interface Props<T extends FieldValues> {
   title: string;
   confirmText: string;
   cancelText: string;
+  /**
+   * Optional second submit, rendered before the primary one. It submits the same
+   * form; which button was used arrives with `onFormSuccess`, so the caller
+   * decides what differs once the submission succeeds.
+   */
+  secondaryConfirm?: {
+    label: string;
+    icon?: React.ReactNode;
+  };
 
   onOpenChange?: () => void;
   onCancel?: () => void;
-  onFormSuccess?: (data: T) => void;
+  onFormSuccess?: (data: T, meta: { viaSecondaryConfirm: boolean }) => void;
   onFormFailure?: (errors: FieldErrors<T>, data: T) => void;
   renderFields: (form: UseFormReturn<T>) => React.ReactNode;
   defaultValues?: DefaultValues<T>;
@@ -52,6 +60,7 @@ export const DrawerForm = <T extends FieldValues>({
   onOpenChange,
   cancelText,
   confirmText,
+  secondaryConfirm,
   title,
   onCancel,
   onFormSuccess,
@@ -62,10 +71,25 @@ export const DrawerForm = <T extends FieldValues>({
   renderFields,
 }: Props<T>) => {
   const formRef = useRef<HTMLFormElement>(null);
+  // Only the secondary button raises this, and the submit it belongs to takes it
+  // back down, valid or not. The footer sits outside the form and submits it
+  // programmatically, so a submit carries no submitter to read this from, and a
+  // secondary submission that failed validation would otherwise still be flying
+  // when the user presses Enter or the primary button next.
+  const viaSecondaryConfirm = useRef(false);
+  const takeViaSecondaryConfirm = useCallback(() => {
+    const viaSecondary = viaSecondaryConfirm.current;
+    viaSecondaryConfirm.current = false;
+    return viaSecondary;
+  }, []);
 
-  const handleFormSubmit = useCallback(() => {
-    formRef?.current?.requestSubmit();
-  }, [formRef]);
+  const handleFormSubmit = useCallback(
+    (viaSecondary = false) => {
+      viaSecondaryConfirm.current = viaSecondary;
+      formRef?.current?.requestSubmit();
+    },
+    [formRef],
+  );
 
   const handleCancel = useCallback(() => {
     if (onCancel) {
@@ -77,20 +101,22 @@ export const DrawerForm = <T extends FieldValues>({
 
   const handleFormSuccess = useCallback(
     (data: T) => {
+      const viaSecondaryConfirm = takeViaSecondaryConfirm();
       if (onFormSuccess) {
-        onFormSuccess(data as T);
+        onFormSuccess(data as T, { viaSecondaryConfirm });
       }
     },
-    [onFormSuccess],
+    [onFormSuccess, takeViaSecondaryConfirm],
   );
 
   const handleFormFailure = useCallback(
     (errors: FieldErrors<T>, data: T) => {
+      takeViaSecondaryConfirm();
       if (onFormFailure) {
         onFormFailure(errors, data);
       }
     },
-    [onFormFailure],
+    [onFormFailure, takeViaSecondaryConfirm],
   );
 
   return (
@@ -102,20 +128,17 @@ export const DrawerForm = <T extends FieldValues>({
           onCancel();
         }
       }}
-      motionProps={MOTION_PROPS}
-      backdrop={BACKDROP}
-      closeButton={<CloseButton />}
-      hideCloseButton={
-        hideCloseButton !== undefined ? hideCloseButton : isActioning
-      }
       isDismissable={
         hideCloseButton !== undefined ? !hideCloseButton : !isActioning
       }
-      classNames={CLASSES}
     >
-      <DrawerContent>
+      <DrawerContent
+        hideCloseButton={
+          hideCloseButton !== undefined ? hideCloseButton : isActioning
+        }
+      >
         <DrawerHeader>{title}</DrawerHeader>
-        <DrawerBody className="w-full">
+        <DrawerBody>
           <ManagedForm<T>
             isActioning={isActioning}
             onFormSuccess={handleFormSuccess}
@@ -136,13 +159,25 @@ export const DrawerForm = <T extends FieldValues>({
           >
             {cancelText}
           </ActionButton>
+          {secondaryConfirm && (
+            <ActionButton
+              secondary
+              aria-label={secondaryConfirm.label}
+              icon={secondaryConfirm.icon}
+              isDisabled={isDisabled || isActioning}
+              type="submit"
+              onPress={() => handleFormSubmit(true)}
+            >
+              {secondaryConfirm.label}
+            </ActionButton>
+          )}
           <ActionButton
             primary
             aria-label={confirmText}
             isLoading={isActioning}
             isDisabled={isDisabled}
             type="submit"
-            onPress={handleFormSubmit}
+            onPress={() => handleFormSubmit()}
           >
             {confirmText}
           </ActionButton>

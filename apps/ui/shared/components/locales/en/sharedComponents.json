@@ -1,0 +1,148 @@
+{
+  "TagInput": {
+    "placeholder": "Add a tag…",
+    "ariaLabel": "Tag input",
+    "removeTag": "Remove tag {{tag}}",
+    "tagAdded": "Tag {{tag}} added",
+    "tagsAdded": "{{count}} tags added",
+    "tagRemoved": "Tag {{tag}} removed",
+    "errorMinLength": "Tag \"{{tag}}\" must be at least {{min}} character(s).",
+    "errorMaxLength": "Tag \"{{tag}}\" must be at most {{max}} characters.",
+    "errorDisallowedChars": "Tag \"{{tag}}\" contains disallowed characters.",
+    "errorDuplicate": "\"{{tag}}\" is already added."
+  },
+  "wizard": {
+    "check": "Check",
+    "optional": "Optional",
+    "stepAnnouncement": "Step {{current}} of {{total}}: {{title}}"
+  },
+  "actions": {
+    "back": {
+      "title": "Back"
+    },
+    "cancel": {
+      "title": "Cancel"
+    },
+    "clear": {
+      "title": "Clear"
+    },
+    "clearFilters": {
+      "title": "Clear filters"
+    },
+    "close": {
+      "title": "Close"
+    },
+    "confirm": {
+      "title": "Confirm"
+    },
+    "copy": {
+      "copied": "Copied",
+      "title": "Copy"
+    },
+    "download": {
+      "title": "Download"
+    },
+    "edit": {
+      "title": "Edit"
+    },
+    "next": "Next",
+    "previous": "Previous",
+    "refresh": {
+      "title": "Refresh"
+    },
+    "showDetails": {
+      "title": "Show details"
+    },
+    "submit": {
+      "title": "Submit"
+    }
+  },
+  "CodeBlock": {
+    "enterFileName": "Enter file name"
+  },
+  "data": {
+    "lastUpdated": "Last update: {{timestamp}}",
+    "loading": "Loading...",
+    "refreshing": "Refreshing ..."
+  },
+  "breadcrumbs": {
+    "label": "Breadcrumb"
+  },
+  "FormFileUpload": {
+    "remove": "Remove",
+    "add_one": "Choose a file",
+    "add_other": "Add files",
+    "drop_one": "Drop a file here to upload",
+    "drop_other": "Drop files here to upload",
+    "dropFail_one": "The file cannot be uploaded",
+    "dropFail_other": "These files cannot be uploaded",
+    "footerFiles_one": "{{count}} file",
+    "footerFiles_other": "{{count}} files"
+  },
+  "list": {
+    "actions": {
+      "label": "Actions",
+      "menu": "Actions menu"
+    }
+  },
+  "links": {
+    "documentation": "Documentation"
+  },
+  "password": {
+    "hidePassword": "Hide password",
+    "showPassword": "Show password"
+  },
+  "RelevantDocs": {
+    "title": "Documentation",
+    "learnMore": "Learn more"
+  },
+  "statistics": {
+    "categoryBar": "Category bar",
+    "noData": "No data",
+    "upperLimitPrefix": "out of"
+  },
+  "numberField": {
+    "decrease": "Decrease",
+    "increase": "Increase"
+  },
+  "status": {
+    "description": "The system returned the following error message:",
+    "errorDetail": {
+      "title": "Error details",
+      "action": {
+        "next": "Next error",
+        "prev": "Previous error"
+      }
+    }
+  },
+  "timeRange": {
+    "description": "Time range selection",
+    "range": {
+      "15m": "15 min",
+      "30m": "30 min",
+      "1h": "1 hour",
+      "24h": "24 hours",
+      "7d": "7 days"
+    }
+  },
+  "menu": {
+    "navigation": "Navigation",
+    "actions": {
+      "open": "Open menu",
+      "close": "Close menu",
+      "themeToggle": "Toggle light/dark mode",
+      "theme": "Theme: {{theme}}",
+      "logout": "Logout",
+      "reportIssue": "Report issue"
+    },
+    "sidebar": {
+      "expand": "Expand sidebar",
+      "collapse": "Collapse sidebar",
+      "goToHome": "Go to home"
+    }
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark"
+  }
+}

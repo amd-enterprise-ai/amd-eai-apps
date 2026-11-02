@@ -90,3 +90,13 @@ Remove user from project
     ${response}=            Safe Delete Request     ${endpoint}/${project_id}/users/${user_id}      expected_status=${expected_status}
     Log    API Response: ${response.status_code}    DEBUG
     RETURN                  ${response}
+
+Assign secret to project
+    [Documentation]    Assign an organization secret to one project without replacing other assignments.
+    [Arguments]    ${project_id}    ${secret_id}    ${expected_status}=204
+    Create api session    airm
+    ${endpoint}=    Projects endpoint
+    ${response}=    Safe Put Request    ${endpoint}/${project_id}/secrets/${secret_id}/assign
+    ...    expected_status=${expected_status}
+    Log    API Response: ${response.status_code}    DEBUG
+    RETURN    ${response}

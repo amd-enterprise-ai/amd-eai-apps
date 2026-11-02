@@ -29,7 +29,7 @@ export const ProjectAndRoleEntry: React.FC<Props> = ({
       description={description}
       userIcon={<IconComponent size={32} />}
       onPress={onPress}
-      buttonLabel={t('detail.projectsAndRoles.projects.actions.delete')}
+      buttonLabel={t('detail.projectsAndRoles.projects.actions.delete.title')}
     />
   );
 };

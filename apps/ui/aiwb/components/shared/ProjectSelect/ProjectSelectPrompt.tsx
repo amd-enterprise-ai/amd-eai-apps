@@ -35,7 +35,7 @@ export function ProjectSelectPrompt({ errorCode }: ProjectSelectPromptProps) {
           ? t(descriptionKey)
           : t('projectSelectPrompt.description')
       }
-      endContent={<ProjectSelect size="md" showTooltip={false} />}
+      endContent={<ProjectSelect showTooltip={false} />}
     />
   );
 }

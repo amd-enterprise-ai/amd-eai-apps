@@ -15,7 +15,12 @@ from ..secrets.enums import ProjectSecretStatus
 from ..secrets.models import OrganizationSecretAssignment
 from ..utilities.messaging import KubernetesMetadata
 from ..workloads.enums import ConfigMapStatus
-from .constants import PROJECT_STORAGE_ID_LABEL
+from .constants import (
+    AIWB_STORAGE_DISPLAY_NAME_ANNOTATION,
+    PROJECT_STORAGE_ID_LABEL,
+    STORAGE_DISCOVERY_LABEL,
+    STORAGE_TYPE_LABEL,
+)
 from .enums import ProjectStorageStatus, StorageStatus
 from .messaging import StorageInfoConfigMapManifest
 from .models import ProjectStorage as ProjectStorageModel
@@ -32,7 +37,12 @@ def _build_storage_info_configmap_manifest(
         metadata=KubernetesMetadata(
             name=f"{storage.name}-info-config-map",
             namespace=project_name,
-            labels={PROJECT_STORAGE_ID_LABEL: str(project_storage_id)},
+            labels={
+                PROJECT_STORAGE_ID_LABEL: str(project_storage_id),
+                STORAGE_DISCOVERY_LABEL: "true",
+                STORAGE_TYPE_LABEL: str(storage.type),
+            },
+            annotations={AIWB_STORAGE_DISPLAY_NAME_ANNOTATION: storage.name},
         ),
         data={
             "BUCKET_URL": storage.bucket_url,

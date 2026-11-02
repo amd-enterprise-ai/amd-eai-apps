@@ -15,21 +15,10 @@ By participating in this project you agree to abide by the [Code of Conduct](COD
 ## Issue Tracking
 
 - **Bug reports and feature requests** — open a [GitHub Issue](../../issues).
-- **Internal development tasks** — tracked in Jira. All internal PRs should reference a Jira ticket.
 
 ## Branch and Commit Naming
 
-When a Jira ticket exists, prefix branch names and commit messages with the ticket ID:
-
-```
-# Branch
-EAI-1234-short-description-of-work
-
-# Commit message
-EAI-1234: Short description of what changed and why
-```
-
-For community contributions without a Jira ticket, use a short descriptive branch name and a clear commit message that explains _why_ the change is needed.
+Use a short descriptive branch name and a clear commit message that explains _why_ the change is needed.
 
 ## Development Setup
 
@@ -38,10 +27,10 @@ See [README.md](README.md) for full prerequisites and setup instructions. The sh
 ```bash
 git clone <this-repo>
 cd <repo>
-prek install --install-hooks --hook-type pre-commit --hook-type pre-push
+prek install --prepare-hooks --hook-type pre-commit --hook-type pre-push
 ```
 
-`prek` runs linters on commit and tests on push. If the pre-push stage is too slow for your workflow you can disable it and rely on CI instead:
+`prek` runs linters on commit and tests on push. If the pre-push stage is too slow for your workflow you can disable it:
 
 ```bash
 prek uninstall -t pre-push
@@ -58,6 +47,7 @@ prek uninstall -t pre-push
 | `apps/ui/aiwb`               | TypeScript / Next.js | `pnpm test`     |
 | `apps/ui/airm`               | TypeScript / Next.js | `pnpm test`     |
 | `apps/agent`                 | Go                   | `make test`     |
+| `apps/ai-gateway-discovery`  | Go                   | `make test`     |
 
 ## Making Changes
 
@@ -69,11 +59,7 @@ prek uninstall -t pre-push
 
 ### Pull Request Title
 
-Follow the same naming convention as commits:
-
-```
-EAI-1234: Short description of what changed and why
-```
+Use a short summary of what changed and why.
 
 ### What reviewers look for
 

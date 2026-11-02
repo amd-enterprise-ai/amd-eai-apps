@@ -81,7 +81,7 @@ describe('WorkloadLogsModal', () => {
     expect(screen.getByText('IsOpen: true')).toBeInTheDocument();
 
     // Check close button is present
-    expect(screen.getByTestId('close-button')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /close/i })).toBeInTheDocument();
   });
 
   it('does not render when modal is closed', () => {
@@ -116,7 +116,7 @@ describe('WorkloadLogsModal', () => {
     );
 
     // Find and click the close button
-    const closeButton = screen.getByTestId('close-button');
+    const closeButton = screen.getByRole('button', { name: /close/i });
     fireEvent.click(closeButton);
 
     expect(mockOnOpenChange).toHaveBeenCalledWith(false);
@@ -209,9 +209,9 @@ describe('WorkloadLogsModal', () => {
     ).toBeInTheDocument();
 
     // Check close button is present with correct aria-label
-    const closeButton = screen.getByTestId('close-button');
+    const closeButton = screen.getByRole('button', { name: /close/i });
     expect(closeButton).toBeInTheDocument();
-    expect(closeButton).toHaveAttribute('aria-label', 'actions.close.title');
+    expect(closeButton).toHaveAttribute('aria-label', 'Close');
 
     // Verify modal is rendered
     expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -229,7 +229,7 @@ describe('WorkloadLogsModal', () => {
     );
 
     // Close button should trigger onOpenChange
-    const closeButton = screen.getByTestId('close-button');
+    const closeButton = screen.getByRole('button', { name: /close/i });
     fireEvent.click(closeButton);
 
     expect(mockOnOpenChange).toHaveBeenCalledWith(false);

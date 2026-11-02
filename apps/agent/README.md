@@ -66,28 +66,26 @@ Clone required repositories side-by-side with the `core` repository:
 
 ```
 └── projects/
-    ├── core/           # This repository
+    ├── amd-eai-apps/   # This repository
     ├── kaiwo/          # Queue configuration CRD
-    ├── aim-engine/     # AIMService CRD
-    └── dev_helpers/    # Utilities for local development
+    └── aim-engine/     # AIMService CRD
 ```
 
 Clone the repositories:
 
 ```bash
 cd projects/
-git clone https://github.com/silogen/core.git
+git clone https://github.com/amd-enterprise-ai/amd-eai-apps.git
 git clone https://github.com/silogen/kaiwo.git
-git clone https://github.com/silogen/dev_helpers.git
-git clone https://github.com/silogen/aim-engine.git
+git clone https://github.com/amd-enterprise-ai/aim-engine.git
 ```
 
 #### Create and Configure Cluster
 
-Create a kind cluster from the root of the `core/` repository:
+Create a kind cluster from the root of the `amd-eai-apps/` repository:
 
 ```bash
-cd core/
+cd amd-eai-apps/
 kind create cluster --config ./apps/agent/local/kind-config.yaml
 ```
 
@@ -100,22 +98,12 @@ kubectl cluster-info --context kind-kind
 kubectl config use-context kind-kind
 ```
 
-Fix SSL certificates (AMD corporate network only):
-
-If you're on an AMD corporate machine, SSL certificate issues can prevent pulling images and installing Helm charts. Fix this by running:
-
-```bash
-sh ../dev_helpers/fix_kind.sh
-```
-
-This script installs the corporate CA certificates into the kind cluster nodes, allowing secure connections to internal registries and services.
-
 #### Install Kubernetes Dependencies
 
 Install required CRDs and operators in the cluster:
 
 - **Kaiwo** - Queue Configuration CRD for workload queuing. [Installation Guide](https://silogen.github.io/kaiwo/admin/installation/)
-- **AIM Engine** - AIMService CRD for AI model inference services. [Installation Guide](https://github.com/silogen/aim-engine)
+- **AIM Engine** - AIMService CRD for AI model inference services. [Installation Guide](https://github.com/amd-enterprise-ai/aim-engine)
 - **External Secrets Operator** - For managing secrets from external sources like Vault. [Installation Guide](https://external-secrets.io/main/introduction/getting-started/#installing-with-helm)
 
 #### Onboard Cluster with AIRM

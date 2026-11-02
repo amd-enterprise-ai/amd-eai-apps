@@ -29,6 +29,14 @@ minio:
 clusterAuth:
   secretName: "cluster-auth-admin-token"
 
+# Scoped OpenBao write token for the API-key KV path. Consumed by the AIWB backend as
+# OPENBAO_TOKEN; sole materializer of this Secret (the dev/root-token path was removed).
+openbaoToken:
+  # Set to false for an installation without OpenBao. Match it with
+  # openBao.enabled in the aiwb application chart.
+  enabled: true
+  secretName: "aiwb-openbao-token"
+
 # PostgreSQL CNPG Configuration
 postgresql:
   username: "aiwb_user"

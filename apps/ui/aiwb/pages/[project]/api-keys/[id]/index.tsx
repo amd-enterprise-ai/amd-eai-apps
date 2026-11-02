@@ -4,13 +4,13 @@
 
 import { getServerSession } from 'next-auth';
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import type { GetServerSidePropsContext } from 'next';
 import { useRouter } from 'next/router';
 
 import { authOptions } from '@amdenterpriseai/utils/server';
 
 import { useProject } from '@/contexts/ProjectContext';
+import { getPageTranslations } from '@/lib/server/i18n';
 import ApiKeyMetricsDashboard from '@/components/features/api-keys/ApiKeyMetricsDashboard';
 
 const ApiKeyDetailsPage: React.FC = () => {
@@ -56,10 +56,8 @@ export async function getServerSideProps(context: GetServerSidePropsContext) {
   }
 
   const resolvedLocale = locale ?? 'en';
-  const translations = await serverSideTranslations(resolvedLocale, [
-    'common',
+  const translations = await getPageTranslations(resolvedLocale, [
     'api-keys',
-    'sharedComponents',
     'projects',
     'workloads',
     'models',

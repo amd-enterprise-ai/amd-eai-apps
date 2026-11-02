@@ -7,40 +7,47 @@ import { vi } from 'vitest';
 
 import { PasswordInput } from '@amdenterpriseai/components';
 
-// Mock HeroUI components
-vi.mock('@heroui/react', async () => {
-  const actual = await vi.importActual('@heroui/react');
-  return {
-    ...actual,
-    Input: ({ type, endContent, ...props }: any) => (
-      <div data-testid="input-wrapper">
-        <input data-testid="password-input" type={type} {...props} />
-        {endContent && <div data-testid="end-content">{endContent}</div>}
-      </div>
-    ),
-    Button: ({
-      children,
-      onPress,
-      tabIndex,
-      variant,
-      isIconOnly,
-      size,
-      ...props
-    }: any) => (
-      <button
-        data-testid="password-toggle-button"
-        onClick={onPress}
-        tabIndex={tabIndex}
-        data-variant={variant}
-        data-icon-only={isIconOnly}
-        data-size={size}
+// PasswordInput composes the local Input/Button adapters (not the raw HeroUI
+// primitives), so stub those modules to isolate the toggle/visibility logic.
+vi.mock('../../../src/Input/InputPrimitive', () => ({
+  Input: ({ type, endContent, classNames, className, ...props }: any) => (
+    <div data-testid="input-wrapper">
+      <input
+        data-testid="password-input"
+        type={type}
+        className={
+          [className, classNames?.input].filter(Boolean).join(' ') || undefined
+        }
         {...props}
-      >
-        {children}
-      </button>
-    ),
-  };
-});
+      />
+      {endContent && <div data-testid="end-content">{endContent}</div>}
+    </div>
+  ),
+}));
+
+vi.mock('../../../src/Buttons/Button', () => ({
+  Button: ({
+    children,
+    onPress,
+    tabIndex,
+    variant,
+    isIconOnly,
+    size,
+    ...props
+  }: any) => (
+    <button
+      data-testid="password-toggle-button"
+      onClick={onPress}
+      tabIndex={tabIndex}
+      data-variant={variant}
+      data-icon-only={isIconOnly}
+      data-size={size}
+      {...props}
+    >
+      {children}
+    </button>
+  ),
+}));
 
 vi.mock('@tabler/icons-react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tabler/icons-react')>();
@@ -60,8 +67,20 @@ vi.mock('@tabler/icons-react', async (importOriginal) => {
 });
 
 describe('PasswordInput', () => {
+  // jsdom has no `CSS.supports`, so simulate a browser (Chrome/Safari) that
+  // supports `-webkit-text-security` for most tests; the "unsupported
+  // browser" describe block below overrides this to exercise the Firefox
+  // fallback path.
+  const cssSupportsSpy = vi.fn().mockReturnValue(true);
+
   beforeEach(() => {
     vi.clearAllMocks();
+    cssSupportsSpy.mockReturnValue(true);
+    vi.stubGlobal('CSS', { supports: cssSupportsSpy });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   describe('Basic rendering', () => {
@@ -214,6 +233,66 @@ describe('PasswordInput', () => {
       render(<PasswordInput />);
       const button = screen.getByTestId('password-toggle-button');
       expect(button.tagName).toBe('BUTTON');
+    });
+  });
+
+  describe('preventPasswordManagerPrompt', () => {
+    it('renders type="text" instead of "password" when enabled', () => {
+      render(<PasswordInput preventPasswordManagerPrompt />);
+      const input = screen.getByTestId('password-input');
+      expect(input).toHaveAttribute('type', 'text');
+    });
+
+    it('keeps type="text" after toggling reveal', () => {
+      render(<PasswordInput preventPasswordManagerPrompt />);
+      const input = screen.getByTestId('password-input');
+      const toggleButton = screen.getByTestId('password-toggle-button');
+
+      fireEvent.click(toggleButton);
+      expect(input).toHaveAttribute('type', 'text');
+
+      fireEvent.click(toggleButton);
+      expect(input).toHaveAttribute('type', 'text');
+    });
+
+    it('applies CSS-only masking that toggles with reveal state', () => {
+      render(<PasswordInput preventPasswordManagerPrompt />);
+      const input = screen.getByTestId('password-input');
+      const toggleButton = screen.getByTestId('password-toggle-button');
+
+      expect(input.className).toContain('[-webkit-text-security:disc]');
+
+      fireEvent.click(toggleButton);
+      expect(input.className).toContain('[-webkit-text-security:none]');
+    });
+
+    it('does not change default behavior when the flag is unset', () => {
+      render(<PasswordInput />);
+      const input = screen.getByTestId('password-input');
+      expect(input).toHaveAttribute('type', 'password');
+      expect(input.className).not.toContain('text-security');
+    });
+
+    describe('when the browser does not support -webkit-text-security', () => {
+      beforeEach(() => {
+        cssSupportsSpy.mockReturnValue(false);
+      });
+
+      it('falls back to a native password field instead of exposing the value in clear text', () => {
+        render(<PasswordInput preventPasswordManagerPrompt />);
+        const input = screen.getByTestId('password-input');
+        expect(input).toHaveAttribute('type', 'password');
+        expect(input.className).not.toContain('text-security');
+      });
+
+      it('still allows revealing the value via the toggle button', () => {
+        render(<PasswordInput preventPasswordManagerPrompt />);
+        const input = screen.getByTestId('password-input');
+        const toggleButton = screen.getByTestId('password-toggle-button');
+
+        fireEvent.click(toggleButton);
+        expect(input).toHaveAttribute('type', 'text');
+      });
     });
   });
 

@@ -131,7 +131,7 @@ describe('Node detail page', () => {
     });
     expect(
       screen.getByRole('tablist', {
-        name: 'common:timeRange.description',
+        name: 'timeRange.description',
       }),
     ).toBeInTheDocument();
   });

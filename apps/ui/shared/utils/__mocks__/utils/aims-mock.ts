@@ -14,7 +14,7 @@ export const mockAims = [
     image: 'string',
     labels: {
       'com.amd.aim.hfToken.required': 'False',
-      'org.opencontainers.image.source': 'https://github.com/silogen/aim-build',
+      'org.opencontainers.image.source': 'https://github.com/amd-enterprise-ai/aim-build',
       'org.opencontainers.image.title': 'AIM - DeepSeek-R1',
       'org.opencontainers.image.revision':
         'ebec727adebbf66f8fcbb28180b03f992c220c69',
@@ -80,7 +80,7 @@ export const mockAims = [
     image: 'string',
     labels: {
       'com.amd.aim.hfToken.required': 'False',
-      'org.opencontainers.image.source': 'https://github.com/silogen/aim-build',
+      'org.opencontainers.image.source': 'https://github.com/amd-enterprise-ai/aim-build',
       'org.opencontainers.image.title': 'AIM - DeepSeek-R2',
       'org.opencontainers.image.revision':
         'ebec727adebbf66f8fcbb28180b03f992c220c69',
@@ -146,7 +146,7 @@ export const mockAims = [
     image: 'string',
     labels: {
       'com.amd.aim.hfToken.required': 'False',
-      'org.opencontainers.image.source': 'https://github.com/silogen/aim-build',
+      'org.opencontainers.image.source': 'https://github.com/amd-enterprise-ai/aim-build',
       'org.opencontainers.image.title': 'AIM - DeepSeek-R3',
       'org.opencontainers.image.revision':
         'ebec727adebbf66f8fcbb28180b03f992c220c69',
@@ -212,7 +212,7 @@ export const mockAims = [
     image: 'string',
     labels: {
       'com.amd.aim.hfToken.required': 'False',
-      'org.opencontainers.image.source': 'https://github.com/silogen/aim-build',
+      'org.opencontainers.image.source': 'https://github.com/amd-enterprise-ai/aim-build',
       'org.opencontainers.image.title': 'DeepSeek-R4',
       'org.opencontainers.image.revision':
         'ebec727adebbf66f8fcbb28180b03f992c220c69',

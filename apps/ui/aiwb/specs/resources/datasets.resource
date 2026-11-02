@@ -16,6 +16,7 @@ Resource            resources/aiwb_datasets.resource
 
 *** Variables ***
 ${UI_DATASET_FILE}    ${EXECDIR}/test_data/datasets/sample.jsonl
+${UI_LARGE_DATASET_FILE}    ${EXECDIR}/test_data/datasets/large-sample.jsonl
 # Default UI page size is 10; uploading 11 forces a second page.
 ${UI_DATASETS_PAGE_SIZE}    10
 ${UI_PAGINATION_DATASET_COUNT}    11
@@ -38,6 +39,33 @@ The project contains more datasets than fit on a single page
     ...                ``Multiple datasets exist`` keyword for the actual upload.
 
     Multiple datasets exist    count=${UI_PAGINATION_DATASET_COUNT}
+
+Datasets of different sizes exist
+    [Documentation]    Uploads two datasets with distinct file sizes and tracks them for cleanup.
+    ${random_suffix}=    Generate Random String    8    [LOWER][NUMBERS]
+    VAR    ${small_name}    e2e-small-${random_suffix}
+    VAR    ${large_name}    e2e-large-${random_suffix}
+    ${namespace}=    Get Project Namespace
+    ${small_response}=    Upload dataset
+    ...    jsonl_file_path=${UI_DATASET_FILE}
+    ...    name=${small_name}
+    ...    namespace=${namespace}
+    ...    description=Small dataset
+    ...    dataset_type=Fine-tuning
+    ...    expected_status=200
+    ${large_response}=    Upload dataset
+    ...    jsonl_file_path=${UI_LARGE_DATASET_FILE}
+    ...    name=${large_name}
+    ...    namespace=${namespace}
+    ...    description=Large dataset
+    ...    dataset_type=Fine-tuning
+    ...    expected_status=200
+    VAR    ${small_dataset}    ${small_response.json()}
+    VAR    ${large_dataset}    ${large_response.json()}
+    Track Dataset For Cleanup    ${small_dataset}[id]
+    Track Dataset For Cleanup    ${large_dataset}[id]
+    VAR    ${UI_SMALL_DATASET_NAME}    ${small_name}    scope=TEST
+    VAR    ${UI_LARGE_DATASET_NAME}    ${large_name}    scope=TEST
 
 # =============================================================================
 # When keywords (actions)
@@ -120,6 +148,13 @@ Datasets should be listed with their metadata
 
     Dataset table should have rows
     Dataset row should contain metadata    ${TEST_DATASET}[name]    Fine-tuning
+
+Dataset file sizes should be displayed
+    [Documentation]    Verifies both dataset rows show a human-readable file size.
+    ${small_row}=    Get dataset row text    ${UI_SMALL_DATASET_NAME}
+    ${large_row}=    Get dataset row text    ${UI_LARGE_DATASET_NAME}
+    Should Match Regexp    ${small_row}    \\d+(\\.\\d{2})? (B|KB|MB|GB|TB|PB)
+    Should Match Regexp    ${large_row}    \\d+(\\.\\d{2})? (B|KB|MB|GB|TB|PB)
 
 Track UI uploaded dataset for cleanup
     [Documentation]    Looks up the UI-uploaded dataset by name via API and tracks its ID

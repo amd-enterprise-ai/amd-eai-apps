@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Copyright © Advanced Micro Devices, Inc., or its affiliates.
+
+SPDX-License-Identifier: MIT
+-->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.0.xsd">
+
+    <changeSet id="012-readd-cluster-auth-key-id-if-missing" author="aiwb">
+        <!-- Backwards-compat: cluster_auth_key_id is retained (nullable) so keys created via the
+             legacy cluster-auth path stay readable; the OpenBao/ESO store is the sole path for new
+             keys, which leave it NULL. On DBs that never dropped it (006 creates, 010 makes
+             nullable) the precondition skips this. This heals any environment that already applied
+             the earlier drop changeset before that drop was deferred. -->
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="api_keys" columnName="cluster_auth_key_id"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="api_keys">
+            <column name="cluster_auth_key_id" type="VARCHAR(255)"/>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

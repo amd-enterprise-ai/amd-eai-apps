@@ -804,4 +804,4 @@ async def test_get_gpu_device_vram_utilization_missing_params() -> None:
     with TestClient(app) as client:
         response = client.get(f"/v1/workloads/{workload_id}/metrics/gpu-devices/vram-utilization")
 
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT

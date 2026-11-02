@@ -1,0 +1,7 @@
+{
+  "get deploy aiwb-ui -n aiwb -o json": [
+    1,
+    "",
+    "Error from server (Forbidden): deployments.apps \"aiwb-ui\" is forbidden"
+  ]
+}

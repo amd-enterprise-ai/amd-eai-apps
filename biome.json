@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.2.6/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
   "vcs": {
     "enabled": false,
     "clientKind": "git",
@@ -41,7 +41,7 @@
           "options": {
             "paths": {
               "@heroui/react": {
-                "message": "Import from @amdenterpriseai/components or @amdenterpriseai/hooks instead. See EAI-5614 for migration status.",
+                "message": "Import from @amdenterpriseai/components or @amdenterpriseai/hooks instead.",
                 "importNames": [
                   "Accordion",
                   "AccordionItem",
@@ -102,8 +102,6 @@
                   "PopoverProps",
                   "PopoverTrigger",
                   "PopoverTriggerProps",
-                  "Pagination",
-                  "PaginationProps",
                   "Select",
                   "Selection",
                   "SelectItem",
@@ -211,6 +209,11 @@
       "selfCloseVoidElements": "always"
     }
   },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
   "assist": {
     "enabled": false
   },
@@ -226,24 +229,29 @@
         "apps/ui/shared/components/src/CodeBlock/**",
         "apps/ui/shared/components/src/CopySnippet/**",
         "apps/ui/shared/components/src/DataTable/**",
+        "apps/ui/shared/components/__tests__/shared/DataTable/**",
+        "apps/ui/shared/components/__stories__/Table.stories.tsx",
         "apps/ui/shared/components/src/Drawer/**",
         "apps/ui/shared/components/src/Dropdown/**",
+        "apps/ui/shared/components/src/Filters/**",
         "apps/ui/shared/components/src/Input/**",
         "apps/ui/shared/components/src/Link/**",
         "apps/ui/shared/components/src/Listbox/**",
         "apps/ui/shared/components/src/Modal/**",
+        "apps/ui/shared/components/src/Navigation/**",
         "apps/ui/shared/components/src/NumberField/**",
-        "apps/ui/shared/components/src/Pagination/**",
         "apps/ui/shared/components/src/Popover/**",
         "apps/ui/shared/components/src/Select/**",
         "apps/ui/shared/components/src/Separator/**",
         "apps/ui/shared/components/src/Skeleton/**",
         "apps/ui/shared/components/src/Slider/**",
         "apps/ui/shared/components/src/Spinner/**",
+        "apps/ui/shared/components/src/Status/**",
         "apps/ui/shared/components/src/Switch/**",
         "apps/ui/shared/components/src/Tabs/**",
         "apps/ui/shared/components/src/Textarea/**",
         "apps/ui/shared/components/src/Tooltip/**",
+        "apps/ui/shared/components/src/Wizard/**",
         "apps/ui/shared/hooks/src/useOverlayState/**"
       ],
       "linter": {
@@ -283,7 +291,9 @@
       "!**/.turbo/**",
       "!**/node_modules/**",
       "!**/.venv/**",
-      "!**/types/react-i18next.d.ts"
+      "!**/types/react-i18next.d.ts",
+      "!**/types/api.generated.ts",
+      "!**/*.svg"
     ]
   }
 }

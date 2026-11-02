@@ -14,9 +14,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
 import { APIRequestError } from '@amdenterpriseai/utils/app';
 import { useProject } from '@/contexts/ProjectContext';
-import { AIMServiceStatus } from '@/types/aims';
 import type { AIMService, AIMClusterModel, ParsedAIM } from '@/types/aims';
-import { aimParser, getAIMServiceStatusVariants } from '@/lib/app/aims';
+import {
+  aimParser,
+  getAIMServiceStatusVariants,
+  getAimClusterProfileByName,
+  getProjectAimProfileByName,
+} from '@/lib/app/aims';
 import {
   deleteInferenceDeployment,
   getInferenceDeployment,
@@ -25,7 +29,11 @@ import {
   listAllInferenceDeployments,
 } from '@/lib/app/inference';
 import { getCustomModel } from '@/lib/app/custom-models';
-import { NAMESPACE_AIM_MODEL_LABEL } from '@/types/aims';
+import { getAdapterArtifacts } from '@/lib/app/artifacts';
+import {
+  AIM_DISPLAY_NAME_ANNOTATION,
+  NAMESPACE_AIM_MODEL_LABEL,
+} from '@/types/aims';
 import { useScalingConvergence } from '@/hooks/useScalingConvergence';
 import AimDetailsPage from '@/pages/[project]/aims/[id]/index';
 import wrapper from '@/__tests__/ProviderWrapper';
@@ -45,6 +53,8 @@ vi.mock('@/lib/app/aims', async (importOriginal) => ({
   ...(await importOriginal()),
   aimParser: vi.fn(),
   getAIMServiceStatusVariants: vi.fn(() => ({})),
+  getProjectAimProfileByName: vi.fn(),
+  getAimClusterProfileByName: vi.fn(),
 }));
 
 vi.mock('@/lib/app/inference', () => ({
@@ -57,6 +67,10 @@ vi.mock('@/lib/app/inference', () => ({
 
 vi.mock('@/lib/app/custom-models', () => ({
   getCustomModel: vi.fn(),
+}));
+
+vi.mock('@/lib/app/artifacts', () => ({
+  getAdapterArtifacts: vi.fn(),
 }));
 
 vi.mock('@/hooks/useScalingConvergence', () => ({
@@ -104,6 +118,21 @@ vi.mock('@/components/features/workloads/InferenceMetrics', () => ({
 vi.mock('@/components/features/models/AIMConnectModal', () => ({
   __esModule: true,
   default: vi.fn(() => <div data-testid="aim-connect-modal" />),
+}));
+
+vi.mock('@/components/features/workloads/EditLoraAdaptersModal', () => ({
+  EditLoraAdaptersModal: ({
+    isOpen,
+    onSuccess,
+  }: {
+    isOpen: boolean;
+    onSuccess?: () => void;
+  }) =>
+    isOpen ? (
+      <button data-testid="save-lora-adapters" onClick={onSuccess}>
+        Save LoRA adapters
+      </button>
+    ) : null,
 }));
 
 vi.mock('@amdenterpriseai/hooks', async (importOriginal) => ({
@@ -159,8 +188,6 @@ const mockAimService: AIMService = {
   spec: {
     model: { name: 'aim-llama-8b' },
     replicas: 1,
-    overrides: {},
-    cacheModel: false,
     routing: { annotations: {}, enabled: false },
     runtimeConfigName: 'default',
     minReplicas: 1,
@@ -183,7 +210,7 @@ const mockAimService: AIMService = {
     },
   },
   status: {
-    status: AIMServiceStatus.RUNNING,
+    status: 'Running',
     conditions: [
       {
         type: 'CacheReady',
@@ -211,7 +238,7 @@ const mockAimService: AIMService = {
     resolvedModel: { name: 'aim-llama-8b' },
     resolvedProfile: { name: 'profile-1' },
   },
-  clusterAuthGroupId: 'auth-group-1',
+  statusValue: '',
   endpoints: {
     external: 'https://example.com/aim',
     internal: 'http://aim.default.svc.cluster.local',
@@ -258,7 +285,7 @@ const mockParsedAim: ParsedAIM = {
   model: 'aim-llama-8b',
   aimId: 'meta-llama/Llama-3.1-8B-Instruct',
   imageReference: 'ghcr.io/amdenterpriseai/aim-llama-8b:0.7.0',
-  annotations: mockAimClusterModel.metadata.annotations,
+  annotations: mockAimClusterModel.metadata.annotations ?? {},
   description: { short: 'A large language model', full: 'Full description' },
   title: 'Llama 3.1 8B Instruct',
   imageVersion: '0.7.0',
@@ -298,6 +325,9 @@ describe('AimDetailsPage', () => {
     (getInferenceReplicas as Mock).mockResolvedValue([]);
     (aimParser as Mock).mockReturnValue(mockParsedAim);
     (getAIMServiceStatusVariants as Mock).mockReturnValue({});
+    (getAdapterArtifacts as Mock).mockResolvedValue([]);
+    (getProjectAimProfileByName as Mock).mockResolvedValue(undefined);
+    (getAimClusterProfileByName as Mock).mockResolvedValue(undefined);
     (useScalingConvergence as Mock).mockReturnValue({
       startPolling: mockStartPolling,
     });
@@ -421,6 +451,57 @@ describe('AimDetailsPage', () => {
       });
     });
 
+    it('prefers AIM service display name in the title when it differs from resource name', async () => {
+      const serviceWithDisplayName: AIMService = {
+        ...mockAimService,
+        metadata: {
+          ...mockAimService.metadata,
+          name: 'aim-llama-8b',
+          annotations: {
+            ...mockAimService.metadata.annotations,
+            [AIM_DISPLAY_NAME_ANNOTATION]: 'Llama 8B Friendly Deploy Name',
+          },
+        },
+      };
+      (getInferenceDeployment as Mock).mockResolvedValue(
+        serviceWithDisplayName,
+      );
+      (aimParser as Mock).mockReturnValue({
+        ...mockParsedAim,
+        deployedService: serviceWithDisplayName,
+        deployedServices: [serviceWithDisplayName],
+      });
+
+      await act(async () => {
+        render(<AimDetailsPage id="aim-service-1" />, { wrapper });
+      });
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('Llama 8B Friendly Deploy Name'),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it('hides the chat action for a transcription deployment', async () => {
+      (aimParser as Mock).mockReturnValue({
+        ...mockParsedAim,
+        tags: ['transcription'],
+      });
+
+      await act(async () => {
+        render(<AimDetailsPage id="aim-service-1" />, { wrapper });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('list.actions.logs.label')).toBeInTheDocument();
+      });
+      // Transcription deployments have no chat playground surface.
+      expect(
+        screen.queryByText('list.actions.chat.label'),
+      ).not.toBeInTheDocument();
+    });
+
     it('renders inference metrics for running service', async () => {
       await act(async () => {
         render(<AimDetailsPage id="aim-service-1" />, { wrapper });
@@ -428,6 +509,187 @@ describe('AimDetailsPage', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('inference-metrics')).toBeInTheDocument();
+      });
+    });
+  });
+
+  // The page used to send every scope that was not exactly `Namespace` to the
+  // cluster catalog, while the hook resolves those references namespace-first.
+  // A namespace-only overlay was therefore missed, and a namesake existing in
+  // both scopes answered with the wrong weights.
+  describe('resolved profile scope', () => {
+    const NAMESPACE_GPU = 'MI300X-from-namespace';
+    const CLUSTER_GPU = 'MI300X-from-cluster';
+    // The accelerator cell carries an "automatic" suffix when the value is not
+    // an override, so the spec that won is matched inside the rendered string.
+    const shownAs = (gpu: string) => new RegExp(gpu);
+
+    const renderWithProfileScope = async (scope?: string) => {
+      const scopedService = {
+        ...mockAimService,
+        status: {
+          ...mockAimService.status,
+          resolvedProfile: { name: 'profile-1', ...(scope ? { scope } : {}) },
+        },
+      } as AIMService;
+      (getInferenceDeployment as Mock).mockResolvedValue(scopedService);
+      (aimParser as Mock).mockReturnValue({
+        ...mockParsedAim,
+        deployedService: scopedService,
+        deployedServices: [scopedService],
+      });
+
+      await act(async () => {
+        render(<AimDetailsPage id="aim-service-1" />, { wrapper });
+      });
+    };
+
+    beforeEach(() => {
+      // Same name in both scopes, different weights behind it — the case the
+      // old cluster-only lookup could not tell apart.
+      (getProjectAimProfileByName as Mock).mockResolvedValue({
+        metadata: { name: 'profile-1' },
+        spec: { acceleratorModel: NAMESPACE_GPU },
+      });
+      (getAimClusterProfileByName as Mock).mockResolvedValue({
+        metadata: { name: 'profile-1' },
+        spec: { acceleratorModel: CLUSTER_GPU },
+      });
+    });
+
+    it.each([
+      ['an absent scope', undefined],
+      ['Merged', 'Merged'],
+      ['Unknown', 'Unknown'],
+    ])(
+      'resolves a namespace-only profile referenced with %s',
+      async (_label, scope) => {
+        await renderWithProfileScope(scope);
+
+        await waitFor(() =>
+          expect(getProjectAimProfileByName).toHaveBeenCalledWith(
+            'test-project',
+            'profile-1',
+          ),
+        );
+        // The project answered, so the cluster namesake is never consulted and
+        // its weights can never reach the page.
+        expect(getAimClusterProfileByName).not.toHaveBeenCalled();
+        expect(
+          await screen.findByText(shownAs(NAMESPACE_GPU)),
+        ).toBeInTheDocument();
+        expect(
+          screen.queryByText(shownAs(CLUSTER_GPU)),
+        ).not.toBeInTheDocument();
+      },
+    );
+
+    it('falls back to the cluster profile when the project has none', async () => {
+      (getProjectAimProfileByName as Mock).mockRejectedValue(
+        new APIRequestError('not found', 404),
+      );
+
+      await renderWithProfileScope('Merged');
+
+      await waitFor(() =>
+        expect(getAimClusterProfileByName).toHaveBeenCalledWith('profile-1'),
+      );
+      expect(await screen.findByText(shownAs(CLUSTER_GPU))).toBeInTheDocument();
+    });
+
+    it('reads a Cluster-scoped reference from the cluster catalog only', async () => {
+      await renderWithProfileScope('Cluster');
+
+      await waitFor(() =>
+        expect(getAimClusterProfileByName).toHaveBeenCalledWith('profile-1'),
+      );
+      expect(getProjectAimProfileByName).not.toHaveBeenCalled();
+      expect(await screen.findByText(shownAs(CLUSTER_GPU))).toBeInTheDocument();
+    });
+
+    it('reads a Namespace-scoped reference from the project only', async () => {
+      await renderWithProfileScope('Namespace');
+
+      await waitFor(() =>
+        expect(getProjectAimProfileByName).toHaveBeenCalledWith(
+          'test-project',
+          'profile-1',
+        ),
+      );
+      expect(getAimClusterProfileByName).not.toHaveBeenCalled();
+      expect(
+        await screen.findByText(shownAs(NAMESPACE_GPU)),
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe('LoRA adapters', () => {
+    const loraService: AIMService = {
+      ...mockAimService,
+      spec: {
+        ...mockAimService.spec,
+        adapterMode: 'dynamic',
+        adapters: [{ name: 'adapter-1' }],
+        adapterRuntime: { maxRank: 64 },
+      } as any,
+    };
+
+    const renderWithLoraService = async () => {
+      (getInferenceDeployment as Mock).mockResolvedValue(loraService);
+      (aimParser as Mock).mockReturnValue({
+        ...mockParsedAim,
+        deployedService: loraService,
+        deployedServices: [loraService],
+      });
+      (getAdapterArtifacts as Mock).mockResolvedValue([
+        {
+          id: 'adapter-1',
+          name: 'adapter-1',
+          displayName: 'Support LoRA',
+          compatibleWith: [],
+          rank: 16,
+        },
+      ]);
+
+      await act(async () => {
+        render(<AimDetailsPage id="aim-service-1" />, { wrapper });
+      });
+    };
+
+    it('renders attached LoRA details for a dynamic deployment', async () => {
+      await renderWithLoraService();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('lora-adapters-card')).toBeInTheDocument();
+        expect(screen.getByText('64')).toBeInTheDocument();
+        expect(screen.getByText('Support LoRA')).toBeInTheDocument();
+        expect(
+          screen.getByTestId('edit-lora-adapters-button'),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it('does not render the LoRA card without adapters or a rank limit', async () => {
+      await act(async () => {
+        render(<AimDetailsPage id="aim-service-1" />, { wrapper });
+      });
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId('lora-adapters-card'),
+        ).not.toBeInTheDocument();
+      });
+    });
+
+    it('refetches deployment details after LoRA adapters are updated', async () => {
+      await renderWithLoraService();
+
+      const editButton = await screen.findByTestId('edit-lora-adapters-button');
+      fireEvent.click(editButton);
+      fireEvent.click(await screen.findByTestId('save-lora-adapters'));
+
+      await waitFor(() => {
+        expect(getInferenceDeployment).toHaveBeenCalledTimes(2);
       });
     });
   });
@@ -687,7 +949,7 @@ describe('AimDetailsPage', () => {
     it('calls listAllInferenceDeployments when live AIM returns 404', async () => {
       const historicalService = {
         ...mockAimService,
-        status: { ...mockAimService.status, status: AIMServiceStatus.DELETED },
+        status: { ...mockAimService.status, status: 'Deleted' },
       };
       (getInferenceDeployment as Mock).mockRejectedValue(
         new APIRequestError('not found', 404),
@@ -770,11 +1032,11 @@ describe('AimDetailsPage', () => {
           labels: { [NAMESPACE_AIM_MODEL_LABEL]: 'true' },
         },
         spec: {
-          ...mockAimService.spec,
+          ...mockAimService.spec!,
           model: { name: 'my-byom-model-cr' },
         },
         status: {
-          ...mockAimService.status,
+          ...mockAimService.status!,
           resolvedModel: { name: 'my-byom-model-cr', scope: 'Namespace' },
         },
       };
@@ -798,7 +1060,7 @@ describe('AimDetailsPage', () => {
           artifactLastError: null,
         },
         status: null,
-        profile: null,
+        profiles: [],
       });
 
       await act(async () => {

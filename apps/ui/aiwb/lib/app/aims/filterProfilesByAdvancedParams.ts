@@ -7,8 +7,19 @@ import type { AIMClusterProfile } from '@/types/aims';
 /** Form sentinel: control does not narrow profiles for that dimension (automatic selection). */
 export const ADVANCED_PARAM_AUTOMATIC = '__automatic__';
 
+export const formatAccelerator = (profile: AIMClusterProfile): string => {
+  const gpu = profile.spec?.acceleratorModel;
+  const count = profile.spec?.acceleratorCount;
+  if (!gpu) return '—';
+  return count == null ? gpu : `${gpu} × ${count}`;
+};
+
+export const formatClass = (type?: string): string =>
+  type ? type.charAt(0).toUpperCase() + type.slice(1) : '—';
+
 export type FilterProfilesByAdvancedParamsFilters = {
   selectedMetric?: string;
+  profileName?: string;
   optimizationClass?: string;
   gpuModel?: string;
   precision?: string;
@@ -33,11 +44,17 @@ export function filterProfilesByAdvancedParams(
   profiles: AIMClusterProfile[],
   filters: FilterProfilesByAdvancedParamsFilters,
 ): AIMClusterProfile[] {
+  if (filters.profileName && filters.profileName !== ADVANCED_PARAM_AUTOMATIC) {
+    const match = profiles.find(
+      (profile) => profile.metadata.name === filters.profileName,
+    );
+    return match ? [match] : [];
+  }
   const isAutomatic = (v: string | undefined) =>
     !v || v === ADVANCED_PARAM_AUTOMATIC;
   const matchesOrAutomatic = (
     selected: string | undefined,
-    actual: string | undefined,
+    actual: string | null | undefined,
   ) => isAutomatic(selected) || actual === selected;
 
   const { selectedMetric, optimizationClass, gpuModel, precision, gpuCount } =

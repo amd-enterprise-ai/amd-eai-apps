@@ -1,0 +1,7 @@
+{
+  "get jobs -A -o json": [
+    0,
+    "{\"items\":[{\"metadata\":{\"namespace\":\"project-example\",\"name\":\"model-download\"},\"status\":{\"conditions\":[{\"type\":\"Failed\",\"status\":\"True\",\"reason\":\"DeadlineExceeded\"}]}}]}",
+    ""
+  ]
+}

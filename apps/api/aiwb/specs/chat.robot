@@ -5,8 +5,8 @@
 *** Settings ***
 Documentation       Test scenarios for the AIWB chattable inference listing.
 ...                 The AIWB-proxied chat endpoints have been removed: AIM service
-...                 chat moved to the UI direct-to-AIM bypass (EAI-6323), and
-...                 generic workload chat was dropped (EAI-6313). This suite now
+...                 chat moved to the UI direct-to-AIM bypass, and
+...                 generic workload chat was dropped. This suite now
 ...                 only verifies the chattable inference listing surface used by
 ...                 the UI to discover chat-capable deployments. The external
 ...                 OpenAI-compatible endpoints are tested in api_keys.robot.
@@ -25,7 +25,7 @@ Chattable AIM services only include ready models
     [Tags]    chat    aims    chattable    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And AIM is deployed and running
     When chattable AIM services are listed
     Then response status should be 200

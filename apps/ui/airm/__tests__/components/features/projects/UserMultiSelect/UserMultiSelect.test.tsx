@@ -236,11 +236,8 @@ describe('UserMultiSelect Component', () => {
         fireEvent.click(userRow2!);
       });
 
-      const checkboxToDeselect = screen.getByRole('checkbox', {
-        name: 'Doe, John',
-      });
       await act(async () => {
-        fireEvent.click(checkboxToDeselect);
+        fireEvent.click(userRow1!);
       });
 
       expect(onSelectionChange).toHaveBeenCalledWith(['2']);
@@ -256,12 +253,8 @@ describe('UserMultiSelect Component', () => {
         fireEvent.click(userRow!);
       });
 
-      const checkboxes = screen.getAllByRole('checkbox');
-      const selectedCheckbox = checkboxes.find(
-        (cb) => cb.getAttribute('aria-label') === 'Doe, John',
-      );
-
-      expect(selectedCheckbox).toBeChecked();
+      expect(screen.getByText('Selected users')).toBeInTheDocument();
+      expect(screen.getByText('john.doe@example.com')).toBeInTheDocument();
     });
   });
 

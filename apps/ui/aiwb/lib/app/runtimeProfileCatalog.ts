@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
+import type { components } from '@/types/api';
 import type { AimImageFamily, ClusterAccelerator } from '@/types/cluster';
 import {
   AUTOMATIC_IMAGE_FAMILY_ID,
@@ -19,6 +20,30 @@ export const RUNTIME_PROFILE_ACCELERATOR_TYPE_OPTIONS: RuntimeProfileSelectOptio
     { key: 'gpu', label: 'GPU' },
     { key: 'cpu', label: 'CPU' },
   ];
+
+function toAcceleratorTypeLabel(type: string): string {
+  const normalized = type.trim().toLowerCase();
+  if (!normalized) {
+    return '';
+  }
+  return normalized.toUpperCase();
+}
+
+function normalizeAcceleratorType(type: string | null | undefined): string {
+  return (type ?? '').trim().toLowerCase();
+}
+
+/**
+ * Metrics aim-engine narrows profiles on, as the static superset. Unlike the
+ * other axes these carry no label here: they are user-facing terms, so callers
+ * resolve them through `getMetricTranslationKey`.
+ *
+ * Callers offer the metrics `GET .../runtime-profile-options` reports for the
+ * project and keep this union for the fallback that endpoint's contract asks for
+ * when the base template has emitted no profiles yet.
+ */
+export const RUNTIME_PROFILE_METRIC_KEYS: components['schemas']['OptimizationMetric'][] =
+  ['latency', 'throughput'];
 
 export function toImageSelectOptions(
   families: AimImageFamily[],
@@ -49,16 +74,50 @@ export function toTagSelectOptions(
   if (!family?.repository) {
     return [];
   }
-  return family.tags.map((tag) => ({ key: tag, label: tag }));
+  return (family.tags ?? []).map((tag: string) => ({ key: tag, label: tag }));
 }
 
 export function toAcceleratorSelectOptions(
   accelerators: ClusterAccelerator[],
+  resolveModelLabel?: (model: string) => string,
 ): RuntimeProfileSelectOption[] {
   return accelerators.map((entry) => ({
     key: entry.deviceId,
-    label: entry.productName,
+    label:
+      entry.productName?.trim() ||
+      (entry.acceleratorModel?.trim()
+        ? (resolveModelLabel?.(entry.acceleratorModel.trim()) ??
+          entry.acceleratorModel.trim())
+        : ''),
   }));
+}
+
+/**
+ * Accelerator types exposed by the cluster accelerators API, de-duplicated in
+ * first-seen order.
+ */
+export function toAcceleratorTypeSelectOptions(
+  accelerators: ClusterAccelerator[],
+): RuntimeProfileSelectOption[] {
+  const seen = new Set<string>();
+  const options: RuntimeProfileSelectOption[] = [];
+  for (const entry of accelerators) {
+    const type = normalizeAcceleratorType(entry.acceleratorType);
+    if (!type || seen.has(type)) {
+      continue;
+    }
+    seen.add(type);
+    options.push({
+      key: type,
+      label: toAcceleratorTypeLabel(type),
+    });
+  }
+  return options;
+}
+
+/** Lowercase form of accelerator type (`cpu`, `gpu`, etc.) for comparisons. */
+export function acceleratorTypeKey(type: string | null | undefined): string {
+  return normalizeAcceleratorType(type);
 }
 
 export function findImageFamily(
@@ -107,8 +166,8 @@ function compareVersionTags(a: string, b: string): number {
 }
 
 /** Picks the newest semver-like tag from a family catalog entry. */
-export function getLatestImageTag(tags: string[]): string {
-  if (tags.length === 0) {
+export function getLatestImageTag(tags: string[] | undefined): string {
+  if (!tags || tags.length === 0) {
     return '';
   }
   if (tags.length === 1) {
@@ -172,7 +231,7 @@ function imageRefFromFamily(family: AimImageFamily): string | undefined {
   if (!family.repository) {
     return undefined;
   }
-  if (family.tags.length > 0) {
+  if (family.tags && family.tags.length > 0) {
     return buildContainerImageRef(
       family.repository,
       getLatestImageTag(family.tags),
@@ -225,101 +284,189 @@ export function supportedAcceleratorCounts(
   return capped.length > 0 ? capped : supported;
 }
 
-/** Vendor prefixes stripped from a node `productName`. Most-specific first so `AMD Instinct ` wins over `AMD `. */
-const ACCELERATOR_PRODUCT_PREFIXES = ['AMD Instinct ', 'AMD Radeon ', 'AMD '];
-
-/** Form-factor tokens the GPU operator appends to product names but aim-engine drops (e.g. `MI300X OAM` -> `MI300X`). */
-const ACCELERATOR_FORM_FACTOR_SUFFIXES = ['OAM', 'APU', 'GPU'];
-
-/** Instinct model token, e.g. `MI300X` — the trailing letter is significant and kept. */
-const INSTINCT_MODEL_PATTERN = /\bMI\d{2,}[A-Za-z]*\b/i;
-
-/**
- * Radeon Pro / AI Pro model token, e.g. `R9700` or `W7900`. The marketing name can
- * carry a trailing variant letter the operator reports but aim-engine drops
- * (`R9700S` -> `R9700`), so only the `[RW]####` core is captured.
- */
-const RADEON_MODEL_PATTERN = /\b([RW]\d{4})[A-Za-z]*\b/i;
-
-/**
- * Reduce a node `productName` (e.g. `AMD Instinct MI300X OAM`) to the bare token
- * aim-engine keys `acceleratorModel` on (`MI300X`, `R9700`): match the Instinct
- * or Radeon model token directly, else strip the vendor prefix and form-factor
- * suffixes. Sending the un-normalized name leaves a custom profile stuck
- * `NotAvailable` — the AIMProfile CRD also rejects the spaces a multi-word name
- * would leave behind.
- */
-export function canonicalAcceleratorModel(productName: string): string {
-  const normalized = productName.trim().replace(/_/g, ' ').replace(/\s+/g, ' ');
-  const instinctModel = normalized.match(INSTINCT_MODEL_PATTERN);
-  if (instinctModel) {
-    return instinctModel[0].toUpperCase();
-  }
-  const radeonModel = normalized.match(RADEON_MODEL_PATTERN);
-  if (radeonModel) {
-    return radeonModel[1].toUpperCase();
-  }
-  let name = normalized;
-  for (const prefix of ACCELERATOR_PRODUCT_PREFIXES) {
-    if (name.startsWith(prefix)) {
-      name = name.slice(prefix.length).trim();
-      break;
-    }
-  }
-  const tokens = name.split(' ').filter(Boolean);
-  while (
-    tokens.length > 1 &&
-    ACCELERATOR_FORM_FACTOR_SUFFIXES.includes(
-      tokens[tokens.length - 1].toUpperCase(),
-    )
-  ) {
-    tokens.pop();
-  }
-  return tokens.join(' ');
-}
-
-/**
- * Resolve a selected device id (`74a1`) to the canonical `acceleratorModel`
- * (`MI300X`) before persisting; the raw device id leaves the profile
- * `NotAvailable`. Falls back to the input when the device id is unknown.
- */
+/** Map a form device id to the catalog's canonical `acceleratorModel`. */
 export function deviceIdToAcceleratorModel(
   deviceId: string,
   accelerators: ClusterAccelerator[],
 ): string {
-  const id = deviceId.trim();
-  if (!id) {
-    return id;
+  if (!deviceId) {
+    return '';
   }
-  const match = accelerators.find((entry) => entry.deviceId === id);
-  if (!match) {
-    return id;
+  const match = accelerators.find((entry) => entry.deviceId === deviceId);
+  return match?.acceleratorModel ?? '';
+}
+
+/** Map a persisted `acceleratorModel` back to the form's device id for edit prefill. */
+export function acceleratorModelToDeviceId(
+  model: string | null | undefined,
+  accelerators: ClusterAccelerator[],
+): string {
+  if (!model) {
+    return '';
   }
-  return canonicalAcceleratorModel(match.productName) || id;
+  return (
+    accelerators.find((entry) => entry.acceleratorModel === model)?.deviceId ??
+    ''
+  );
+}
+
+type RuntimeProfileCombination =
+  components['schemas']['RuntimeProfileCombination'];
+
+/** A partial four-axis selection; an absent axis is treated as "not yet chosen". */
+export type RuntimeAxisSelection = {
+  acceleratorModel?: string;
+  acceleratorCount?: number;
+  precision?: string;
+  metric?: string;
+};
+
+/** The values still reachable per axis, given the current selection. */
+export type ReachableRuntimeAxes = {
+  acceleratorModels: string[];
+  acceleratorCounts: number[];
+  precisions: string[];
+  metrics: string[];
+};
+
+const uniqueStrings = (values: string[]): string[] =>
+  Array.from(new Set(values)).sort();
+
+const uniqueNumbers = (values: number[]): number[] =>
+  Array.from(new Set(values)).sort((a, b) => a - b);
+
+/**
+ * Narrows the four runtime axes to the combinations a base template actually
+ * emits. The per-axis option lists say which values exist but not which coexist,
+ * and a profile create/update must resolve its axes to exactly one base profile;
+ * offering the cartesian product lets the form build a tuple the base never emits
+ * (rejected with 400). This constrains each axis to values reachable from the
+ * current selection.
+ *
+ * Axes cascade in priority order (model → count → precision → metric): each axis
+ * is filtered by the higher-priority axes only, so its list never depends on a
+ * lower-priority choice. A selected value that is not reachable given the
+ * higher-priority axes is ignored rather than emptying the downstream lists, so
+ * selectors never flash empty while the snap effects converge the selection back
+ * onto a valid tuple.
+ */
+export function reachableRuntimeAxes(
+  combinations: RuntimeProfileCombination[],
+  selection: RuntimeAxisSelection,
+): ReachableRuntimeAxes {
+  const acceleratorModels = uniqueStrings(
+    combinations.map((combination) => combination.acceleratorModel),
+  );
+  const model =
+    selection.acceleratorModel &&
+    acceleratorModels.includes(selection.acceleratorModel)
+      ? selection.acceleratorModel
+      : undefined;
+  const byModel = model
+    ? combinations.filter(
+        (combination) => combination.acceleratorModel === model,
+      )
+    : combinations;
+  const acceleratorCounts = uniqueNumbers(
+    byModel.map((combination) => combination.acceleratorCount),
+  );
+  const count =
+    selection.acceleratorCount != null &&
+    acceleratorCounts.includes(selection.acceleratorCount)
+      ? selection.acceleratorCount
+      : undefined;
+  const byCount =
+    count != null
+      ? byModel.filter((combination) => combination.acceleratorCount === count)
+      : byModel;
+  const precisions = uniqueStrings(
+    byCount.map((combination) => combination.precision),
+  );
+  const precision =
+    selection.precision && precisions.includes(selection.precision)
+      ? selection.precision
+      : undefined;
+  const byPrecision = precision
+    ? byCount.filter((combination) => combination.precision === precision)
+    : byCount;
+  const metrics = uniqueStrings(
+    byPrecision.map((combination) => combination.metric),
+  );
+  return { acceleratorModels, acceleratorCounts, precisions, metrics };
+}
+
+/** Minimal matrix shape both runtime-options payloads share for readiness. */
+type RuntimeMatrix = {
+  combinations: RuntimeProfileCombination[];
+  profilesAvailable: boolean;
+};
+
+const combinationKey = (combination: RuntimeProfileCombination): string =>
+  [
+    combination.acceleratorModel,
+    combination.acceleratorCount,
+    combination.precision,
+    combination.metric,
+  ].join('\u0000');
+
+/** Combinations present in both matrices — the tuples the resolver accepts and the image emits. */
+export function intersectCombinations(
+  authoritative: RuntimeProfileCombination[],
+  refining: RuntimeProfileCombination[],
+): RuntimeProfileCombination[] {
+  const refiningKeys = new Set(refining.map(combinationKey));
+  return authoritative.filter((combination) =>
+    refiningKeys.has(combinationKey(combination)),
+  );
 }
 
 /**
- * Inverse of {@link deviceIdToAcceleratorModel} for edit prefill: map a persisted
- * `acceleratorModel` back to the dropdown's device id. Tolerates legacy device
- * ids and unknown values (returned as-is).
+ * Why the runtime selectors offer no valid choice, or `null` when they are
+ * usable (or a safe static fallback applies). A non-null value must block the
+ * save: submitting would resolve against no base profile and be rejected 400.
+ *
+ * - `noValidCombinations`: the base emitted profiles but none resolves to a
+ *   single tuple (all ambiguous or incomplete) — the form must not fall back to
+ *   the broad per-axis lists.
+ *
+ * The create/update resolver validates against the namespace base-role profiles,
+ * so the namespace matrix is the authoritative gate; it is never relaxed by the
+ * selected image's matrix (which only refines which options are shown). The
+ * image matrix blocks only when the namespace has emitted nothing yet and the
+ * loaded image is itself ambiguous-only, so the onboard wizard cannot pick an
+ * unresolvable combination.
  */
-export function acceleratorModelToDeviceId(
-  model: string | undefined,
-  accelerators: ClusterAccelerator[],
-): string {
-  const value = model?.trim();
-  if (!value) {
-    return '';
+export type RuntimeSelectionBlock = null | 'noValidCombinations';
+
+const matrixBlock = (matrix: RuntimeMatrix | null): RuntimeSelectionBlock => {
+  if (matrix && matrix.combinations.length > 0) return null;
+  return matrix?.profilesAvailable ? 'noValidCombinations' : null;
+};
+
+export function runtimeSelectionBlock(params: {
+  imageSelected: boolean;
+  baseImageLoading: boolean;
+  baseImageError: boolean;
+  baseImageMatrix: RuntimeMatrix | null;
+  namespaceMatrix: RuntimeMatrix | null;
+}): RuntimeSelectionBlock {
+  const namespaceBlock = matrixBlock(params.namespaceMatrix);
+  if (namespaceBlock) {
+    return namespaceBlock;
   }
-  const byDeviceId = accelerators.find((entry) => entry.deviceId === value);
-  if (byDeviceId) {
-    return byDeviceId.deviceId;
+  // Namespace has resolvable combinations, or emitted nothing yet. Only in the
+  // latter (fallback) case does a settled, ambiguous-only image matrix block, so
+  // the wizard cannot pick a combination that image cannot resolve.
+  if (
+    !params.namespaceMatrix?.profilesAvailable &&
+    params.imageSelected &&
+    !params.baseImageLoading &&
+    !params.baseImageError &&
+    params.baseImageMatrix &&
+    params.baseImageMatrix.combinations.length === 0 &&
+    params.baseImageMatrix.profilesAvailable
+  ) {
+    return 'noValidCombinations';
   }
-  const byModel = accelerators.find(
-    (entry) => canonicalAcceleratorModel(entry.productName) === value,
-  );
-  if (byModel) {
-    return byModel.deviceId;
-  }
-  return value;
+  return null;
 }

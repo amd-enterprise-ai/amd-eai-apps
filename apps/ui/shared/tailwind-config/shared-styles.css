@@ -4,10 +4,11 @@ Copyright © Advanced Micro Devices, Inc., or its affiliates.
 SPDX-License-Identifier: MIT
 */
 
-/* Tailwind 4 Imports */
-@import "tailwindcss";
-@plugin './hero.ts';
-@plugin '@tailwindcss/typography';
+/* HeroUI entry pulls in Tailwind; avoid a second @import "tailwindcss" (Turbopack
+   can mis-resolve @apply in downstream CSS when Tailwind is initialized twice). */
+@import "@heroui/styles/css";
+/* Class-based dark mode (next-themes sets `.dark` on html). Without this, `dark:*`
+   utilities do not match — Tailwind v4 does not enable this selector by default. */
 @custom-variant dark (&:is(.dark *));
 
 /* Globals */
@@ -271,6 +272,15 @@ body {
   .group:hover .group-hover\:visible {
     visibility: visible;
   }
+
+  /* SVG assets (e.g. model icons) that need fill to track theme foreground/background */
+  .fill-foreground {
+    fill: var(--foreground);
+  }
+
+  .fill-background {
+    fill: var(--background);
+  }
 }
 
 /* Typography */
@@ -282,7 +292,7 @@ body {
   h5,
   h6 {
     @apply font-sans;
-    @apply text-default-800;
+    @apply text-foreground;
   }
 
   h1 {
@@ -315,12 +325,64 @@ body {
     @apply text-base;
     @apply font-normal;
     @apply font-sans;
-    @apply text-default-600;
-    @apply dark:text-default-500;
+    @apply text-muted;
   }
 
   a {
     @apply font-sans;
+  }
+}
+
+@layer components {
+  /* HeroUI v3: unchecked control uses transparent field border on white surfaces.
+     Do not @apply gap-* here — duplicates HeroUI's .checkbox rules and can trigger
+     Turbopack/PostCSS errors (e.g. unknown `col-gap-*`) during HMR. */
+
+  .checkbox__control {
+    @apply bg-surface-tertiary border-separator size-5;
+  }
+
+  /* size-5 controls match text-sm's line height, so start alignment centers
+     each control on the first line instead of the full wrapped label. */
+  .checkbox__content,
+  .radio__content {
+    @apply items-start;
+  }
+
+  .radio__control {
+    @apply border-separator size-5;
+  }
+
+  .checkbox > [data-slot="description"],
+  .checkbox > [data-slot="field-error"],
+  .radio > [data-slot="description"],
+  .radio > [data-slot="field-error"] {
+    @apply ps-8;
+  }
+
+  .radio__indicator:empty::before {
+    @apply bg-surface-tertiary;
+  }
+
+  .radio:has([data-slot="radio-content"][data-hovered="true"]):not(
+      [data-selected]
+    ):not(:has(input:checked))
+    .radio__control
+    .radio__indicator:empty::before {
+    @apply bg-surface-hover;
+  }
+
+  /* HeroUI v3 spinner sizing lives on the inline <span>, which ignores
+     width/height; the bare <svg> (display:block via preflight) otherwise
+     expands to the parent block width. Constrain both so standalone
+     <Spinner> renders at its intended size. */
+  [data-slot="spinner"] {
+    display: inline-block;
+  }
+
+  [data-slot="spinner"] svg {
+    width: 100%;
+    height: 100%;
   }
 }
 
@@ -335,16 +397,16 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-default-200;
+  @apply bg-default;
   border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-default-300;
+  @apply bg-muted;
 }
 
 ::-webkit-scrollbar-track:hover {
-  @apply bg-default-100;
+  @apply bg-surface-secondary;
 }
 
 ::-webkit-scrollbar-corner {
@@ -354,4 +416,16 @@ body {
 ::-webkit-scrollbar {
   width: 3px;
   height: 3px;
+}
+
+/* HeroUI component CSS is unlayered, so overrides must live outside @layer to win
+   the cascade. Number-field group hides overflow for rounded corners; that clips
+   the focus-within ring. Accordion panel uses overflow:clip for height animation. */
+.number-field__group:focus-within,
+.number-field__group[data-focus-within="true"] {
+  overflow: visible !important;
+}
+
+.accordion__panel[data-expanded="true"] {
+  overflow: visible !important;
 }

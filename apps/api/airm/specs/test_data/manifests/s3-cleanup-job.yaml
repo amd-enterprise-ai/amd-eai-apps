@@ -52,9 +52,9 @@ spec:
                 secretKeyRef:
                   name: SECRET_NAME_PLACEHOLDER # Will be replaced by Robot
                   key: SECRET_KEY_NAME_PLACEHOLDER # Will be replaced by Robot
-            # Prefix for e2e test objects to delete
+            # Key prefix of the e2e test objects to delete
             - name: TEST_DATA_PREFIX
-              value: "e2e-test-storage-"
+              value: "PLACEHOLDER" # Will be replaced by Robot
           command:
             - /bin/sh
             - -c
@@ -89,37 +89,82 @@ spec:
                   region_name='us-east-1'
               )
 
-              # List all objects with the e2e-test prefix
+              # List only the objects owned by this test. An empty prefix would mean every object
+              # in the bucket, so refuse it before making any S3 call.
               prefix = os.environ['TEST_DATA_PREFIX']
+              prefix_parts = prefix.removeprefix('e2e-test-storage-').removesuffix('/').split('-')
+              safe_prefix = (
+                  prefix.startswith('e2e-test-storage-')
+                  and prefix.endswith('/')
+                  and len(prefix_parts) == 2
+                  and prefix_parts[0].isdigit()
+                  and len(prefix_parts[1]) == 12
+                  and all(char in '0123456789abcdef' for char in prefix_parts[1])
+              )
+              if not safe_prefix:
+                  raise SystemExit(
+                      f"Refusing to delete with an unsafe S3 key prefix: {prefix!r}"
+                  )
 
+              # Every direct-S3 test creates its own e2e-test-bucket-* bucket. This generic Job
+              # deletes a bucket only when its name proves that it follows that test convention;
+              # anything else may be platform- or user-owned.
+              delete_bucket = bucket_name.startswith('e2e-test-bucket-')
+
+              # This Job reports truthfully and lets every real error fail it. Keeping cleanup
+              # non-fatal for the test is the caller's job -- the Robot keyword wraps this in
+              # TRY/EXCEPT and downgrades a failure to a warning. Swallowing errors here too
+              # would leave no layer able to say the objects were never deleted.
+
+              # Paginate: a single list call returns at most 1000 keys, so a caller that passes a
+              # broad prefix would otherwise have only its first page deleted and still be told
+              # the cleanup succeeded.
+              objects_to_delete = []
               try:
-                  # List objects
-                  response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
+                  for page in s3.get_paginator('list_objects_v2').paginate(
+                      Bucket=bucket_name, Prefix=prefix
+                  ):
+                      objects_to_delete.extend(
+                          {'Key': obj['Key']} for obj in page.get('Contents') or []
+                      )
+              except s3.exceptions.NoSuchBucket:
+                  # Nothing was ever written here, so there is nothing to clean up.
+                  print(f"Bucket {bucket_name} does not exist - nothing to clean up")
+                  raise SystemExit(0)
 
-                  if 'Contents' not in response or len(response['Contents']) == 0:
-                      print(f"No objects found with prefix '{prefix}'")
-                  else:
-                      # Delete objects in batches
-                      objects_to_delete = [{'Key': obj['Key']} for obj in response['Contents']]
+              if objects_to_delete:
+                  print(f"Found {len(objects_to_delete)} objects to delete:")
+                  for obj in objects_to_delete[:20]:
+                      print(f"  - {obj['Key']}")
+                  if len(objects_to_delete) > 20:
+                      print(f"  ... and {len(objects_to_delete) - 20} more")
 
-                      print(f"Found {len(objects_to_delete)} objects to delete:")
-                      for obj in objects_to_delete:
-                          print(f"  - {obj['Key']}")
-
-                      # Delete the objects
-                      s3.delete_objects(
+                  # delete_objects also caps at 1000 keys per request.
+                  errors = []
+                  for start in range(0, len(objects_to_delete), 1000):
+                      result = s3.delete_objects(
                           Bucket=bucket_name,
-                          Delete={'Objects': objects_to_delete}
+                          Delete={'Objects': objects_to_delete[start:start + 1000]}
+                      )
+                      # A per-key failure is reported in the response body, not raised.
+                      errors.extend(result.get('Errors') or [])
+
+                  if errors:
+                      for err in errors[:20]:
+                          print(f"  ! {err.get('Key')}: {err.get('Code')} {err.get('Message')}")
+                      raise SystemExit(
+                          f"Failed to delete {len(errors)} of {len(objects_to_delete)} objects"
                       )
 
-                      print(f"✓ Successfully deleted {len(objects_to_delete)} test objects")
+                  print(f"✓ Successfully deleted {len(objects_to_delete)} test objects")
+              else:
+                  print(f"No objects found with prefix '{prefix}'")
 
-              except s3.exceptions.NoSuchBucket:
-                  print(f"Bucket {bucket_name} does not exist - nothing to clean up")
-              except Exception as e:
-                  print(f"Warning: Error during cleanup (non-fatal): {e}")
-                  # Don't fail - cleanup is best-effort
-
+              if delete_bucket:
+                  # The writer creates a new bucket for this test, so it contains no unrelated
+                  # data. Delete it even when the write failed before creating an object.
+                  s3.delete_bucket(Bucket=bucket_name)
+                  print(f"✓ Successfully deleted test bucket {bucket_name}")
               EOF
 
               echo "=== S3 Cleanup Complete ==="

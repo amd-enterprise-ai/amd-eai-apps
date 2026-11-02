@@ -12,6 +12,7 @@ from app.workloads.constants import (
     CHART_ID_LABEL,
     DATASET_ID_LABEL,
     DISPLAY_NAME_ANNOTATION,
+    TRAINING_OUTPUT_ANNOTATION,
     WORKLOAD_ID_LABEL,
     WORKLOAD_TYPE_LABEL,
 )
@@ -517,7 +518,14 @@ spec:
     mock_api_resource.create = MagicMock()
 
     with patch("app.workloads.utils.get_dynamic_client", spec=get_dynamic_client, return_value=mock_dynamic_client):
-        await apply_manifest(mock_kube_client, manifest, workload, "test-namespace", "test-user@example.com")
+        await apply_manifest(
+            mock_kube_client,
+            manifest,
+            workload,
+            "test-namespace",
+            "test-user@example.com",
+            extra_annotations={TRAINING_OUTPUT_ANNOTATION: "merged"},
+        )
 
     # Verify chart label was injected for CRD
     call_args = mock_api_resource.create.call_args
@@ -527,6 +535,7 @@ spec:
     assert WORKLOAD_TYPE_LABEL in body["metadata"]["labels"]
     assert DISPLAY_NAME_ANNOTATION in body["metadata"]["annotations"]
     assert body["metadata"]["annotations"][DISPLAY_NAME_ANNOTATION] == workload.display_name
+    assert body["metadata"]["annotations"][TRAINING_OUTPUT_ANNOTATION] == "merged"
 
 
 @pytest.mark.asyncio

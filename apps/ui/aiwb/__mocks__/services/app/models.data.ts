@@ -4,11 +4,16 @@
 
 import {
   AIM_MODEL_NAME_LABEL,
+  AIM_MODEL_TRAINING_OUTPUT_ANNOTATION,
   AIM_MODEL_WORKLOAD_ID_LABEL,
   AIMModel,
 } from '@/types/aims';
 
-const makeModel = (n: number, extra?: Partial<AIMModel>): AIMModel => ({
+const makeModel = (
+  n: number,
+  output?: string,
+  extra?: Partial<AIMModel>,
+): AIMModel => ({
   metadata: {
     name: `wb-finetune-cr-${n}`, // K8s auto-generated resource name
     creationTimestamp: '2026-01-01T00:00:00Z',
@@ -16,8 +21,12 @@ const makeModel = (n: number, extra?: Partial<AIMModel>): AIMModel => ({
       [AIM_MODEL_WORKLOAD_ID_LABEL]: String(n),
       [AIM_MODEL_NAME_LABEL]: `model-${n}`, // user-chosen display name
     },
+    annotations: output
+      ? { [AIM_MODEL_TRAINING_OUTPUT_ANNOTATION]: output }
+      : undefined,
   },
   spec: {
+    image: '',
     profiles: {
       overrides: {
         modelSources: [
@@ -35,9 +44,9 @@ const makeModel = (n: number, extra?: Partial<AIMModel>): AIMModel => ({
  */
 export const mockModels: AIMModel[] = [
   makeModel(1),
-  makeModel(2, { status: { status: 'NotReady' } }),
-  makeModel(3),
-  makeModel(4, { status: { status: 'NotReady' } }),
-  makeModel(5),
+  makeModel(2, 'merged', { status: { status: 'NotAvailable' } }),
+  makeModel(3, 'lora'),
+  makeModel(4, undefined, { status: { status: 'NotAvailable' } }),
+  makeModel(5, 'unsupported'),
   makeModel(6),
 ];

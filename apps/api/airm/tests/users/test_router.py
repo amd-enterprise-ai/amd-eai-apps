@@ -174,4 +174,4 @@ async def test_create_user_invalid_email() -> None:
     with TestClient(app) as client:
         response = client.post("/v1/users", json={"email": "invalid-email", "roles": []})
 
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT

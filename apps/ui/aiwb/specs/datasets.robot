@@ -48,6 +48,17 @@ Datasets page displays all datasets with metadata
     When user is on datasets page
     Then datasets should be listed with their metadata
 
+Datasets page displays file sizes
+    [Documentation]    Verify dataset sizes use suitable units.
+    [Tags]    ui    datasets    list
+
+    Given a ready project with user access exists
+    And datasets of different sizes exist
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    When user is on datasets page
+    Then dataset file sizes should be displayed
+
 Download indicator appears when dataset download starts
     [Documentation]    Verify that the download indicator appears in the preparing state
     ...                immediately after a dataset download is triggered from the table.

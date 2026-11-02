@@ -54,10 +54,14 @@ export const RelevantDocs = ({ docs }: RelevantDocsProps) => {
         selectedKeys={selectedKeys}
         onSelectionChange={handleToggle}
         selectionMode="single"
-        isCompact
       >
-        <AccordionItem key={STORAGE_KEY} title={t('title')}>
-          <div className="grid grid-cols-1 min-[1100px]:grid-cols-3 gap-4 w-full">
+        <AccordionItem
+          key={STORAGE_KEY}
+          id={STORAGE_KEY}
+          title={t('title')}
+          classNames={{ content: 'px-0' }}
+        >
+          <div className="grid grid-cols-1 min-[1100px]:grid-cols-3 gap-2 w-full">
             {displayEntries.map((entry) => (
               <RelevantDocsCard key={entry.url} {...entry} />
             ))}

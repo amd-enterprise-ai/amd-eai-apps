@@ -1,8 +1,8 @@
 {
   "title": "Users",
   "tabs": {
-    "active": "Active Users",
-    "invited": "Invited Users"
+    "active": "Active users",
+    "invited": "Invited users"
   },
   "actions": {
     "addUser": {
@@ -20,8 +20,8 @@
       "email": {
         "title": "Email"
       },
-      "lastSeenAt": {
-        "title": "Last Seen At"
+      "createdAt": {
+        "title": "Created"
       },
       "roles": {
         "title": "Role"
@@ -31,6 +31,7 @@
       }
     },
     "filter": {
+      "label": "Search users",
       "placeholder": "Search"
     },
     "pagination": {
@@ -56,10 +57,11 @@
       "role": {
         "asc": "Sort Role by Ascending",
         "desc": "Sort Role by Descending"
+      },
+      "createdAt": {
+        "asc": "Sort Created by Ascending",
+        "desc": "Sort Created by Descending"
       }
-    },
-    "lastSeenAt": {
-      "never": "Never"
     },
     "empty": {
       "description": "List of users is empty."
@@ -94,7 +96,7 @@
           }
         },
         "tempPassword": {
-          "label": "Temporary Password",
+          "label": "Temporary password",
           "placeholder": "Please enter a temporary password for this invited user",
           "validation": {
             "required": "Please enter a temporary password for this user.",
@@ -122,9 +124,9 @@
     }
   },
   "detail": {
-    "title": "User Details",
+    "title": "User details",
     "delete": {
-      "title": "Danger Zone",
+      "title": "Danger zone",
       "message": "These changes are permanent and cannot be undone.",
       "action": {
         "label": "Delete user",
@@ -133,7 +135,7 @@
         }
       },
       "confirmation": {
-        "title": "Confirm Deletion",
+        "title": "Confirm deletion",
         "description": "Are you sure you want to delete this user?"
       },
       "notification": {
@@ -149,22 +151,27 @@
     },
     "form": {
       "firstName": {
-        "label": "First Name",
+        "label": "First name",
         "placeholder": "First name",
         "validation": {
+          "required": "Please enter the user's first name.",
           "length": "The user's first name must be between 2 and 64 characters."
         }
       },
       "lastName": {
-        "label": "Last Name",
+        "label": "Last name",
         "placeholder": "Last name",
         "validation": {
+          "required": "Please enter the user's last name.",
           "length": "The user's last name must be between 2 and 64 characters."
         }
       },
       "email": {
         "label": "Email",
-        "placeholder": "Email"
+        "placeholder": "Email",
+        "validation": {
+          "format": "Please enter the correct email format."
+        }
       },
       "actions": {
         "submit": "Save changes",
@@ -267,10 +274,10 @@
           "title": "Role"
         },
         "invitedAt": {
-          "title": "Invite Sent"
+          "title": "Invite sent"
         },
         "invitedBy": {
-          "title": "Invited By"
+          "title": "Invited by"
         },
         "actions": {
           "title": ""
@@ -278,11 +285,11 @@
       },
       "actions": {
         "resend": {
-          "label": "Resend Invite",
+          "label": "Resend invite",
           "confirmation": {
-            "title": "Resend Invite?",
+            "title": "Resend invite?",
             "description": "A new invite will be sent. Link will be valid for 12 hours.",
-            "confirm": "Resend Invite"
+            "confirm": "Resend invite"
           },
           "notification": {
             "success": "Invitation resent successfully.",
@@ -292,9 +299,9 @@
         "cancel": {
           "label": "Cancel",
           "confirmation": {
-            "title": "Cancel Invite?",
+            "title": "Cancel invite?",
             "description": "Are you sure you want to cancel the invite for this user? This action cannot be undone.",
-            "confirm": "Cancel Invite"
+            "confirm": "Cancel invite"
           },
           "notification": {
             "success": "Invitation cancelled successfully.",
@@ -303,6 +310,7 @@
         }
       },
       "filter": {
+        "label": "Search invited users",
         "placeholder": "Search"
       },
       "pagination": {

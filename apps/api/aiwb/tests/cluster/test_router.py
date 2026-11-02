@@ -38,9 +38,12 @@ def test_list_aim_images_returns_catalog() -> None:
 def test_list_cluster_accelerators_returns_data(mock_get_accelerators: AsyncMock) -> None:
     mock_get_accelerators.return_value = [
         ClusterAccelerator(
+            accelerator_type="gpu",
             device_id="74a1",
+            accelerator_vendor="amd",
             product_name="AMD Instinct MI300X",
             allocatable_count=8,
+            accelerator_model="MI300X",
         )
     ]
     with TestClient(app) as client:
@@ -50,9 +53,12 @@ def test_list_cluster_accelerators_returns_data(mock_get_accelerators: AsyncMock
     assert body == {
         "data": [
             {
+                "acceleratorType": "gpu",
                 "deviceId": "74a1",
+                "acceleratorVendor": "amd",
                 "productName": "AMD Instinct MI300X",
                 "allocatableCount": 8,
+                "acceleratorModel": "MI300X",
             }
         ]
     }

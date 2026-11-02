@@ -10,7 +10,7 @@ from kubernetes_asyncio.client import ApiException
 from loguru import logger
 
 from api_common.exceptions import ConflictException, NotFoundException, ValidationException
-from api_common.secrets import SecretUseCase
+from api_common.secrets import S3_REQUIRED_CREDENTIAL_KEYS, SecretUseCase, find_missing_s3_credential_types
 
 from ..dispatch.kube_client import KubernetesClient
 from .constants import DISPLAY_NAME_ANNOTATION
@@ -90,7 +90,8 @@ async def create_secret(
 
     Raises:
         ConflictException: If a secret with the same name already exists
-        ValidationException: If image pull secret value is not valid JSON
+        ValidationException: If image pull secret value is not valid JSON, or an S3 secret is
+            missing required credential keys
     """
     if secret_in.use_case == SecretUseCase.IMAGE_PULL_SECRET:
         dockerconfig_b64 = secret_in.data.get(".dockerconfigjson")
@@ -103,6 +104,15 @@ async def create_secret(
                     message='Image pull secret value must be valid Docker config JSON (e.g. {"auths":{"<registry>":{"username":"...","password":"...","auth":"..."}}}). Paste the JSON content, not YAML or other formats.',
                     detail=str(e),
                 ) from e
+
+    if secret_in.use_case == SecretUseCase.S3:
+        missing = find_missing_s3_credential_types(secret_in.data.keys())
+        if missing:
+            details = "; ".join(
+                f"{name} (one of: {', '.join(alias for alias in S3_REQUIRED_CREDENTIAL_KEYS[name] if '_' not in alias)})"
+                for name in missing
+            )
+            raise ValidationException(message=f"S3 secret is missing required credential key(s): {details}.")
 
     existing_secrets = await list_kubernetes_secrets(kube_client=kube_client, namespace=namespace)
     for existing in existing_secrets:

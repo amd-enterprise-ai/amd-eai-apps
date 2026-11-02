@@ -121,6 +121,34 @@ Single deployed model is auto-selected on chat page
     When user navigates to the chat page
     Then chat input should be enabled
 
+Chat model selector shows default model name when no custom deployment name is set
+    [Documentation]    Verify the chat model selector shows the model's default name
+    ...                for a catalog deployment when the user does not provide a
+    ...                custom deployment name.
+    [Tags]    ui    chat    inference    display-name    gpu
+
+    Given a ready project with user access exists
+    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And AIM is deployed without custom deployment name and running
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    When user navigates to the chat page
+    Then the chat model selector should show default model name when no custom deployment name is set
+
+Chat model selector shows custom deployment name
+    [Documentation]    Verify the chat model selector prefers the custom deployment
+    ...                name the user provided when creating the deployment.
+    [Tags]    ui    chat    inference    display-name    gpu
+
+    Given a ready project with user access exists
+    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    ${deploy_name}=    Test Name    chat-deploy
+    And AIM is deployed with custom deployment name and running    ${deploy_name}
+    When user navigates to the chat page
+    Then the chat model selector should offer the deployment labeled "${deploy_name}"
+
 # =============================================================================
 # Chat Message and Response Rendering
 # =============================================================================

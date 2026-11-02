@@ -263,6 +263,95 @@ async def test_get_users_with_real_data(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_users_registers_keycloak_users_without_db_record(db_session: AsyncSession) -> None:
+    """Federated users that exist only in Keycloak (e.g. logged in via AIWB/OKTA) get a local record."""
+    await factory.create_basic_test_environment(db_session)
+    db_user = await factory.create_user(db_session, email="db-user@example.com", keycloak_user_id=str(uuid4()))
+
+    federated_keycloak_id = str(uuid4())
+    keycloak_users = [
+        {
+            "id": db_user.keycloak_user_id,
+            "email": db_user.email,
+            "firstName": "Database",
+            "lastName": "User",
+        },
+        {
+            "id": federated_keycloak_id,
+            "email": "federated@example.com",
+            "firstName": "Federated",
+            "lastName": "User",
+        },
+    ]
+    with (
+        patch("app.users.service.get_users_from_keycloak", return_value=keycloak_users),
+        patch("app.users.service.get_users_in_role", return_value=[]),
+    ):
+        kc_admin = AsyncMock(spec=KeycloakAdmin)
+        result = await get_users(kc_admin, db_session)
+    assert len(result) == 2
+    result_by_email = {user.email: user for user in result}
+    federated_user = result_by_email["federated@example.com"]
+    assert federated_user.role == Roles.TEAM_MEMBER.value
+    assert federated_user.last_active_at is None
+    assert result_by_email["db-user@example.com"].id == db_user.id
+    # A local record is created so the user is usable by every per-user / project flow.
+    registered = await get_user_by_email(db_session, "federated@example.com")
+    assert registered is not None
+    assert registered.keycloak_user_id == federated_keycloak_id
+    assert registered.created_by == "federated"
+    assert federated_user.id == registered.id
+
+
+@pytest.mark.asyncio
+async def test_get_users_does_not_duplicate_existing_records(db_session: AsyncSession) -> None:
+    """Listing twice must not create duplicate local records for the same Keycloak user."""
+    await factory.create_basic_test_environment(db_session)
+    federated_keycloak_id = str(uuid4())
+    keycloak_users = [
+        {
+            "id": federated_keycloak_id,
+            "email": "federated@example.com",
+            "firstName": "Federated",
+            "lastName": "User",
+        },
+    ]
+    with (
+        patch("app.users.service.get_users_from_keycloak", return_value=keycloak_users),
+        patch("app.users.service.get_users_in_role", return_value=[]),
+    ):
+        kc_admin = AsyncMock(spec=KeycloakAdmin)
+        first = await get_users(kc_admin, db_session)
+        second = await get_users(kc_admin, db_session)
+    assert len(first) == 1
+    assert len(second) == 1
+    assert first[0].id == second[0].id
+
+
+@pytest.mark.asyncio
+async def test_get_users_reuses_existing_record_on_email_conflict(db_session: AsyncSession) -> None:
+    """A Keycloak user whose email already belongs to another local record reuses that record."""
+    await factory.create_basic_test_environment(db_session)
+    existing = await factory.create_user(db_session, email="shared@example.com", keycloak_user_id=str(uuid4()))
+    keycloak_users = [
+        {
+            "id": str(uuid4()),
+            "email": "shared@example.com",
+            "firstName": "Federated",
+            "lastName": "User",
+        },
+    ]
+    with (
+        patch("app.users.service.get_users_from_keycloak", return_value=keycloak_users),
+        patch("app.users.service.get_users_in_role", return_value=[]),
+    ):
+        kc_admin = AsyncMock(spec=KeycloakAdmin)
+        result = await get_users(kc_admin, db_session)
+    assert len(result) == 1
+    assert result[0].id == existing.id
+
+
+@pytest.mark.asyncio
 async def test_create_user_with_no_roles(db_session: AsyncSession) -> None:
     """Test successful user creation without roles."""
     env = await factory.create_basic_test_environment(db_session)

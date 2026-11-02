@@ -26,7 +26,7 @@ export const DrivingAModal: Story = () => {
 
   return (
     <div className="flex flex-col items-start gap-4 p-6">
-      <p className="text-sm text-default-500">
+      <p className="text-sm text-muted">
         isOpen:{' '}
         <span className="font-mono font-semibold">{String(isOpen)}</span>
       </p>
@@ -51,7 +51,7 @@ export const DrivingAModal: Story = () => {
                 Overlay driven by useOverlayState
               </ModalPrimitiveHeader>
               <ModalPrimitiveBody>
-                <p className="text-sm text-default-500">
+                <p className="text-sm text-muted">
                   This modal&apos;s visibility is bound to the hook&apos;s
                   isOpen and onOpenChange. Pressing Escape or the backdrop also
                   routes through onOpenChange.

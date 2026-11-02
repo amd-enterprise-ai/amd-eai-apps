@@ -4,14 +4,14 @@
 
 """HTTP interface for the inference capability.
 
-Endpoints are organised to mirror the capability shape described in
-EAI-6310: a cluster-wide catalog of base models and a per-project surface
+Endpoints are organised to mirror the inference capability shape:
+a cluster-wide catalog of base models and a per-project surface
 for managing inference deployments.
 
 Path-keying choice
 ------------------
 URLs use ``/v1/projects/{project}/inference/...`` per the convention
-established in EAI-6359 (fine-tuning). The ``ensure_access_to_project``
+established by the fine-tuning capability. The ``ensure_access_to_project``
 dependency maps the project identifier 1:1 to the underlying workbench
 namespace, so the inference routes plug into the established auth flow
 without leaking the internal namespace naming into the API surface.
@@ -45,14 +45,13 @@ from ..aims.service import (
     list_aims,
     undeploy_aim,
 )
-from ..cluster_auth import get_cluster_auth_client
-from ..cluster_auth.client import ClusterAuthClient
-from ..common_responses import PROJECT_ACCESS_RESPONSES
+from ..common_responses import EXTERNAL_SERVICE_RESPONSES, PROJECT_ACCESS_RESPONSES
 from ..dispatch.kube_client import KubernetesClient, get_kube_client
 from ..metrics.client import get_prometheus_client
 from ..metrics.enums import MetricName
 from ..metrics.schemas import MetricsScalar, MetricsScalarWithRange, MetricsTimeRange, MetricsTimeseries
 from ..metrics.service import get_metric_by_workload_id
+from ..minio import MinioClient, get_minio_client_optional
 from ..projects.security import ensure_access_to_project
 from . import service as inference_service
 from .schemas import (
@@ -213,17 +212,60 @@ async def get_inference_profile_endpoint(
         Deploy a model for inference in the given project.
 
         The `model` field accepts either an AIMClusterModel name
-        (cluster-scoped) or an AIMModel name (project-scoped fine-tuned
-        model). The API auto-detects which type it is.
+        (cluster-scoped) or an AIMModel name (project-scoped fine-tuned or
+        custom-onboarded model). The API auto-detects which type it is.
+
+        For a custom-onboarded model, `profileName` selects which of that
+        model's profiles serves the deployment, using an identifier from its
+        profile list (`default` selects the engine-provided profile). The
+        server resolves it to the profile that identifier derives and pins it,
+        so the deployment keeps serving that profile rather than re-resolving to
+        a sibling. Omitting `profileName` deploys the Default. Fine-tuned models
+        have no selectable profiles and continue to reject it.
+
+        `adapters` attaches the project's LoRA adapters to the deployment by name.
+        Each one must be an adapter in this project, must list the deployed model
+        among the base models it can serve, and — for adapters uploaded here — must
+        have finished uploading its weights. If any adapter fails a check the whole
+        deploy is refused with a 400 naming each one and why, and nothing is created.
+
+        `adapterMode` is immutable once the deployment exists, so it can only be
+        chosen here. Omit it to take the platform default (`static`, serving exactly
+        the adapters listed at deploy time).
+
+        `maxLoraRank` reserves the highest LoRA rank a `dynamic` deployment can serve,
+        since its adapters are not known at deploy time; it is refused on any other
+        mode, as is spelling it as the `max-lora-rank` engine argument.
+
+        A pinned profile must support serving adapters whenever the deployment will
+        need that capability — either because `adapters` names some, or because
+        `adapterMode` is `dynamic`, which asks for adapters to be attachable while the
+        deployment runs and so is refused on an incapable profile even when no adapters
+        are named. On the selector path no profile is pinned and the engine makes that
+        call instead, after the deployment is created.
+
+        Per-adapter progress appears on `status.adapters` of the deployment exactly
+        as the engine reports it; the platform neither derives nor aggregates it.
     """),
     responses={
         **PROJECT_ACCESS_RESPONSES,
-        400: {"description": "Model requires a Hugging Face token but none was provided."},
+        400: {
+            "description": (
+                "Model requires a Hugging Face token but none was provided; `profileName` is unknown to the "
+                "model or names a profile that is not ready; `profileName` was supplied for a fine-tuned "
+                "model; `imagePullSecrets`/`hfToken` were supplied for a project-scoped model; a "
+                "requested adapter cannot be attached to this model or profile; or `adapterMode` "
+                "is `dynamic` and the pinned profile cannot serve adapters."
+            )
+        },
         404: {"description": "Project or namespace not found, or referenced model resource not found."},
         422: {
             "description": (
                 "Invalid scaling policy (e.g., missing one of minReplicas/maxReplicas/autoScaling, "
-                "or maxReplicas < minReplicas)."
+                "or maxReplicas < minReplicas), an invalid adapters list (more than 64 adapters, "
+                "the same adapter listed twice, or a name no adapter artifact could have), or a "
+                "`maxLoraRank` that is unsupported, set outside `dynamic` adapter mode, or spelled "
+                "as the `max-lora-rank` engine argument."
             )
         },
     },
@@ -233,14 +275,14 @@ async def deploy_inference_endpoint(
     project: str = Depends(ensure_access_to_project),
     submitter: str = Depends(get_user_email),
     kube_client: KubernetesClient = Depends(get_kube_client),
-    cluster_auth_client: ClusterAuthClient | None = Depends(get_cluster_auth_client),
+    minio_client: MinioClient | None = Depends(get_minio_client_optional),
 ) -> InferenceDeploymentResponse:
     aim_response = await deploy_aim(
         kube_client=kube_client,
         deploy_request=deploy_request,
         namespace=project,
         submitter=submitter,
-        cluster_auth_client=cluster_auth_client,
+        minio_client=minio_client,
     )
     return InferenceDeploymentResponse.model_validate(aim_response, from_attributes=True)
 
@@ -255,12 +297,13 @@ async def deploy_inference_endpoint(
         navigate; the response includes a `pagination` object with `page`,
         `pageSize`, and `total` alongside `data`.
 
-        Use `?capability=chat` to narrow the list to deployments whose model
-        supports chat completions and whose serving stack is fully ready —
-        useful for populating chat-target pickers. Use `?statusFilter=` to
-        filter by deployment status (repeatable). Pagination is applied
-        after capability and status filters, so `total` reflects the
-        filtered set.
+        Use `?capability=chat` or `?capability=transcription` to narrow the
+        list to deployments whose model advertises that capability via its
+        catalog tags and whose serving stack is fully ready — for example,
+        populating chat-target pickers or discovering speech-to-text
+        (Whisper-style) endpoints. Use `?statusFilter=` to filter by
+        deployment status (repeatable). Pagination is applied after capability
+        and status filters, so `total` reflects the filtered set.
 
         Including `statusFilter=Deleted` also surfaces DB-persisted historical
         deployments (undeployed AIMServices), merged into the same paginated
@@ -269,8 +312,8 @@ async def deploy_inference_endpoint(
         `creationTimestamp`; the live K8s engine never emits the `Deleted`
         status itself.
 
-        Note: `capability=chat` requires the serving stack to be fully ready,
-        so combining it with `statusFilter=Pending` (or other non-ready
+        Note: a `capability` filter requires the serving stack to be fully
+        ready, so combining it with `statusFilter=Pending` (or other non-ready
         statuses) will typically return an empty list.
     """),
     responses={**PROJECT_ACCESS_RESPONSES},
@@ -312,6 +355,7 @@ async def list_inference_deployments_endpoint(
     """),
     responses={
         **PROJECT_ACCESS_RESPONSES,
+        **EXTERNAL_SERVICE_RESPONSES,
         404: {"description": "Project or namespace not found, or inference deployment not found in the project."},
     },
 )
@@ -331,21 +375,68 @@ async def get_inference_deployment_endpoint(
     description=dedent("""
         Update an inference deployment without redeploying the model.
 
-        Currently the only supported change is the scaling policy. All three
-        scaling fields (`minReplicas`, `maxReplicas`, `autoScaling`) must be
-        provided together.
+        Two changes are supported, either on its own or both together:
+
+        - **Scaling policy.** All three fields (`minReplicas`, `maxReplicas`,
+          `autoScaling`) must be provided together.
+        - **Adapters.** `adapters` is the complete set the deployment should
+          serve: adapters currently attached and not listed are detached, and
+          `[]` detaches all of them. Omit the field to leave the adapter set
+          alone.
+
+        A request carrying both reaches Kubernetes as a single atomic update:
+        either both changes are recorded or neither is.
+
+        Changing adapters requires the deployment to have been created with
+        `adapterMode: dynamic`, which is fixed at deploy time — a deployment
+        created without it can never accept an adapter change. Each requested
+        adapter passes the same checks as at deploy time: it must be an adapter
+        in this project, must list the deployed model among the base models it
+        can serve, and — for adapters uploaded here — must not be waiting on an
+        unfinished upload. That last check only ever refuses on a definite "the
+        weights are not there"; storage that cannot be reached leaves it unknown
+        and the change proceeds. If any check fails, the request is refused with
+        a 400 naming each one and why, and nothing is changed. A scaling-only
+        request is not subject to `adapterMode` and works on any deployment.
+
+        Accepting this request records the requested set on the deployment; it
+        does not mean the adapters are serving traffic yet. `spec.adapters` is
+        what was requested and `status.adapters[]` is what the engine reports,
+        verbatim — the platform neither derives nor aggregates it. The `state`
+        on each entry is that adapter's **disk-side** staging state: `Downloaded`
+        means its weights are present, which is not a load confirmation and must
+        not be read as one. `Loaded` is the authoritative signal that an adapter
+        is available for inference wherever the engine reports it, but the engine
+        deployed today reports disk-side states only, so the absence of `Loaded`
+        is not evidence of failure. A detached adapter legitimately stays in
+        `status.adapters` as `Deleting` until the unload completes. The engine
+        picks up a change on its next poll, so allow up to one poll interval
+        before the runtime reflects it.
     """),
     responses={
         **PROJECT_ACCESS_RESPONSES,
-        400: {"description": "All scaling fields are absent (none of minReplicas, maxReplicas, autoScaling provided)."},
-        404: {"description": "Project or namespace not found, or inference deployment not found in the project."},
-        422: {
+        400: {
             "description": (
-                "Scaling fields are partially provided (e.g., autoScaling missing while min/max set) "
-                "or maxReplicas < minReplicas."
+                "Neither adapters nor the scaling policy was supplied; the deployment's "
+                "adapterMode is not `dynamic`; a requested adapter cannot be attached to this "
+                "deployment; or Kubernetes rejected the change."
             )
         },
-        502: {"description": "Kubernetes patch on the AIMService failed."},
+        404: {"description": "Project or namespace not found, or inference deployment not found in the project."},
+        409: {"description": "The deployment changed concurrently; re-read it and retry."},
+        422: {
+            "description": (
+                "Scaling fields are partially provided (e.g., autoScaling missing while min/max set), "
+                "maxReplicas < minReplicas, or an invalid adapters list (more than 64 adapters, the "
+                "same adapter listed twice, or a name no adapter artifact could have)."
+            )
+        },
+        502: {
+            "description": (
+                "The cluster could not be reached, or refused the change for a reason it did not "
+                "attribute to the request."
+            )
+        },
     },
 )
 async def update_inference_deployment_endpoint(
@@ -353,12 +444,14 @@ async def update_inference_deployment_endpoint(
     patch_request: InferencePatchRequest = Body(...),
     project: str = Depends(ensure_access_to_project),
     kube_client: KubernetesClient = Depends(get_kube_client),
+    minio_client: MinioClient | None = Depends(get_minio_client_optional),
 ) -> InferenceDeploymentResponse:
-    aim_response = await inference_service.update_inference_scaling_policy(
+    aim_response = await inference_service.update_inference_deployment(
         kube_client=kube_client,
         project=project,
         id=id,
         patch_request=patch_request,
+        minio_client=minio_client,
     )
     return InferenceDeploymentResponse.model_validate(aim_response, from_attributes=True)
 
@@ -373,6 +466,7 @@ async def update_inference_deployment_endpoint(
     """),
     responses={
         **PROJECT_ACCESS_RESPONSES,
+        **EXTERNAL_SERVICE_RESPONSES,
         404: {"description": "Project or namespace not found, or inference deployment not found in the project."},
     },
 )
@@ -380,13 +474,11 @@ async def undeploy_inference_endpoint(
     id: UUID = Path(..., description="UUID of the inference deployment to undeploy"),
     project: str = Depends(ensure_access_to_project),
     kube_client: KubernetesClient = Depends(get_kube_client),
-    cluster_auth_client: ClusterAuthClient | None = Depends(get_cluster_auth_client),
 ) -> None:
     await undeploy_aim(
         kube_client=kube_client,
         namespace=project,
         id=id,
-        cluster_auth_client=cluster_auth_client,
     )
 
 
@@ -401,6 +493,7 @@ async def undeploy_inference_endpoint(
     """),
     responses={
         **PROJECT_ACCESS_RESPONSES,
+        **EXTERNAL_SERVICE_RESPONSES,
         404: {"description": "Project or namespace not found, or inference deployment not found in the project."},
         422: {
             "description": (
@@ -435,6 +528,8 @@ async def get_inference_metric_endpoint(
         start=time_range.start,
         end=time_range.end,
         prometheus_client=prometheus_client,
+        kube_client=kube_client,
+        namespace=project,
         pod_name=pod_name,
     )
 
@@ -451,6 +546,7 @@ async def get_inference_metric_endpoint(
     """),
     responses={
         **PROJECT_ACCESS_RESPONSES,
+        **EXTERNAL_SERVICE_RESPONSES,
         404: {"description": "Project or namespace not found, or inference deployment not found in the project."},
     },
 )

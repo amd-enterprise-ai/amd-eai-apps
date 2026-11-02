@@ -33,10 +33,10 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { getServerSession } from 'next-auth';
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import { useRouter } from 'next/router';
 
 import { useAccessControl } from '@/hooks/useAccessControl';
+import { getPageTranslations } from '@/utils/i18n';
 
 import {
   deleteCluster as deleteClusterAPI,
@@ -266,7 +266,6 @@ const ClusterPage: React.FC<Props> & WithDocumentationLink = ({
             : t('common:charts.nodata');
         }}
         isLoading={isGPUDeviceUsageDataFetching && !deviceChartData}
-        loadingText={t('common:charts.loading') || ''}
       />
     ),
     [deviceChartData, isGPUDeviceUsageDataFetching, t],
@@ -347,23 +346,16 @@ const ClusterPage: React.FC<Props> & WithDocumentationLink = ({
                   ...(!isAdministrator
                     ? ['edit', 'delete', 'viewWorkloads']
                     : []),
-                  'teamMemberAlert',
                 ]}
               >
                 {!isAdministrator ? (
                   <DropdownItem
                     key="teamMemberAlert"
-                    isReadOnly
-                    className="opacity-100"
+                    className="pointer-events-none"
                   >
                     <Alert
-                      color="warning"
-                      classNames={{
-                        base: 'p-2',
-                        title: 'text-xs leading-3.5',
-                        description: 'text-xs leading-tight',
-                      }}
-                      radius="sm"
+                      status="warning"
+                      isTight
                       title={t('actions.teamMemberAlert.title')}
                       hideIcon
                       className="w-[240px]"
@@ -416,8 +408,7 @@ const ClusterPage: React.FC<Props> & WithDocumentationLink = ({
 
                 <DropdownItem
                   key="delete"
-                  className="text-danger"
-                  color="danger"
+                  variant="danger"
                   onPress={onDeleteClusterModalOpen}
                   startContent={<IconTrash />}
                 >
@@ -428,28 +419,28 @@ const ClusterPage: React.FC<Props> & WithDocumentationLink = ({
           }
         />
       </div>
-      <ClusterStats
-        cluster={clusterData}
-        workloadsStats={clusterWorkloadsStats}
-      />
-      <div className="flex flex-col gap-4 py-8">
-        <ChartTimeSelector
-          onTimeRangeChange={handleTimeBoundChange}
-          initialTimePeriod={TimeRangePeriod['1H']}
-          translationPrefix="timeRange"
-          isFetching={isGPUDeviceUsageDataFetching}
-          onChartsRefresh={handleChartsRefresh}
-          lastFetchedTimestamp={
-            gpuDeviceUsageDataUpdatedAt
-              ? new Date(gpuDeviceUsageDataUpdatedAt)
-              : undefined
-          }
+      <div className="flex flex-col gap-4">
+        <ClusterStats
+          cluster={clusterData}
+          workloadsStats={clusterWorkloadsStats}
         />
-        <Card className="border border-default-200 shadow-sm rounded-sm dark:bg-default-100">
-          <CardHeader className="pb-2">
-            <span className="text-sm font-semibold text-foreground">
+        <Card>
+          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <h4>
               {t('allocationAndWorkloads.charts.gpuDeviceUtilization.title')}
-            </span>
+            </h4>
+            <ChartTimeSelector
+              onTimeRangeChange={handleTimeBoundChange}
+              initialTimePeriod={TimeRangePeriod['1H']}
+              translationPrefix="timeRange"
+              isFetching={isGPUDeviceUsageDataFetching}
+              onChartsRefresh={handleChartsRefresh}
+              lastFetchedTimestamp={
+                gpuDeviceUsageDataUpdatedAt
+                  ? new Date(gpuDeviceUsageDataUpdatedAt)
+                  : undefined
+              }
+            />
           </CardHeader>
           <CardBody className="pt-0 mt-4">{deviceUtilizationChart}</CardBody>
         </Card>
@@ -457,14 +448,12 @@ const ClusterPage: React.FC<Props> & WithDocumentationLink = ({
       <Accordion
         defaultExpandedKeys={['cluster-nodes', 'cluster-quotas']}
         selectionMode="multiple"
-        itemClasses={{
-          title: 'uppercase',
-        }}
       >
         <AccordionItem
           title={t('projects.title')}
           aria-label={t('projects.title')!}
           key="cluster-quotas"
+          classNames={{ title: 'uppercase' }}
         >
           <ProjectTable projects={filteredProjects} />
         </AccordionItem>
@@ -472,6 +461,7 @@ const ClusterPage: React.FC<Props> & WithDocumentationLink = ({
           title={t('nodes.title')}
           aria-label={t('nodes.title')!}
           key="cluster-nodes"
+          classNames={{ title: 'uppercase' }}
         >
           <ClusterNodesTable
             clusterId={id as string}
@@ -526,10 +516,8 @@ export async function getServerSideProps(context: any) {
         ),
       ]);
 
-    const translations = await serverSideTranslations(locale, [
-      'common',
+    const translations = await getPageTranslations(locale, [
       'projects',
-      'sharedComponents',
       'clusters',
     ]);
 

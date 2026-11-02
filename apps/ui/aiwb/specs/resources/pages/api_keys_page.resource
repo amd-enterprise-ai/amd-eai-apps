@@ -18,7 +18,16 @@ ${CREATE_API_KEY_BUTTON}               button:has-text("Create API Key")
 # Create API key drawer — use header element to avoid matching the trigger button
 ${CREATE_DRAWER_TITLE}                 css=header:has-text("Create API Key")
 ${NAME_INPUT_PLACEHOLDER}              Enter API key name
-${CREATE_SUBMIT_BUTTON}                button[type="submit"]
+# Shared by both the create and edit drawers — only one is ever open at a time.
+${API_KEY_FORM_SUBMIT_BUTTON}          button[type="submit"]
+# Model deployments multi-select — anchored on its placeholder, which the trigger
+# shows until a deployment is picked. The trigger stays disabled until every
+# deployment's title and profile subtitle have loaded.
+${MODEL_DEPLOYMENTS_SELECT_TRIGGER}    css=button:has-text("Select model deployments")
+${MODEL_DEPLOYMENTS_OPTION_SELECTOR}    css=[role="listbox"] [role="option"]
+# In the edit drawer the trigger already shows the bound deployment names instead of
+# the placeholder, so it is matched by accessible name (the field label) instead.
+${MODEL_DEPLOYMENTS_EDIT_TRIGGER}      role=button[name="Model deployments"]
 
 # Key created drawer
 ${KEY_CREATED_TITLE}                   text="Key created"
@@ -27,8 +36,8 @@ ${KEY_CREATED_DONE_BUTTON}             button:has-text("Done")
 
 # Edit API key drawer
 ${EDIT_DRAWER_TITLE}                   css=header:has-text("Edit API Key")
-${EDIT_SUBMIT_BUTTON}                  button[type="submit"]
-${LINKED_DEPLOYMENTS_LABEL}            text="Linked deployments"
+${LINKED_DEPLOYMENTS_SECTION}          css=div:has(> label:text-is("Linked deployments"))
+${API_KEY_UPDATED_TOAST}               text="API key updated successfully"
 
 # Delete confirmation modal
 ${DELETE_MODAL_SELECTOR}               [data-testid="confirmation-modal"]
@@ -77,7 +86,7 @@ Click create API key button
 
     Click    css=${CREATE_API_KEY_BUTTON}
     Wait For Elements State    ${CREATE_DRAWER_TITLE}    visible    timeout=15s
-    Wait For Elements State    css=${CREATE_SUBMIT_BUTTON}    stable    timeout=10s
+    Wait For Elements State    css=${API_KEY_FORM_SUBMIT_BUTTON}    stable    timeout=10s
 
 Fill API key name
     [Documentation]    Fills in the API key name in the create drawer.
@@ -93,14 +102,14 @@ Fill API key name
     Fill Text    ${input}    ${name}
     Get Text    ${input}    ==    ${name}
 
-Submit create API key form
-    [Documentation]    Submits the create API key form by clicking the submit button.
-    ...                The DrawerForm's submit button is in the DrawerFooter, OUTSIDE
-    ...                the <form> element, using React Aria's onPress to call
+Submit API key form
+    [Documentation]    Submits the create or edit API key form by clicking the submit
+    ...                button. The DrawerForm's submit button is in the DrawerFooter,
+    ...                OUTSIDE the <form> element, using React Aria's onPress to call
     ...                formRef.current.requestSubmit(). Uses Click which triggers
     ...                React Aria's pointer-based press handler.
 
-    VAR    ${btn}    css=${CREATE_SUBMIT_BUTTON}
+    VAR    ${btn}    css=${API_KEY_FORM_SUBMIT_BUTTON}
     Wait For Elements State    ${btn}    visible    timeout=5s
     Wait For Elements State    ${btn}    enabled    timeout=5s
     Click    ${btn}
@@ -144,13 +153,65 @@ Wait for edit drawer
     [Documentation]    Waits for the Edit API Key drawer to be visible and stable.
 
     Wait For Elements State    ${EDIT_DRAWER_TITLE}    visible    timeout=15s
-    Wait For Elements State    css=${EDIT_SUBMIT_BUTTON}    stable    timeout=10s
+    Wait For Elements State    css=${API_KEY_FORM_SUBMIT_BUTTON}    stable    timeout=10s
 
-Linked deployments section should contain text "${text}"
-    [Documentation]    Verifies the linked deployments section contains the given text.
+Wait for edit drawer to close
+    [Documentation]    Waits for the Edit API Key drawer to close after a successful save.
 
-    VAR    ${section}    css=*:has(${LINKED_DEPLOYMENTS_LABEL})
-    Wait For Elements State    ${section}:has-text("${text}")    visible    timeout=15s
+    Wait For Elements State    ${EDIT_DRAWER_TITLE}    hidden    timeout=10s
+
+Wait for API key updated toast
+    [Documentation]    Waits for the "API key updated successfully" toast to appear.
+
+    Wait For Elements State    ${API_KEY_UPDATED_TOAST}    visible    timeout=15s
+
+Wait for linked deployments section to show text "${text}"
+    [Documentation]    Waits for an element containing the given text to appear in the
+    ...                linked deployments section.
+
+    Wait For Elements State    ${LINKED_DEPLOYMENTS_SECTION}:has-text("${text}")    visible    timeout=15s
+
+Get linked deployments match count for text "${text}"
+    [Documentation]    Returns how many elements in the linked deployments section match
+    ...                the given text. Waits for the section itself to be visible first,
+    ...                since a selector matching zero elements is trivially absent and
+    ...                would otherwise report 0 even if the section never rendered at all.
+
+    Wait For Elements State    ${LINKED_DEPLOYMENTS_SECTION}    visible    timeout=15s
+    ${count}=    Get Element Count    ${LINKED_DEPLOYMENTS_SECTION}:has-text("${text}")
+    RETURN    ${count}
+
+Open model deployments select
+    [Documentation]    Opens the model deployments multi-select using the given trigger
+    ...                selector — the create drawer's placeholder-based trigger by default,
+    ...                or ${MODEL_DEPLOYMENTS_EDIT_TRIGGER} for the edit drawer, where the
+    ...                trigger already displays the bound deployment names instead of a
+    ...                placeholder. Waits for the trigger to be enabled first: the field is
+    ...                gated on the deployment titles and profile subtitles having loaded,
+    ...                so opening it early would read stale option text.
+    [Arguments]    ${trigger}=${MODEL_DEPLOYMENTS_SELECT_TRIGGER}
+
+    Wait For Elements State    ${trigger}    visible    timeout=15s
+    Wait For Elements State    ${trigger}    enabled    timeout=30s
+    Click    ${trigger}
+    Wait For Elements State    css=[role="listbox"]    visible    timeout=10s
+
+Click model deployments option "${text}"
+    [Documentation]    Clicks the open deployments picker's option matching the given text,
+    ...                toggling its selection on or off.
+
+    VAR    ${option}    ${MODEL_DEPLOYMENTS_OPTION_SELECTOR}:has-text("${text}")
+    Wait For Elements State    ${option}    visible    timeout=10s
+    Click    ${option}
+
+Get model deployments option count for text "${text}"
+    [Documentation]    Returns how many options in the open deployments select include the given
+    ...                text. Each option shows the deployment name and, below it, the profile
+    ...                subtitle, so a match on either counts.
+
+    VAR    ${options}    ${MODEL_DEPLOYMENTS_OPTION_SELECTOR}:has-text("${text}")
+    ${count}=    Get Element Count    ${options}
+    RETURN    ${count}
 
 Click delete action in actions menu
     [Documentation]    Clicks the "Delete API Key" option in the actions dropdown.

@@ -1,0 +1,23 @@
+version = 1
+revision = 1
+requires-python = ">=3.13"
+
+[[package]]
+name = "cluster-environment-check-e2e"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "robotframework" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "robotframework", specifier = "==7.4.1" }]
+
+[[package]]
+name = "robotframework"
+version = "7.4.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/93/0e/08078c015d564d6a587e10e0b285620781c1a91b27230ec5b582994e421b/robotframework-7.4.1.tar.gz", hash = "sha256:d645487248a86db1e1a865ce792502792edf5342873f4e4f35d333219cd246c5", size = 653746 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f3/f9/a5f59b75c92be85b18b9dc8a7fd20c52ace79b53e358f9a8402c8721ad7e/robotframework-7.4.1-py3-none-any.whl", hash = "sha256:3f75cae8a24797f1953efdb51399569767d742bb31f549ee9856db5545062728", size = 806871 },
+]

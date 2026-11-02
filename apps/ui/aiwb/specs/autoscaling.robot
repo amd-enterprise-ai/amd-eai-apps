@@ -28,8 +28,8 @@ Test Teardown       Close test browser
 
 
 *** Test Cases ***
-Deploy drawer shows autoscaling toggle
-    [Documentation]    Verify that the deployment drawer includes an autoscaling toggle
+Deploy wizard shows autoscaling toggle
+    [Documentation]    Verify that the deployment wizard includes an autoscaling toggle
     ...                that can be enabled to show autoscaling configuration fields.
     [Tags]    ui    autoscaling    deploy
 
@@ -38,11 +38,11 @@ Deploy drawer shows autoscaling toggle
     And user is logged in
     And project "${TEST_PROJECT}[name]" is selected
     And user is on models page
-    When user opens deploy drawer for "${TEST_AIM_DISPLAY_NAME}"
-    Then deploy drawer should be open
+    When user opens deploy wizard for "${TEST_AIM_DISPLAY_NAME}"
+    Then deploy wizard should be open
     And autoscaling toggle should be visible
 
-Deploy drawer shows autoscaling configuration when enabled
+Deploy wizard shows autoscaling configuration when enabled
     [Documentation]    Verify that enabling the autoscaling toggle displays
     ...                all autoscaling configuration fields.
     [Tags]    ui    autoscaling    deploy    fields
@@ -52,8 +52,8 @@ Deploy drawer shows autoscaling configuration when enabled
     And user is logged in
     And project "${TEST_PROJECT}[name]" is selected
     And user is on models page
-    And user opens deploy drawer for "${TEST_AIM_DISPLAY_NAME}"
-    When user enables autoscaling in deploy drawer
+    And user opens deploy wizard for "${TEST_AIM_DISPLAY_NAME}"
+    When user enables autoscaling in deploy wizard
     Then autoscaling toggle should be enabled
     And autoscaling fields should be visible
 

@@ -9,6 +9,7 @@ Documentation       High-level AIWB project testing keywords.
 ...                 higher-level testing scenarios for project listing, project-scoped
 ...                 workload stats and metrics, and access control.
 Resource            api/projects.resource
+Resource            api/cluster.resource
 Resource            resources/airm_projects.resource
 Resource            aiwb_common.resource
 Library             Collections
@@ -100,7 +101,7 @@ AIWB project workload stats are requested
 # Then-step keywords (used by projects.robot)
 
 Response should contain project list
-    [Documentation]    Verifies response contains a list of project strings in the "data" key.
+    [Documentation]    Verifies response contains a list of project summaries in the "data" key.
     VAR    ${body}    ${TEST_RESPONSE.json()}
     Dictionary Should Contain Key    ${body}    data
     ${projects}=    Get From Dictionary    ${body}    data
@@ -112,7 +113,8 @@ Project list should include current project
     ${project}=    Get Project Namespace
     VAR    ${body}    ${TEST_RESPONSE.json()}
     ${projects}=    Get From Dictionary    ${body}    data
-    Should Contain    ${projects}    ${project}
+    ${expected}=    Create Dictionary    id=${project}    name=${project}
+    List Should Contain Value    ${projects}    ${expected}
     ...    msg=Current project '${project}' not found in project list: ${projects}
 
 Project list should not include inaccessible project
@@ -120,7 +122,10 @@ Project list should not include inaccessible project
     ...    Requires TEST_UNAUTHORIZED_NAMESPACE to be set.
     VAR    ${body}    ${TEST_RESPONSE.json()}
     ${projects}=    Get From Dictionary    ${body}    data
-    Should Not Contain    ${projects}    ${TEST_UNAUTHORIZED_NAMESPACE}
+    ${unexpected}=    Create Dictionary
+    ...    id=${TEST_UNAUTHORIZED_NAMESPACE}
+    ...    name=${TEST_UNAUTHORIZED_NAMESPACE}
+    List Should Not Contain Value    ${projects}    ${unexpected}
     ...    msg=Inaccessible project '${TEST_UNAUTHORIZED_NAMESPACE}' was found in project list
 
 Response should contain workload stats structure
@@ -148,6 +153,27 @@ Response should contain paginated metrics structure
     ${is_list}=    Evaluate    isinstance($data, list)
     Should Be True    ${is_list}    msg=Response 'data' field is not a list
 
+GPU device metric should report an allocation ceiling of "${expected_gpu_count}"
+    [Documentation]    Verifies the GPU device utilization response includes an allocation
+    ...    series reflecting the project's assigned GPU quota.
+    VAR    ${body}    ${TEST_RESPONSE.json()}
+    ${series}=    Get From Dictionary    ${body}    data
+    ${allocation_series}=    Evaluate    [s for s in $series if s['metadata']['label'] == 'allocated_gpus']
+    Should Not Be Empty    ${allocation_series}    msg=No allocation series found in response: ${series}
+    ${values}=    Get From Dictionary    ${allocation_series}[0]    values
+    Should Not Be Empty    ${values}    msg=Allocation series has no datapoints
+    FOR    ${datapoint}    IN    @{values}
+        ${value}=    Get From Dictionary    ${datapoint}    value
+        Should Be Equal As Numbers    ${value}    ${expected_gpu_count}
+    END
+
+GPU device metric should report cluster capacity as its available ceiling
+    [Documentation]    Verifies a project without a dedicated GPU quota reports the
+    ...    cluster GPU capacity available for borrowing.
+    ${response}=    Get AIWB Cluster Resources    expected_status=200
+    ${expected_gpu_count}=    Get From Dictionary    ${response.json()}[data][availableResources]    gpuCount
+    GPU device metric should report an allocation ceiling of "${expected_gpu_count}"
+
 # Then-step keywords (used by cross_service.robot)
 
 AIWB project list should contain current project
@@ -155,7 +181,8 @@ AIWB project list should contain current project
     ...    Requires: TEST_PROJECT (set by project setup keywords), TEST_RESPONSE
     ${project}=    Get Project Namespace
     VAR    ${projects_list}    ${TEST_RESPONSE.json()['data']}
-    List Should Contain Value    ${projects_list}    ${project}
+    ${expected}=    Create Dictionary    id=${project}    name=${project}
+    List Should Contain Value    ${projects_list}    ${expected}
     ...    msg=Project ${project} not found in AIWB project list
 
 AIWB project workload stats response should contain project
@@ -171,7 +198,8 @@ AIWB project list should not contain "${project}"
     [Documentation]    Verifies the project list does NOT contain the specified project.
     ...    Requires: TEST_RESPONSE
     VAR    ${projects_list}    ${TEST_RESPONSE.json()['data']}
-    List Should Not Contain Value    ${projects_list}    ${project}
+    ${unexpected}=    Create Dictionary    id=${project}    name=${project}
+    List Should Not Contain Value    ${projects_list}    ${unexpected}
     ...    msg=Project ${project} should NOT be in AIWB project list but was found
 
 AIWB project list should not contain unauthorized project
@@ -203,7 +231,7 @@ The fine-tuned AIM service entry should expose its creator and creation time
     VAR    ${entries}    ${body}[data]
     VAR    ${matched}    ${None}
     FOR    ${entry}    IN    @{entries}
-        IF    $entry[id] == $TEST_AIM_ID
+        IF    $entry["id"] == $TEST_AIM_ID
             VAR    ${matched}    ${entry}
             BREAK
         END
@@ -213,9 +241,9 @@ The fine-tuned AIM service entry should expose its creator and creation time
     Dictionary Should Contain Key    ${matched}    createdAt
     Dictionary Should Contain Key    ${matched}    createdBy
     Should Not Be Equal    ${matched}[createdAt]    ${None}
-    ...    msg=createdAt is null for fine-tuned AIM service ${TEST_AIM_ID} (EAI-6063)
+    ...    msg=createdAt is null for fine-tuned AIM service ${TEST_AIM_ID}
     Should Not Be Equal    ${matched}[createdBy]    ${None}
-    ...    msg=createdBy is null for fine-tuned AIM service ${TEST_AIM_ID} (EAI-6063)
+    ...    msg=createdBy is null for fine-tuned AIM service ${TEST_AIM_ID}
 
 # Precondition keywords
 

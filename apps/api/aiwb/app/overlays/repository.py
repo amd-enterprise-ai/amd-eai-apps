@@ -2,10 +2,11 @@
 #
 # SPDX-License-Identifier: MIT
 
+from collections.abc import Collection
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,6 +70,35 @@ async def list_overlays(
             query = query.where(Overlay.canonical_name == canonical_name)
     result = await session.execute(query)
     return result.scalars().unique().all()
+
+
+async def delete_overlays_absent_from_chart(
+    session: AsyncSession,
+    chart_id: UUID,
+    keep_ids: Collection[UUID],
+    creator: str,
+) -> list[UUID]:
+    """Delete a chart's registered overlays that the chart no longer ships.
+
+    Overlay rows are a cache of the recipe files a chart carries. Without pruning, a recipe that is
+    renamed, relocated, or dropped upstream keeps being served from whatever content it held when it
+    was last registered.
+
+    Scoped to `creator` so overlays added through the API are never touched, and to rows carrying a
+    canonical name: an overlay that declares no model identifier cannot be traced back to the file
+    that produced it, so its absence from `keep_ids` proves nothing.
+    """
+    query = delete(Overlay).where(
+        Overlay.chart_id == chart_id,
+        Overlay.created_by == creator,
+        Overlay.canonical_name.is_not(None),
+    )
+    if keep_ids:
+        query = query.where(Overlay.id.not_in(keep_ids))
+    result = await session.execute(query.returning(Overlay.id), execution_options={"synchronize_session": False})
+    deleted_ids = [row[0] for row in result.fetchall()]
+    await session.flush()
+    return deleted_ids
 
 
 async def get_overlay(

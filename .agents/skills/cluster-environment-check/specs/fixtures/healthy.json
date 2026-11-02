@@ -1,0 +1,173 @@
+{
+  "cluster-info": [0, "ok", ""],
+  "get crd ciliumnodes.cilium.io": [0, "", ""],
+  "get configmap cilium-config -n kube-system -o json": [
+    0,
+    "{\"data\": {\"mtu\": \"9000\"}}",
+    ""
+  ],
+  "get crd volumes.longhorn.io": [0, "", ""],
+  "get volumes.longhorn.io -A -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"name\": \"volume-example\"}, \"status\": {\"robustness\": \"healthy\", \"state\": \"attached\"}}]}",
+    ""
+  ],
+  "get storageclass -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"name\": \"shared\"}, \"provisioner\": \"csi.example.com\"}]}",
+    ""
+  ],
+  "get csidrivers.storage.k8s.io -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"name\": \"csi.example.com\"}}]}",
+    ""
+  ],
+  "get csinodes.storage.k8s.io -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"name\": \"node-example\"}, \"spec\": {\"drivers\": [{\"name\": \"csi.example.com\"}]}}]}",
+    ""
+  ],
+  "get leases.coordination.k8s.io -A -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"name\": \"external-provisioner-leader-csi-example-com\"}, \"spec\": {\"renewTime\": \"2999-01-01T00:00:00Z\"}}]}",
+    ""
+  ],
+  "get pods -A --field-selector=status.phase=Pending -o json": [
+    0,
+    "{\"items\": []}",
+    ""
+  ],
+  "get events -A --field-selector reason=FailedMount -o json": [
+    0,
+    "{\"items\": []}",
+    ""
+  ],
+  "get events -A --field-selector reason=DeadlineExceeded -o json": [
+    0,
+    "{\"items\": []}",
+    ""
+  ],
+  "get jobs -A -o json": [0, "{\"items\": []}", ""],
+  "get pods -A -l app.kubernetes.io/name=device-metrics-exporter -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"namespace\": \"gpu-system\", \"name\": \"exporter-example\"}}]}",
+    ""
+  ],
+  "logs -n gpu-system exporter-example --tail=200": [
+    0,
+    "exporting metrics",
+    ""
+  ],
+  "get pods -n otel-lgtm-stack -l app.kubernetes.io/name=otel-collector -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"name\": \"collector-example\"}}]}",
+    ""
+  ],
+  "logs -n otel-lgtm-stack collector-example --tail=200": [
+    0,
+    "scraping metrics",
+    ""
+  ],
+  "get svc -A -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"namespace\": \"monitoring\", \"name\": \"prometheus\"}, \"spec\": {\"ports\": [{\"port\": 9090}]}}]}",
+    ""
+  ],
+  "get --raw /api/v1/namespaces/monitoring/services/prometheus:9090/proxy/api/v1/query?query=count%28gpu_gfx_activity%7Bworkload_id%21%3D%22%22%7D%29": [
+    0,
+    "{\"status\": \"success\", \"data\": {\"resultType\": \"vector\", \"result\": [{\"metric\": {}, \"value\": [1735000000, \"1\"]}]}}",
+    ""
+  ],
+  "get pods -A --field-selector=status.phase=Running -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"namespace\": \"project-example\", \"name\": \"gpu-workload\"}, \"spec\": {\"containers\": [{\"resources\": {\"requests\": {\"amd.com/gpu\": \"1\"}}}]}, \"status\": {\"phase\": \"Running\"}}]}",
+    ""
+  ],
+  "get crd aimclustermodels.aim.eai.amd.com": [0, "", ""],
+  "get aimclustermodels.aim.eai.amd.com -A -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"name\": \"model-example\"}, \"status\": {\"conditions\": [{\"type\": \"ManagedProfilesReady\", \"status\": \"True\"}]}}]}",
+    ""
+  ],
+  "get nodes -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"labels\": {\"amd.com/gpu.device-id\": \"example-gpu\"}}, \"status\": {\"capacity\": {\"amd.com/gpu\": \"8\"}, \"allocatable\": {\"amd.com/gpu\": \"8\"}}}]}",
+    ""
+  ],
+  "get externalsecret -n aiwb -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"name\": \"required-secret\"}, \"status\": {\"conditions\": [{\"type\": \"Ready\", \"status\": \"True\"}]}}]}",
+    ""
+  ],
+  "get secret default-minio-tenant-env-configuration -n minio-tenant-default -o name": [
+    0,
+    "secret/default-minio-tenant-env-configuration",
+    ""
+  ],
+  "get clustersecretstores.external-secrets.io openbao-secret-store -o json": [
+    0,
+    "{\"status\": {\"conditions\": [{\"type\": \"Ready\", \"status\": \"True\"}]}}",
+    ""
+  ],
+  "get crd aimartifacts.aim.eai.amd.com": [0, "", ""],
+  "auth can-i create aimartifacts.aim.eai.amd.com -n e2e-apiserver-testing": [
+    0,
+    "yes",
+    ""
+  ],
+  "get deploy aiwb-api -n aiwb -o json": [
+    0,
+    "{\"spec\": {\"template\": {\"spec\": {\"containers\": [{\"env\": []}]}}}, \"status\": {\"conditions\": [{\"type\": \"Available\", \"status\": \"True\"}], \"readyReplicas\": 1}}",
+    ""
+  ],
+  "get gateway https -n kgateway-system -o json": [
+    0,
+    "{\"spec\": {\"listeners\": [{\"name\": \"default\"}]}}",
+    ""
+  ],
+  "get pods -n aiwb -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"name\": \"aiwb-api-example\"}, \"status\": {\"phase\": \"Running\", \"containerStatuses\": [{\"name\": \"api\", \"ready\": true, \"restartCount\": 0, \"state\": {\"running\": {}}}]}}]}",
+    ""
+  ],
+  "get pods -n airm -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"name\": \"airm-api-example\"}, \"status\": {\"phase\": \"Running\", \"containerStatuses\": [{\"name\": \"api\", \"ready\": true, \"restartCount\": 0, \"state\": {\"running\": {}}}]}}]}",
+    ""
+  ],
+  "get deploy aiwb-ui -n aiwb -o json": [
+    0,
+    "{\"status\": {\"conditions\": [{\"type\": \"Available\", \"status\": \"True\"}], \"readyReplicas\": 1}}",
+    ""
+  ],
+  "get localqueues.kueue.x-k8s.io -n e2e-apiserver-testing -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"name\": \"e2e-apiserver-testing\"}, \"spec\": {\"clusterQueue\": \"project-queue\"}}]}",
+    ""
+  ],
+  "get clusterqueues.kueue.x-k8s.io project-queue -o json": [
+    0,
+    "{\"metadata\": {\"name\": \"project-queue\"}, \"spec\": {\"resourceGroups\": [{\"flavors\": [{\"resources\": [{\"name\": \"amd.com/gpu\", \"nominalQuota\": \"8\"}]}]}]}}",
+    ""
+  ],
+  "get clusterrole e2e-aim-test-author -o json": [
+    0,
+    "{\"rules\": [{\"apiGroups\": [\"aim.eai.amd.com\"], \"resources\": [\"aimartifacts\"], \"verbs\": [\"get\", \"create\", \"patch\"]}, {\"apiGroups\": [\"aim.eai.amd.com\"], \"resources\": [\"aimprofiles\"], \"verbs\": [\"get\", \"list\"]}, {\"apiGroups\": [\"aim.eai.amd.com\"], \"resources\": [\"aimmodels\"], \"verbs\": [\"get\", \"list\", \"create\", \"patch\", \"delete\"]}, {\"apiGroups\": [\"aim.eai.amd.com\"], \"resources\": [\"aimmodels/status\"], \"verbs\": [\"get\", \"patch\"]}, {\"apiGroups\": [\"aim.eai.amd.com\"], \"resources\": [\"aimservices\"], \"verbs\": [\"get\", \"list\", \"create\", \"patch\", \"delete\"]}]}",
+    ""
+  ],
+  "get clusterrolebinding e2e-aim-test-author -o json": [
+    0,
+    "{\"roleRef\": {\"kind\": \"ClusterRole\", \"name\": \"e2e-aim-test-author\"}, \"subjects\": [{\"kind\": \"User\", \"name\": \"oidc:devuser@example.com\"}]}",
+    ""
+  ],
+  "get namespaces -l airm.silogen.ai/project-id -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"name\": \"project-example\"}}]}",
+    ""
+  ],
+  "get clusterqueues.kueue.x-k8s.io -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"name\": \"project-example\"}, \"status\": {\"conditions\": [{\"type\": \"Active\", \"status\": \"True\"}]}}]}",
+    ""
+  ]
+}

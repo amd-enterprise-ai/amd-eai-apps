@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, act, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import SettingsDrawer from '@/components/features/chat/SettingsDrawer';
@@ -356,16 +356,20 @@ describe('SettingsDrawer Component', () => {
       expect(screen.getByLabelText('Close')).toBeInTheDocument();
     });
 
-    it('provides proper headings structure', () => {
+    it('uses one dialog heading for the title; workload name is outside the heading', () => {
       render(
         <ProviderWrapper>
           <SettingsDrawer {...defaultProps} />
         </ProviderWrapper>,
       );
 
+      const headings = screen.getAllByRole('heading');
+      expect(headings).toHaveLength(1);
+      expect(headings[0]).toHaveAccessibleName(/modelSettings\.title/);
       expect(
-        screen.getByRole('heading', { name: 'modelSettings.title' }),
-      ).toBeInTheDocument();
+        within(headings[0] as HTMLElement).queryByText('Llama 7B Inference'),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText('Llama 7B Inference')).toBeInTheDocument();
     });
   });
 });

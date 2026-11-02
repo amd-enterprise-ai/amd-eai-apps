@@ -9,10 +9,10 @@ Documentation       Page object for the global user menu (dropdown next to the a
 
 
 *** Variables ***
-# The user menu trigger is the avatar pill in the global toolbar. HeroUI sets
-# aria-haspopup on the DropdownTrigger wrapper; the user menu is the only
-# trigger rendered in the top-right of the toolbar.
-${USER_MENU_TRIGGER_SELECTOR}        [aria-haspopup="menu"] >> nth=-1
+# The user menu trigger is the avatar pill in the global toolbar. Pages render
+# their own dropdown triggers, so the lookup is scoped to the shared user-menu
+# container rather than relying on DOM order.
+${USER_MENU_TRIGGER_SELECTOR}        [data-testid="user-menu"] [data-slot="dropdown-trigger"]
 ${USER_MENU_SELECTOR}                [role="menu"]
 ${REPORT_ISSUE_ITEM_SELECTOR}        ${USER_MENU_SELECTOR} [role="menuitem"]:has-text("Report issue")
 
@@ -24,6 +24,12 @@ Open user menu
 
     Click    css=${USER_MENU_TRIGGER_SELECTOR}
     Wait For Elements State    css=${USER_MENU_SELECTOR}    visible    timeout=10s
+
+Get user menu accessible name
+    [Documentation]    Returns the accessible name of the open user menu.
+
+    ${name}=    Get Attribute    css=${USER_MENU_SELECTOR}    aria-label
+    RETURN    ${name}
 
 Get report issue menu item href
     [Documentation]    Returns the href of the "Report issue" entry in the (open) user menu.

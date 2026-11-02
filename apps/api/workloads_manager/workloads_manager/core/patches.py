@@ -78,6 +78,8 @@ def create_patch(workload_name: str) -> dict[str, Any]:
     # Create patches directory if it doesn't exist
     patches_dir.mkdir(parents=True, exist_ok=True)
 
+    destination_opened = False
+
     try:
         # Get all tracked changes
         tracked_changes = subprocess.run(
@@ -97,6 +99,8 @@ def create_patch(workload_name: str) -> dict[str, Any]:
 
         # Write the patch file
         with open(patch_file, "w") as f:
+            destination_opened = True
+
             # Write tracked changes
             f.write(tracked_changes)
 
@@ -130,8 +134,17 @@ def create_patch(workload_name: str) -> dict[str, Any]:
 
         # Check if the patch file has content
         if os.path.getsize(patch_file) == 0:
+            # A failed run must not leave a file behind: README instructs committing
+            # patches with a `*.patch` glob, which would sweep up an unusable artifact.
+            patch_file.unlink(missing_ok=True)
             return {"name": workload_name, "success": False, "error": "No changes to create patch"}
 
         return {"name": workload_name, "success": True, "patch_file": str(patch_file)}
     except Exception as e:
+        # A partially written patch is worse than none: it is non-empty, so it passes
+        # every size heuristic downstream while being a corrupt, unappliable diff. Only
+        # discard what this run truncated, though - a git call raising before the
+        # destination was opened leaves an earlier, still-valid patch untouched.
+        if destination_opened:
+            patch_file.unlink(missing_ok=True)
         return {"name": workload_name, "success": False, "error": f"Error creating patch: {str(e)}"}

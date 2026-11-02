@@ -136,6 +136,29 @@ Get listbox option count
     ${count}=    Get Length    ${elements}
     RETURN    ${count}
 
+Get listbox option count for text "${text}"
+    [Documentation]    Returns how many options in the open model selector include the given
+    ...                text. An option renders its deployment name on the first line and its
+    ...                description (the profile line) on the second, so a match on either counts.
+
+    VAR    ${options}    css=${LISTBOX_OPTION_SELECTOR}:has-text("${text}")
+    ${count}=    Get Element Count    ${options}
+    RETURN    ${count}
+
+Get listbox option name lines
+    [Documentation]    Returns the first text line from each option in the open model
+    ...                selector listbox, preserving visual option order.
+
+    ${options}=    Get Elements    css=${LISTBOX_OPTION_SELECTOR}
+    @{name_lines}=    Create List
+    FOR    ${option}    IN    @{options}
+        ${text}=    Get Text    ${option}
+        @{lines}=    Split To Lines    ${text}
+        VAR    ${name_line}    ${lines}[0]
+        Append To List    ${name_lines}    ${name_line}
+    END
+    RETURN    ${name_lines}
+
 Get chat input disabled state
     [Documentation]    Returns the disabled property of the chat input textarea.
 

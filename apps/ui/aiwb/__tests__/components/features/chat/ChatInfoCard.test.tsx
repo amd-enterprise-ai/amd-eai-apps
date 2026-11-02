@@ -17,7 +17,7 @@ vi.mock('@amdenterpriseai/components', () => ({
     className,
   }: {
     children: React.ReactNode;
-    className: string;
+    className?: string;
   }) => (
     <div data-testid="card" className={className}>
       {children}
@@ -28,7 +28,7 @@ vi.mock('@amdenterpriseai/components', () => ({
     className,
   }: {
     children: React.ReactNode;
-    className: string;
+    className?: string;
   }) => (
     <div data-testid="card-body" className={className}>
       {children}
@@ -139,8 +139,10 @@ describe('ChatInfoCard Component', () => {
       expect(chatIcon).toHaveClass(
         'w-5',
         'h-5',
-        'text-primary-600',
-        'dark:text-primary-300',
+        'lg:w-7',
+        'lg:h-7',
+        'text-accent',
+        'dark:text-accent',
       );
     });
   });
@@ -196,8 +198,10 @@ describe('ChatInfoCard Component', () => {
       expect(compareIcon).toHaveClass(
         'w-5',
         'h-5',
-        'text-primary-600',
-        'dark:text-primary-300',
+        'lg:w-7',
+        'lg:h-7',
+        'text-accent',
+        'dark:text-accent',
       );
     });
   });
@@ -214,11 +218,9 @@ describe('ChatInfoCard Component', () => {
       expect(card).toHaveClass(
         'max-w-[600px]',
         'mx-4',
+        'lg:mx-8',
         'p-5',
-        'shadow-none',
-        'border',
-        'border-default-200',
-        'dark:border-default-300',
+        'lg:p-8',
       );
     });
 
@@ -230,7 +232,13 @@ describe('ChatInfoCard Component', () => {
       );
 
       const cardBody = screen.getByTestId('card-body');
-      expect(cardBody).toHaveClass('flex', 'flex-col', 'gap-2', 'items-start');
+      expect(cardBody).toHaveClass(
+        'overflow-visible',
+        'flex',
+        'flex-col',
+        'gap-2',
+        'items-start',
+      );
     });
 
     it('renders icon container with correct styling', () => {
@@ -255,7 +263,12 @@ describe('ChatInfoCard Component', () => {
       );
 
       const title = screen.getByRole('heading', { level: 2 });
-      expect(title).toHaveClass('font-bold', 'text-xl', 'text-default-800');
+      expect(title).toHaveClass(
+        'font-bold',
+        'text-xl',
+        'lg:text-2xl',
+        'text-foreground',
+      );
       expect(title).toHaveTextContent('Chat Mode');
     });
 
@@ -281,7 +294,7 @@ describe('ChatInfoCard Component', () => {
       expect(list).toHaveClass(
         'list-disc',
         'pl-4',
-        'text-default-600',
+        'text-foreground',
         'text-sm',
         'space-y-1',
         'mb-1',

@@ -18,10 +18,14 @@ from ..clusters.service import get_cluster_with_resources
 from ..messaging.sender import MessageSender
 from ..namespaces.enums import NamespaceStatus
 from ..namespaces.models import Namespace
-from ..namespaces.repository import get_namespace_by_name_and_cluster, get_namespace_by_project_and_cluster
+from ..namespaces.repository import (
+    get_namespace_by_name_and_cluster,
+    get_namespace_by_project_and_cluster,
+)
 from ..namespaces.service import (
     create_namespace_for_project,
     delete_namespace_in_cluster,
+    find_namespace_sharing_storage_prefix,
     send_project_namespace_manifest_update,
 )
 from ..quotas.enums import QuotaStatus
@@ -217,9 +221,22 @@ async def create_project(
     if await get_project_by_name(session, project_name=project.name):
         raise ConflictException(f"Project with name {project.name} already exists.")
 
+    # Subsumed by the prefix check below — an identical name necessarily shares a prefix — and kept
+    # for the message, which names the collision the caller can actually see. Removing it would
+    # answer "that name is taken" with an explanation about storage prefixes.
     existing_namespace = await get_namespace_by_name_and_cluster(session, cluster.id, project.name)
     if existing_namespace:
         raise ConflictException(f"A namespace '{project.name}' already exists in cluster '{cluster.name}'. ")
+
+    # AIWB derives every object-storage prefix from the slug of the namespace and checks nothing
+    # about namespace naming itself, so this call and the slug-stability rule on ProjectCreate.name
+    # are together the only thing keeping two projects out of one storage tree.
+    colliding_namespace = await find_namespace_sharing_storage_prefix(session, cluster.id, project.name)
+    if colliding_namespace:
+        raise ConflictException(
+            f"A namespace '{colliding_namespace.name}' already exists in cluster '{cluster.name}' and would share "
+            f"object storage with '{project.name}'. Choose a name that does not collide with it."
+        )
 
     project_count = await get_active_project_count_per_cluster(session, cluster.id)
     if project_count >= MAX_PROJECTS_PER_CLUSTER - 1:
@@ -243,6 +260,7 @@ async def update_project(
     old_preemption = extract_gpu_preemption_config(project)
     await update_project_in_db(session, project, project_edit, updater)
     await update_project_quota(session, project, project.cluster, project_edit.quota, updater, message_sender)
+    await refresh_project_status_after_edit(session, project, updater)
     if has_gpu_preemption_changed(old_preemption, project_edit.gpu_preemption):
         await send_project_namespace_manifest_update(project, project_edit.gpu_preemption, message_sender)
     return project
@@ -335,6 +353,33 @@ async def delete_project_if_components_deleted(
         await delete_project_with_cleanup(session, project)
         return True
     return False
+
+
+async def refresh_project_status_after_edit(session: AsyncSession, project: Project, updater: str) -> None:
+    """Bring project status back in line with its components after the project was edited.
+
+    Without this a project failed by its quota keeps both the FAILED status and the failure text
+    built from the old quota reason, even though the re-requested quota is PENDING and carries no
+    reason: the cluster-driven path is what normally recomputes status, and an edit never reaches
+    it. The deletion-aware variant is deliberately not reused here — an edit is not a deletion, and
+    it needs a Keycloak client this path has no reason to hold.
+
+    The status is derived, but the edit that caused it was not: `updater` is the human who made it,
+    and stamping "system" here the way the cluster-driven path does would overwrite the audit
+    attribution the edit just recorded.
+
+    A project with no namespace is left untouched rather than failed; an edit should not be the
+    thing that condemns a project whose namespace has not been recorded yet. This diverges on
+    purpose from update_project_status_from_components, which fails the project in that case: the
+    cluster-driven path is reacting to evidence about the cluster, an edit is not. Unreachable
+    today, since every project gets a namespace at creation.
+    """
+    namespace = await get_namespace_by_project_and_cluster(session, project.id, project.cluster_id)
+    if not namespace:
+        return
+
+    project_status, status_reason = resolve_project_status(namespace, project.quota, project)
+    await update_project_status(session, project, project_status, status_reason, updater)
 
 
 async def update_project_status_from_components(

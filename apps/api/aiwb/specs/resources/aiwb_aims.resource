@@ -20,6 +20,8 @@ Resource    aiwb_common.resource
 Library             AIMModelHelper
 Library             AIMPodInspector
 Library             Collections
+Library             DateTime
+Library             MetricsAssertions
 Library             Process
 Library             AutoscalingPayload
 Library             LoadGenerator
@@ -30,29 +32,109 @@ Library             ModelCatalog
 ${TEST_AIM_NAME}            ${None}
 ${TEST_AIM}                  ${None}
 ${TEST_AIM_ID}              ${None}
+${TEST_AIM_PROFILE_NAME}    ${None}
+${TEST_AIM_GPU_COUNT}       ${None}
+${TEST_AIM_ACCELERATOR_MODEL}    ${EMPTY}
+# CPU/EPYC serving footprint. A vLLM CPU profile has no GPU; it needs core, memory, and
+# ephemeral-storage headroom to load and serve weights. Sized from the epycenv EPYC serving
+# profile (~188 cores / 80 GiB) with margin. Kept here, not in the scenario, so the Given step
+# reads as a behavioral precondition rather than a wall of byte counts.
+${CPU_ONLY_GPU_COUNT}            ${0}
+${CPU_ONLY_QUOTA_CPU_MILLICORES}    ${200000}    # 200 CPU cores
+${CPU_ONLY_QUOTA_MEMORY_BYTES}    ${103079215104}    # 96 GiB
+${CPU_ONLY_QUOTA_EPHEMERAL_BYTES}    ${21474836480}    # 20 GiB
 
 
 *** Keywords ***
+A required HuggingFace token is available for AIM deployment
+    [Documentation]    Provisions the HuggingFace secret and fails immediately when no token was
+    ...    provided. Used by scenarios tagged requires-hf-token; open-model callers retain the
+    ...    optional shared token keyword.
+    A HuggingFace token is available for AIM deployment
+    Should Not Be Empty    ${TEST_HF_TOKEN_SECRET}
+    ...    msg=HF_TOKEN is required for this scenario. Provide it via the HF_TOKEN env var or --variable "HF_TOKEN: Secret:...".
+
+Smallest deployable AIM resource name, profile and GPU count
+    [Documentation]    Returns the resource name, exact profile name, and GPU count for the
+    ...    smallest deployable AIM. The returned profile is pinned so quota and runtime demand
+    ...    share one source of truth.
+    ${aims_list}=    All Ready AIMs
+    ${profiles}=    All inference profiles
+    ${resource_name}    ${profile_name}    ${gpu_count}=    Get Smallest Deployable Aim With Profile
+    ...    ${aims_list}    ${profiles}
+    Log    Selected deployable AIM: ${resource_name} (profile: ${profile_name}, ${gpu_count} GPU)    INFO
+    RETURN    ${resource_name}    ${profile_name}    ${gpu_count}
+
+Smallest deployable AIM resource name and GPU count
+    [Documentation]    Returns model resource name and GPU count for compatibility callers.
+    ${resource_name}    ${profile_name}    ${gpu_count}=
+    ...    Smallest deployable AIM resource name, profile and GPU count
+    RETURN    ${resource_name}    ${gpu_count}
+
 Smallest deployable AIM resource name
-    [Documentation]    Returns the metadata.name (Kubernetes resource name) of the
-    ...    smallest open AIM that a default deploy will actually bring up on this
-    ...    cluster. Mirrors `Get smallest finetunable catalog model` but operates
-    ...    on the AIM inference catalog and is profile-aware: it cross-references
-    ...    the published profile catalog so it only picks models with an
-    ...    auto-selectable deployable profile (Ready, matchingNodes>=1,
-    ...    manualSelectionOnly=False) and skips HF-approval families whose weights
-    ...    can't be downloaded where the artifact pod lacks an HF token.
-    ...
-    ...    Both catalog calls use the max page size (100); profiles are paged
-    ...    through in full because a cluster commonly publishes a few hundred.
+    [Documentation]    Returns only the resource name of the smallest deployable AIM.
+    ${resource_name}    ${profile_name}    ${gpu_count}=
+    ...    Smallest deployable AIM resource name, profile and GPU count
+    RETURN    ${resource_name}
+
+Smallest adapter-capable AIM resource name, profile and GPU count
+    [Documentation]    Returns metadata.name, profile name, and GPU count for the smallest open,
+    ...    Ready AIM with an adapter-capable profile. Unlike automatic selection, this accepts
+    ...    manualSelectionOnly profiles because callers pin the returned profile name explicitly.
+    ${aims_list}=    All Ready AIMs
+    ${profiles}=    All inference profiles
+    ${resource_name}    ${profile_name}    ${gpu_count}=    Get Smallest Adapter Capable Aim With GPU Count
+    ...    ${aims_list}    ${profiles}
+    Log    Selected smallest adapter-capable AIM: ${resource_name} (profile: ${profile_name}, ${gpu_count} GPU)    INFO
+    RETURN    ${resource_name}    ${profile_name}    ${gpu_count}
+
+Smallest adapter-capable AIM resource name and profile
+    [Documentation]    Returns only the model and profile names for the smallest adapter-capable AIM.
+    ${resource_name}    ${profile_name}    ${gpu_count}=
+    ...    Smallest adapter-capable AIM resource name, profile and GPU count
+    RETURN    ${resource_name}    ${profile_name}
+
+All Ready AIMs
+    [Documentation]    Returns the full Ready AIM catalog by paging through the
+    ...    inference-model endpoint (max pageSize is 100). Returns a flat list.
+    VAR    @{aims}    @{EMPTY}
+    VAR    ${page}    ${1}
+    WHILE    $True    limit=50
+        ${response}=    List AIMs    expected_status=200    status_filter=Ready    page=${page}    page_size=100
+        VAR    ${body}    ${response.json()}
+        ${data}=    Get From Dictionary    ${body}    data
+        ${page_count}=    Get Length    ${data}
+        IF    ${page_count} == 0
+            BREAK
+        END
+        Append To List    ${aims}    @{data}
+        ${pagination}=    Get From Dictionary    ${body}    pagination    default=&{EMPTY}
+        ${total}=    Get From Dictionary    ${pagination}    total    default=${0}
+        ${have}=    Get Length    ${aims}
+        IF    ${have} >= ${total}
+            BREAK
+        END
+        ${page}=    Evaluate    ${page} + 1
+    END
+    Should Not Be Empty    ${aims}    msg=No Ready AIMs available in system
+    RETURN    ${aims}
+
+Smallest AIM resource name and profile that cannot serve adapters
+    [Documentation]    Returns (metadata.name, profile name) for the smallest open, Ready AIM that
+    ...    has a Ready profile lacking adapter support -- the inverse of `Smallest adapter-capable
+    ...    AIM resource name and profile`, for scenarios that pin serving hardware a request is
+    ...    meant to be refused on. Fails with an explanatory message when every Ready profile on
+    ...    the cluster declares adapter support, because the refusal cannot be provoked at all
+    ...    then and a bare selection error would send the reader looking for the wrong fault.
     ${response}=    List AIMs    expected_status=200    status_filter=Ready    page_size=100
     VAR    ${aims_list}    ${response.json()}[data]
     ${count}=    Get Length    ${aims_list}
     Should Be True    ${count} > 0    msg=No Ready AIMs available in system
     ${profiles}=    All inference profiles
-    ${resource_name}=    Get Smallest Deployable Aim    ${aims_list}    ${profiles}
-    Log    Selected smallest deployable AIM: ${resource_name}    INFO
-    RETURN    ${resource_name}
+    ${resource_name}    ${profile_name}=    Get Smallest Aim With Adapter Incapable Profile
+    ...    ${aims_list}    ${profiles}
+    Log    Selected AIM without adapter support: ${resource_name} (profile: ${profile_name})    INFO
+    RETURN    ${resource_name}    ${profile_name}
 
 All inference profiles
     [Documentation]    Returns the full list of published inference profiles by
@@ -81,22 +163,108 @@ All inference profiles
     RETURN    ${profiles}
 
 An AIM exists in system
-    [Documentation]    Ensures an AIM exists and sets TEST_AIM_NAME to the SMALLEST deployable AIM
-    ...    (fewest GPUs, profile-aware, skips HF-gated families) so deploy lifecycle tests don't
-    ...    grab a whole-node model and stall on shared-cluster GPU contention. Short-circuits if
-    ...    TEST_AIM_NAME is already set (e.g., from Suite Setup).
+    [Documentation]    Selects a deployable AIM. ``profile_requirement`` controls the pool:
+    ...    "automatic" (default) picks the smallest auto-deployable model; "unoptimized"
+    ...    picks one whose Ready profiles are all unoptimized; "cpu" picks the smallest model
+    ...    with a CPU/EPYC profile (allowing HF-approval-gated families, since a CPU cluster's
+    ...    only servable model is often gated) and records TEST_AIM_PROFILE_NAME so the deploy can
+    ...    pin that profile — without pinning, a model that also has a GPU profile would serve on
+    ...    GPU. The "cpu" pool requires an HF token in the project and fails fast without one.
+    ...    "automatic"/"unoptimized" short-circuit if TEST_AIM_NAME is already set (e.g. from Suite
+    ...    Setup); "cpu" never reuses a preselected model, because that model may lack a CPU profile.
+    [Arguments]    ${profile_requirement}=automatic
 
-    # Short-circuit if already selected
     ${already_set}=         Get Variable Value      ${TEST_AIM_NAME}    ${None}
-    IF    $already_set != $None
+    IF    $already_set != $None and $profile_requirement != "cpu"
+        ${profile_name}=    Get Variable Value    ${TEST_AIM_PROFILE_NAME}    ${None}
+        ${gpu_count}=    Get Variable Value    ${TEST_AIM_GPU_COUNT}    ${None}
+        # Resolve the exact automatic profile/GPU count once for older callers that preselected
+        # only a model. CPU selection never takes this shortcut because it must choose an EPYC profile.
+        IF    $profile_name is None and $gpu_count is None and $profile_requirement == "automatic"
+            # Cost an already-running service from the profile it actually resolved, not from
+            # the catalog's current minimum: availability and ranking can drift over a long
+            # suite, but a running service is not re-costed by a newer ranking.
+            ${namespace}=    Get Project Namespace
+            ${existing}=    Find Existing AIM Service    ${namespace}    ${TEST_AIM_NAME}
+            VAR    ${resolved_profile}    ${None}
+            IF    $existing != $None
+                ${existing_status}=    Get From Dictionary    ${existing}    status
+                ${resolved_profile}=    Evaluate    $existing_status.get('resolvedProfile')
+            END
+            ${profiles}=    All inference profiles
+            IF    $resolved_profile is not None
+                ${profile_name}=    Get From Dictionary    ${resolved_profile}    name
+                ${gpu_count}=    Get Profile Gpu Count    ${profiles}    ${profile_name}
+            ELSE
+                # No service yet (e.g. a freshly pinned AIM_RESOURCE_OVERRIDE before its first
+                # deploy). Tolerate "no auto-selectable profile" instead of raising -- that is
+                # exactly the condition the override is documented to support on clusters with
+                # incomplete profile provisioning; the deploy payload then omits profileName.
+                ${aims_list}=    All Ready AIMs
+                ${profile_name}    ${gpu_count}=    Get Deployable Aim Profile Or None
+                ...    ${aims_list}    ${profiles}    ${TEST_AIM_NAME}
+            END
+            IF    $profile_name is not None
+                VAR    ${TEST_AIM_PROFILE_NAME}    ${profile_name}    scope=TEST
+            END
+            # Pinned unconditionally: the lookup always yields a concrete count, and a later
+            # dual-AIM quota sum int()s this value even on the no-profile branch.
+            VAR    ${TEST_AIM_GPU_COUNT}    ${gpu_count}    scope=TEST
+        END
         Log                     AIM already selected: ${TEST_AIM_NAME}    DEBUG
         RETURN
     END
 
-    # Pick the smallest deployable AIM by GPU footprint (profile-aware) rather than the first
-    # Ready one — a large model can need the whole node (e.g. 8 GPUs) and stall on a shared cluster.
-    # Fetch the chosen AIM directly by name so the selection can never be lost to catalog pagination.
-    ${aim_resource_name}=   Smallest deployable AIM resource name
+    IF    $profile_requirement == "unoptimized"
+        ${aims_list}=           All Ready AIMs
+        ${profiles}=            All inference profiles
+        ${aim_resource_name}=   Get Aim With Only Unoptimized Profiles    ${aims_list}    ${profiles}
+    ELSE IF    $profile_requirement == "cpu"
+        ${hf_secret}=           Get Variable Value      ${TEST_HF_TOKEN_SECRET}    ${EMPTY}
+        Should Not Be Empty     ${hf_secret}
+        ...    msg=A CPU-servable AIM requires an HF token: run `A HuggingFace token is available for AIM deployment` first and provide HF_TOKEN.
+        ${aims_list}=           All Ready AIMs
+        ${profiles}=            All inference profiles
+        ${aim_resource_name}    ${cpu_profile}    ${accelerator_model}=    Get Smallest Cpu Servable Aim    ${aims_list}    ${profiles}    allow_gated=${True}
+        VAR    ${TEST_AIM_PROFILE_NAME}    ${cpu_profile}    scope=TEST
+        VAR    ${TEST_AIM_ACCELERATOR_MODEL}    ${accelerator_model}    scope=TEST
+    ELSE
+        ${aim_resource_name}    ${profile_name}    ${gpu_count}=
+        ...    Smallest deployable AIM resource name, profile and GPU count
+        VAR    ${TEST_AIM_PROFILE_NAME}    ${profile_name}    scope=TEST
+        VAR    ${TEST_AIM_GPU_COUNT}    ${gpu_count}    scope=TEST
+    END
+    Select AIM    ${aim_resource_name}
+
+An AIM that can serve adapters exists in system
+    [Documentation]    Selects a model together with a serving profile that declares adapter
+    ...    support, and pins that profile. Without the pin the engine resolves a profile of its own
+    ...    after the deployment is created, and with the wrong pin a deploy asking for adapters to
+    ...    stay changeable is turned away on the hardware -- either way a scenario about the rank
+    ...    ceiling would never reach its assertion. Unlike `An AIM exists in system`, whose pool is
+    ...    ranked on schedulability alone, this is the narrower pool that can actually take one.
+    ...    Sets: TEST_AIM_NAME, TEST_AIM, TEST_AIM_PROFILE_NAME, TEST_AIM_GPU_COUNT
+    ${resource_name}    ${profile_name}    ${gpu_count}=
+    ...    Smallest adapter-capable AIM resource name, profile and GPU count
+    Select AIM    ${resource_name}
+    VAR    ${TEST_AIM_PROFILE_NAME}    ${profile_name}    scope=TEST
+    VAR    ${TEST_AIM_GPU_COUNT}    ${gpu_count}    scope=TEST
+
+An AIM compatible with runtime profile overrides exists
+    [Documentation]    Selects the smallest open catalog AIM with a Ready profile that can
+    ...    satisfy the accelerator and precision criteria used by the runtime override fixture.
+    ${response}=    List AIMs    expected_status=200    status_filter=Ready    page_size=100
+    VAR    ${aims_list}    ${response.json()}[data]
+    ${count}=    Get Length    ${aims_list}
+    Should Be True    ${count} > 0    msg=No Ready AIMs available in system
+    ${profiles}=    All inference profiles
+    ${aim_resource_name}=    Get Smallest Aim For Runtime Profile Overrides
+    ...    ${aims_list}    ${profiles}    MI300X    ${2}    fp4
+    Select AIM    ${aim_resource_name}
+
+Select AIM
+    [Documentation]    Populates test state from one catalog AIM resource name.
+    [Arguments]    ${aim_resource_name}
     ${response}=            Get AIM                 ${aim_resource_name}    expected_status=200
     ${found_aim}=           Set Variable            ${response.json()}
 
@@ -124,9 +292,19 @@ Valid AIM deploy data is prepared
     ...    gated weights at deploy time. Tests that don't need an HF token leave
     ...    the variable unset and get the legacy payload.
     ${deploy_data}=         Create Dictionary       replicas=1
+    ${profile_name}=        Get Variable Value      ${TEST_AIM_PROFILE_NAME}    ${None}
+    IF    $profile_name is not None
+        Set To Dictionary    ${deploy_data}    profileName=${profile_name}
+    END
     ${hf_secret}=           Get Variable Value      ${TEST_HF_TOKEN_SECRET}    ${EMPTY}
     IF    "${hf_secret}" != ""
         Set To Dictionary    ${deploy_data}    hfToken=${hf_secret}
+    END
+    # Pin a specific profile when one was selected (e.g. the CPU/EPYC profile), so the engine
+    # serves on that hardware rather than auto-resolving a different profile of the same model.
+    ${profile_name}=        Get Variable Value      ${TEST_AIM_PROFILE_NAME}    ${EMPTY}
+    IF    "${profile_name}" != ""
+        Set To Dictionary    ${deploy_data}    profileName=${profile_name}
     END
     RETURN                  ${deploy_data}
 
@@ -141,7 +319,7 @@ Valid AIM deploy data with runtime profile overrides is prepared
     ${deploy_data}=         Create Dictionary
     ...    replicas=${1}
     ...    allowUnoptimized=${True}
-    ...    precision=fp8
+    ...    precision=fp4
     ...    gpuModel=MI300X
     ...    gpuCount=${2}
     ...    engineArgs=${engine_args}
@@ -161,6 +339,86 @@ Deploy AIM request is sent with runtime profile overrides
     ${service_id}=          Get From Dictionary     ${json}                 id
     VAR    ${TEST_AIM_ID}    ${service_id}    scope=TEST
 
+Deploy AIM request is sent with maximum LoRA adapter rank
+    [Documentation]    Deploys the selected AIM with the maximum adapter rank the operator chose.
+    ...    Requires dynamic adapter mode: the rank ceiling only means something for deployments
+    ...    whose adapters are not known at deploy time, and is refused on any other mode.
+    [Arguments]    ${max_lora_rank}
+    ${deploy_data}=    Valid AIM deploy data is prepared
+    ${rank}=    Convert To Integer    ${max_lora_rank}
+    Set To Dictionary    ${deploy_data}    maxLoraRank=${rank}    adapterMode=dynamic
+    Deploy AIM request with adapter settings is sent    ${deploy_data}    202
+
+Deploy AIM request is sent without a maximum LoRA adapter rank
+    [Documentation]    Deploys the selected AIM able to take adapters at runtime, but without
+    ...    naming a rank ceiling, so the serving runtime supplies its own.
+    ${deploy_data}=    Valid AIM deploy data is prepared
+    Set To Dictionary    ${deploy_data}    adapterMode=dynamic
+    Deploy AIM request with adapter settings is sent    ${deploy_data}    202
+
+Deploy AIM request is sent with the maximum LoRA adapter rank as an engine argument
+    [Documentation]    Spells the rank as the engine's own flag while leaving the field that
+    ...    carries it empty, so the spelling is the only thing wrong with the request.
+    ...    Requires: TEST_AIM_NAME. Sets: TEST_RESPONSE.
+    [Arguments]    ${max_lora_rank}
+    ${deploy_data}=    Valid AIM deploy data is prepared
+    ${rank}=    Convert To Integer    ${max_lora_rank}
+    ${engine_args}=    Create Dictionary    max-lora-rank=${rank}
+    Set To Dictionary    ${deploy_data}    engineArgs=${engine_args}    adapterMode=dynamic
+    Deploy AIM request with adapter settings is sent    ${deploy_data}    any
+
+Deploy AIM request is sent with an unsupported maximum LoRA adapter rank
+    [Documentation]    Asks for a rank between two supported ones, so the request is well formed in
+    ...    every other respect and only the value can account for the refusal.
+    ...    Requires: TEST_AIM_NAME. Sets: TEST_RESPONSE.
+    [Arguments]    ${max_lora_rank}
+    ${deploy_data}=    Valid AIM deploy data is prepared
+    ${rank}=    Convert To Integer    ${max_lora_rank}
+    Set To Dictionary    ${deploy_data}    maxLoraRank=${rank}    adapterMode=dynamic
+    Deploy AIM request with adapter settings is sent    ${deploy_data}    any
+
+Deploy AIM request is sent with a maximum LoRA adapter rank that is not a whole number
+    [Documentation]    Sends a rank the supported ones would match anyway -- by equality for the
+    ...    boolean, by rounding for a fractional part of zero.
+    ...    Requires: TEST_AIM_NAME. Sets: TEST_RESPONSE.
+    [Arguments]    ${max_lora_rank}
+    ${deploy_data}=    Valid AIM deploy data is prepared
+    Set To Dictionary    ${deploy_data}    maxLoraRank=${max_lora_rank}    adapterMode=dynamic
+    Deploy AIM request with adapter settings is sent    ${deploy_data}    any
+
+A maximum LoRA adapter rank that is not a whole number should be refused
+    [Documentation]    One shape of a rank that is not a whole number, sent and checked, so the
+    ...    scenario can run every shape it cares about. Requires: TEST_AIM_NAME.
+    [Arguments]    ${max_lora_rank}
+    Deploy AIM request is sent with a maximum LoRA adapter rank that is not a whole number
+    ...    ${max_lora_rank}
+    The deploy should be refused as a rank that is not a whole number
+
+Deploy AIM request is sent with a maximum LoRA adapter rank outside dynamic adapter serving
+    [Documentation]    Leaves the adapter mode alone, so the deployment serves the fixed set of
+    ...    adapters it declares -- the arrangement that derives its own ceiling.
+    ...    Requires: TEST_AIM_NAME. Sets: TEST_RESPONSE.
+    [Arguments]    ${max_lora_rank}
+    ${deploy_data}=    Valid AIM deploy data is prepared
+    ${rank}=    Convert To Integer    ${max_lora_rank}
+    Set To Dictionary    ${deploy_data}    maxLoraRank=${rank}
+    Deploy AIM request with adapter settings is sent    ${deploy_data}    any
+
+Deploy AIM request with adapter settings is sent
+    [Documentation]    Sends a prepared deploy request and records the response. Records the new
+    ...    deployment id only when one was created, so a refused request leaves nothing for
+    ...    teardown to chase.
+    ...    Requires: TEST_AIM_NAME
+    ...    Sets: TEST_RESPONSE, and TEST_AIM_ID when the deploy is accepted
+    [Arguments]    ${deploy_data}    ${expected_status}
+    ${namespace}=    Get Project Namespace
+    ${response}=    Deploy AIM    ${TEST_AIM_NAME}    ${deploy_data}    ${namespace}
+    ...    expected_status=${expected_status}
+    VAR    ${TEST_RESPONSE}    ${response}    scope=TEST
+    IF    ${response.status_code} == 202
+        VAR    ${TEST_AIM_ID}    ${response.json()}[id]    scope=TEST
+    END
+
 Valid AIM deploy data with autoscaling is prepared
     [Documentation]    Prepares deployment data for an AIM with autoscaling enabled.
     ...                Creates KEDA-compatible autoscaling policy structure matching
@@ -177,7 +435,7 @@ Valid AIM deploy data with autoscaling is prepared
     ...                 target_type=Value
     ...                 target_value=${target_value}
 
-    # UI always sends replicas=1 even when autoscaling (see DeployAIMDrawer.tsx:244)
+    # UI always sends replicas=1 even when autoscaling (see DeployAIMWizard.tsx)
     # IMPORTANT: Convert to int to match API schema (Robot Framework defaults to strings)
     ${min_replicas_int}=    Convert To Integer    ${min_replicas}
     ${max_replicas_int}=    Convert To Integer    ${max_replicas}
@@ -302,25 +560,30 @@ AIM is deployed and running
     An AIM exists in system
     ${namespace}=           Get Project Namespace
 
-    # Check for existing AIM service
+    # Check for existing AIM service. When a specific profile is pinned (TEST_AIM_PROFILE_NAME,
+    # e.g. the CPU/EPYC profile) a service found by model name alone may serve a *different*
+    # profile, so it is never reused — it is replaced with a fresh deploy that pins the profile.
     ${existing}=            Find Existing AIM Service    ${namespace}    ${TEST_AIM_NAME}
     IF    $existing != $None
         ${service_id}=          Get From Dictionary     ${existing}             id
         ${status_dict}=         Get From Dictionary     ${existing}             status
         ${status}=              Get From Dictionary     ${status_dict}          status
         Set Test Variable       ${TEST_AIM_ID}                         ${service_id}
-        IF    "${status}" == "Running"
+        ${profile_pinned}=      Get Variable Value      ${TEST_AIM_PROFILE_NAME}    ${EMPTY}
+        ${reusable}=            Evaluate                "${profile_pinned}" == ""
+        IF    ${reusable} and "${status}" == "Running"
             Log    AIM service ${service_id} already running, reusing    INFO
             RETURN
         END
-        ${is_starting}=         Evaluate                "${status}" in ("Pending", "Starting")
+        ${is_starting}=         Evaluate                ${reusable} and "${status}" in ("Pending", "Starting")
         IF    ${is_starting}
             Log    AIM service ${service_id} is ${status}, waiting for Running    INFO
             Wait for AIM workload to be running
             RETURN
         END
-        # Service in bad state (Failed, Degraded), undeploy and redeploy
-        Log    Existing AIM service ${service_id} is ${status}, removing and redeploying    WARN
+        # Bad state (Failed, Degraded), or a pinned profile that this service may not serve:
+        # undeploy and redeploy.
+        Log    Replacing AIM service ${service_id} (status ${status}, pinned profile '${profile_pinned}')    WARN
         Undeploy AIM            ${service_id}           ${namespace}            expected_status=any
         Wait for AIM workload to reach state    Deleted    timeout=60
     END
@@ -328,6 +591,62 @@ AIM is deployed and running
     # No usable service, deploy fresh and wait
     AIM is deployed
     Wait for AIM workload to be running
+
+AIM deployment is recreated with custom deployment name and running
+    [Documentation]    Recreates the current AIM deployment with an explicit display name
+    ...    provided by the user and waits for Running. Any existing service for the same
+    ...    model is undeployed first so the active deployment reflects that name.
+    ...    Requires: TEST_AIM_NAME
+    ...    Sets: TEST_AIM_ID, TEST_AIM_DEPLOY_DISPLAY_NAME
+    [Arguments]    ${display_name}
+    An AIM exists in system
+    ${namespace}=           Get Project Namespace
+    ${existing}=            Find Existing AIM Service    ${namespace}    ${TEST_AIM_NAME}
+    IF    $existing != $None
+        ${service_id}=          Get From Dictionary     ${existing}             id
+        VAR    ${TEST_AIM_ID}    ${service_id}    scope=TEST
+        Undeploy AIM            ${service_id}           ${namespace}            expected_status=any
+        Wait for AIM workload to reach state    Deleted    timeout=120
+    END
+    ${deploy_data}=         Valid AIM deploy data is prepared
+    Set To Dictionary       ${deploy_data}             displayName=${display_name}
+    ${response}=            Deploy AIM                 ${TEST_AIM_NAME}         ${deploy_data}    ${namespace}    expected_status=202
+    VAR    ${json}    ${response.json()}
+    ${service_id}=          Get From Dictionary        ${json}                  id
+    VAR    ${TEST_AIM_ID}    ${service_id}    scope=TEST
+    VAR    ${TEST_AIM_DEPLOY_DISPLAY_NAME}    ${display_name}    scope=TEST
+    Wait for AIM workload to be running
+
+AIM deployment is recreated without custom deployment name and running
+    [Documentation]    Recreates the current AIM deployment without an explicit
+    ...    custom deployment name and waits for Running.
+    ...    Requires: TEST_AIM_NAME
+    ...    Sets: TEST_AIM_ID, TEST_AIM_DEPLOY_DISPLAY_NAME
+    An AIM exists in system
+    ${namespace}=           Get Project Namespace
+    ${existing}=            Find Existing AIM Service    ${namespace}    ${TEST_AIM_NAME}
+    IF    $existing != $None
+        ${service_id}=          Get From Dictionary     ${existing}             id
+        VAR    ${TEST_AIM_ID}    ${service_id}    scope=TEST
+        Undeploy AIM            ${service_id}           ${namespace}            expected_status=any
+        Wait for AIM workload to reach state    Deleted    timeout=120
+    END
+    ${deploy_data}=         Valid AIM deploy data is prepared
+    ${response}=            Deploy AIM                 ${TEST_AIM_NAME}         ${deploy_data}    ${namespace}    expected_status=202
+    VAR    ${json}    ${response.json()}
+    ${service_id}=          Get From Dictionary        ${json}                  id
+    VAR    ${TEST_AIM_ID}    ${service_id}    scope=TEST
+    VAR    ${TEST_AIM_DEPLOY_DISPLAY_NAME}    ${EMPTY}    scope=TEST
+    Wait for AIM workload to be running
+
+An AIM served on CPU/EPYC is deployed and running
+    [Documentation]    Selects the smallest AIM with a CPU/EPYC profile (allowing HF-approval-gated
+    ...    families, since a CPU cluster's only servable model is often gated), pins that profile in
+    ...    the deploy request, then deploys it and waits for Running. Requires an HF token in the
+    ...    project (run `A HuggingFace token is available for AIM deployment` first). Sets:
+    ...    TEST_AIM_ID, TEST_AIM_PROFILE_NAME.
+    An AIM exists in system    profile_requirement=cpu
+    AIM is deployed and running
 
 Undeploy AIM request is sent
     [Documentation]    Sends request to undeploy an AIM.
@@ -550,24 +869,26 @@ AIM should have active workload deployment
     Should Not Be Equal     ${found_service}        ${None}                 msg=No active AIMService found for AIM ${resource_name}
 
 AIM should not have active workload deployment
-    [Documentation]    Verifies that the AIM does not have an active AIMService deployment
-    [Arguments]             ${resource_name}=${TEST_AIM_NAME}
-    ${namespace}=           Get Project Namespace
-    ${response}=            List AIM Services       ${namespace}            expected_status=200
-    ${services_data}=       Set Variable            ${response.json()}
-    ${services_list}=       Set Variable            ${services_data['data']}
+    [Documentation]    Verifies that the AIM does not have an active AIMService deployment.
+    ...    Undeploy is asynchronous and the agent can briefly re-publish an auto-discovered
+    ...    AIMService for a workload it is still tearing down, so poll for the steady state
+    ...    rather than reading the list once.
+    [Arguments]             ${resource_name}=${TEST_AIM_ID}
+    Wait Until Keyword Succeeds    2 min    5 sec
+    ...    No active AIMService for AIM    ${resource_name}
 
-    # Check that no service exists for this AIM model
-    ${found_service}=       Set Variable            ${None}
-    FOR    ${service}    IN    @{services_list}
-        ${model}=               Get From Dictionary     ${service['spec']}      model
-        ${model_name}=          Get From Dictionary     ${model}                name
-        IF    "${model_name}" == "${resource_name}"
-            ${found_service}=       Set Variable            ${service}
-            BREAK
-        END
-    END
-    Should Be Equal         ${found_service}        ${None}                 msg=Found unexpected AIMService for AIM ${resource_name}
+No active AIMService for AIM
+    [Documentation]    Single check that the undeployed workload's own AIMService is gone — for polling.
+    ...
+    ...    Queries the AIMService by its own id (the deploy response id, held in TEST_AIM_ID) rather
+    ...    than scanning the deployment list. Several tests in this suite deploy the same catalog
+    ...    model, so a list scan risks matching another test's surviving service — and the list is
+    ...    paginated, so the target could sit off the first page and read as absent. A direct by-id
+    ...    lookup returning 404 is unambiguous and page-count independent.
+    [Arguments]             ${resource_name}=${TEST_AIM_ID}
+    ${response}=            Get AIM Service By ID    ${resource_name}    expected_status=any
+    Should Be Equal As Integers    ${response.status_code}    404
+    ...    msg=Undeployed workload ${resource_name} still has an AIMService (HTTP ${response.status_code})
 
 Find Existing AIM Service
     [Documentation]    Finds an existing AIM service for a given model in a namespace.
@@ -602,14 +923,26 @@ AIM workload should exist in database
 Wait for AIM workload to reach state
     [Documentation]    Waits for the AIM workload to reach the specified status
     ...    Polls the workload status every 5 seconds for up to 20 minutes
+    ...    Gateway errors (502/503/504) are tolerated as transient control-plane blips and
+    ...    retried, but only until max_gateway_errors of them arrive back to back
     [Arguments]             ${target_state}         ${timeout}=1200         ${interval}=5
+    ...                     ${max_gateway_errors}=12
     Variable Should Exist                           ${TEST_AIM_ID}                         msg=TEST_AIM_ID is not set
     ${start_time}=          Evaluate                time.time()             modules=time
     ${end_time}=            Evaluate                ${start_time} + ${timeout}
+    VAR    ${gateway_errors}=               ${0}
+    VAR    ${consecutive_gateway_errors}=   ${0}
+    VAR    ${last_observation}=             no response received yet
 
     WHILE    True
         # Small delay before checking to prevent overwhelming the API
         Sleep                   ${interval}s
+
+        # Checked at the top so an expired deadline never buys another poll.
+        ${now}=                 Evaluate                time.time()             modules=time
+        IF    ${now} >= ${end_time}
+            Fail    Timeout waiting for AIM workload to reach ${target_state} status. Last observation: ${last_observation}. Gateway errors tolerated: ${gateway_errors}
+        END
 
         # Force session recreation to avoid connection pool issues
         Set Suite Variable      ${API_SESSION}          ${None}
@@ -621,6 +954,7 @@ Wait for AIM workload to reach state
         # If waiting for Deleted and got 404, the resource is gone - success!
         IF    $target_state == "Deleted" and ${response.status_code} == 404
             Log    AIM workload ${TEST_AIM_ID} successfully deleted (404)    INFO
+            Report tolerated gateway errors    ${gateway_errors}
             RETURN
         END
 
@@ -629,13 +963,45 @@ Wait for AIM workload to reach state
             Fail    AIM workload ${TEST_AIM_ID} was deleted unexpectedly
         END
 
+        # Tolerate control-plane blips: while the aiwb-api pod restarts or rolls, Envoy
+        # answers with a plain-text "upstream connect error ..." body that is not JSON, so
+        # parsing it would abort a run whose workload is progressing normally. Only gateway
+        # statuses are treated this way - a 500 means the API itself raised, which is a real
+        # failure and should surface now rather than after the full timeout. A backend that
+        # stays unreachable is caught by the consecutive cap, so a genuine outage still
+        # fails fast instead of masquerading as a slow deploy.
+        IF    ${response.status_code} in [502, 503, 504]
+            VAR    ${gateway_errors}=               ${gateway_errors + 1}
+            VAR    ${consecutive_gateway_errors}=   ${consecutive_gateway_errors + 1}
+            VAR    ${last_observation}=             HTTP ${response.status_code} from aiwb-api
+            IF    ${consecutive_gateway_errors} >= ${max_gateway_errors}
+                Fail    aiwb-api unreachable while waiting for AIM workload ${TEST_AIM_ID} to reach ${target_state} status: ${consecutive_gateway_errors} consecutive gateway errors (last: HTTP ${response.status_code})
+            END
+            Log    Transient ${response.status_code} from aiwb-api while polling AIM status, retrying (${consecutive_gateway_errors}/${max_gateway_errors} consecutive, ${gateway_errors} total)    WARN
+            CONTINUE
+        END
+
+        # Any parseable response means the backend is back - only unbroken runs of gateway
+        # errors indicate an outage.
+        VAR    ${consecutive_gateway_errors}=   ${0}
+
+        # Every remaining error status - a 500 from the API itself above all - is a real
+        # failure. Report it with its status and body instead of falling through to a
+        # .json() that raises JSONDecodeError on a plain-text error page.
+        IF    ${response.status_code} >= 400
+            ${body}=    Evaluate    $response.text[:500]
+            Fail    aiwb-api returned HTTP ${response.status_code} while waiting for AIM workload ${TEST_AIM_ID} to reach ${target_state} status. Body: ${body}
+        END
+
         ${json}=                Set Variable            ${response.json()}
         ${status_dict}=         Get From Dictionary     ${json}                 status
         ${status}=              Get From Dictionary     ${status_dict}          status
+        VAR    ${last_observation}=    status '${status}'
         Log    DEBUG: status='${status}', target='${target_state}', status_dict='${status_dict}'    level=INFO
 
         # Check if workload reached target state
         IF    $status == $target_state
+            Report tolerated gateway errors    ${gateway_errors}
             RETURN
         END
 
@@ -644,12 +1010,40 @@ Wait for AIM workload to reach state
             Fail                    AIM workload ${TEST_AIM_ID} failed to start. Status: ${status}
         END
 
-        # Check timeout
-        ${current_time}=        Evaluate                time.time()             modules=time
-        IF    ${current_time} >= ${end_time}
-            Fail                    Timeout waiting for AIM workload to reach ${target_state} status. Last status: ${status}
+        # Fail fast on terminal pod states (broken image / crash-loop). The AIMService
+        # status can sit at Pending/Deploying while the pod is in ImagePullBackOff, so
+        # without this a missing image would wait out the full timeout.
+        IF    $target_state != "Deleted"
+            ${meta}=    Get From Dictionary    ${json}    metadata
+            ${aim_name}=    Get From Dictionary    ${meta}    name
+            ${aim_ns}=    Get From Dictionary    ${meta}    namespace
+            AIM pods should not be in a terminal image or crash state    ${aim_name}    ${aim_ns}
         END
     END
+
+Report tolerated gateway errors
+    [Documentation]    Surfaces swallowed gateway errors on an otherwise green wait, so a run
+    ...    that rode out a flapping backend is distinguishable from a clean one without
+    ...    digging through the log.
+    [Arguments]    ${gateway_errors}
+    IF    ${gateway_errors} > 0
+        Log    AIM status poll succeeded after tolerating ${gateway_errors} gateway error(s) from aiwb-api    WARN
+    END
+
+AIM pods should not be in a terminal image or crash state
+    [Documentation]    Fail fast when the AIM's pods are stuck in a terminal image or
+    ...    crash state (ImagePullBackOff, ErrImagePull, InvalidImageName,
+    ...    CrashLoopBackOff, CreateContainerConfigError) so a broken image fails the
+    ...    test in seconds instead of waiting out the full deploy timeout. Pods of a
+    ...    superseded ReplicaSet are ignored — see the library keyword for why.
+    ...    Best-effort, degrading two different ways. Pods unlistable: the check is
+    ...    skipped entirely. ReplicaSets unlistable: the check narrows — pods with no
+    ...    ReplicaSet owner are still judged and can still fail it, since nothing can
+    ...    supersede them, while owned pods are passed over. A degraded run never
+    ...    invents a failure, but a missing fail-fast means "could not tell", not
+    ...    "pods are healthy". Both cases are logged at DEBUG level.
+    [Arguments]    ${name}    ${namespace}
+    AIM Pods Should Not Be In A Terminal State    ${name}    ${namespace}
 
 Wait for AIM workload to be running
     [Documentation]    Waits for the AIM workload to reach Running status (backward compatibility)
@@ -688,6 +1082,8 @@ AIM workload should be accessible externally
     Set Test Variable    ${TEST_API_KEYS}    ${api_keys_list}
     Api key exists for user
     Api key is assigned to AIMS model
+    Key assignment should succeed
+    Api key binding should take effect    host=${external_host}
     ${models}=              List models from external endpoint              ${external_host}        ${TEST_AIM_ID}    ${TEST_API_KEY_VALUE}
     Should Be True          isinstance($models, list)                       msg=Models data should be a list
     ${model_count}=         Get Length              ${models}
@@ -1000,8 +1396,40 @@ AIM service should have version info
     END
 
 The project has GPU quota available
-    [Documentation]    Ensures the project has enough GPU quota to deploy an AIM service.
-    project quota is set to    gpu_count=2
+    [Documentation]    Ensures the project has enough quota for the selected deployable AIM.
+    An AIM exists in system
+    Set project quota for model GPU count    ${TEST_AIM_GPU_COUNT}
+
+The project has GPU quota for that AIM
+    [Documentation]    Sizes quota for a model a scenario already chose, for selections narrower
+    ...    than the smallest deployable one.
+    ...    Requires: TEST_AIM_GPU_COUNT
+    Set project quota for model GPU count    ${TEST_AIM_GPU_COUNT}
+
+The project has runtime-override quota available
+    [Documentation]    Reserves the two-GPU footprint requested by runtime profile override tests.
+    An AIM exists in system
+    Set project quota for model GPU count    ${2}
+
+The project has CPU-only quota available
+    [Documentation]    Reserves a GPU-free footprint sized for a single CPU/EPYC-served AIM. Does not
+    ...    select a model: the CPU serving footprint is fixed core/memory headroom, and model
+    ...    selection needs the HF token that a later Given step provides.
+    project quota is set to
+    ...    gpu_count=${CPU_ONLY_GPU_COUNT}
+    ...    cpu_milli_cores=${CPU_ONLY_QUOTA_CPU_MILLICORES}
+    ...    memory_bytes=${CPU_ONLY_QUOTA_MEMORY_BYTES}
+    ...    ephemeral_storage_bytes=${CPU_ONLY_QUOTA_EPHEMERAL_BYTES}
+
+Set project quota for model GPU count
+    [Documentation]    Sizes project GPU, CPU, and memory quota for one or more model workloads.
+    [Arguments]    ${gpu_count}
+    ${gpu_count}    ${cpu_milli_cores}    ${memory_bytes}=    Get Model Resource Quota
+    ...    ${gpu_count}
+    project quota is set to
+    ...    gpu_count=${gpu_count}
+    ...    cpu_milli_cores=${cpu_milli_cores}
+    ...    memory_bytes=${memory_bytes}
 
 AIM workload details should include profile information
     [Documentation]    Verifies that the AIM service's resolved profile exposes accessible profile
@@ -1033,7 +1461,7 @@ AIM workload details should include profile information
     ...    msg=Resolved profile '${profile_name}' not found in catalog profiles
 
     # Verify profile spec carries the fields the UI displays. v1alpha2 hoists
-    # accelerator/metric/precision/type to spec (ADR 006b §1); the v1alpha1
+    # accelerator/metric/precision/type to spec; the v1alpha1
     # status.profile.metadata.* shape no longer exists.
     ${spec}=                Get From Dictionary     ${profile_entry}        spec
 
@@ -1201,7 +1629,7 @@ AIMService CR should have runtime profile overrides in kubernetes
     ${spec}=    Get From Dictionary    ${cr}    spec
     ${profile}=    Get From Dictionary    ${spec}    profile
     ${selector}=    Get From Dictionary    ${profile}    selector
-    Should Be Equal    ${selector}[precision]    fp8
+    Should Be Equal    ${selector}[precision]    fp4
     ...    msg=CR spec.profile.selector.precision should match deploy request
     Should Be Equal    ${selector}[acceleratorModel]    MI300X
     ...    msg=CR spec.profile.selector.acceleratorModel should match deploy request
@@ -1223,6 +1651,100 @@ AIMService CR should have runtime profile overrides in kubernetes
     ...    msg=CR spec.profileOverrides.containerEnv[0].name should match deploy request
     Should Be Equal    ${container_env}[0][value]    bar
     ...    msg=CR spec.profileOverrides.containerEnv[0].value should match deploy request
+
+The deployment should honor the maximum LoRA adapter rank
+    [Documentation]    Verifies the deployment the engine reconciles carries the chosen ceiling on
+    ...    spec.adapterRuntime.maxRank.
+    [Arguments]    ${expected_rank}
+    ${cr}=    The deployed AIMService CR
+    Should Be Equal As Integers
+    ...    ${cr}[spec][adapterRuntime][maxRank]
+    ...    ${expected_rank}
+    ...    msg=The AIM deployment should record the selected maximum LoRA rank on adapterRuntime.maxRank
+
+The deployment should leave the maximum LoRA adapter rank to the serving runtime
+    [Documentation]    An operator who named no ceiling gets none written onto the deployment, so
+    ...    the runtime's own configured limit is what applies. A value appearing here would be one
+    ...    the platform chose for them, and it would outlive any later change to that default.
+    ${cr}=    The deployed AIMService CR
+    Dictionary Should Not Contain Key    ${cr}[spec]    adapterRuntime
+    ...    msg=A deployment that named no rank ceiling should carry no adapterRuntime, got: ${cr}[spec]
+
+The deploy should have been refused
+    [Documentation]    Shared by the rank refusals below: each is decided on the request itself, so
+    ...    none of them may reach the point of creating a deployment.
+    ...    Requires: TEST_RESPONSE.
+    Should Be Equal As Integers    ${TEST_RESPONSE.status_code}    422
+    ...    msg=Expected the deploy to be refused, got ${TEST_RESPONSE.status_code}: ${TEST_RESPONSE.text}
+
+The deploy should be refused as a rank spelled as an engine argument
+    [Documentation]    Guards against the engine flag being honoured alongside the field that
+    ...    carries the same value, and against a refusal that sends the operator to a field without
+    ...    saying what it needs -- one refusal has to name the field, the ranks it takes and the
+    ...    adapter mode it needs, or moving the value across earns a second refusal.
+    The deploy should have been refused
+    Should Contain    ${TEST_RESPONSE.text}    max-lora-rank
+    ...    msg=Refusal should name the engine argument at fault, got: ${TEST_RESPONSE.text}
+    Should Contain    ${TEST_RESPONSE.text}    use the maxLoraRank field instead
+    ...    msg=Refusal should point at the field that carries the value, got: ${TEST_RESPONSE.text}
+    Should Contain    ${TEST_RESPONSE.text}    under adapterMode 'dynamic'
+    ...    msg=Refusal should name the adapter mode the field needs, got: ${TEST_RESPONSE.text}
+
+The deploy should be refused as an unsupported rank
+    [Documentation]    Guards against a rank the serving runtime cannot honour being accepted, and
+    ...    against a refusal that withholds the ranks it can -- the operator would have to consult
+    ...    the engine's own documentation to correct the value.
+    The deploy should have been refused
+    Should Contain    ${TEST_RESPONSE.text}    maxLoraRank
+    ...    msg=Refusal should name the field at fault, got: ${TEST_RESPONSE.text}
+    Should Contain    ${TEST_RESPONSE.text}    512
+    ...    msg=Refusal should list the ranks the deployment can serve, got: ${TEST_RESPONSE.text}
+
+The deploy should be refused as a rank outside dynamic adapter serving
+    [Documentation]    Guards against a ceiling being accepted onto a deployment that derives its
+    ...    own from the adapters it declares, where it would be silently ignored.
+    The deploy should have been refused
+    Should Contain    ${TEST_RESPONSE.text}    maxLoraRank
+    ...    msg=Refusal should name the field at fault, got: ${TEST_RESPONSE.text}
+    Should Contain    ${TEST_RESPONSE.text}    requires adapterMode 'dynamic'
+    ...    msg=Refusal should say which adapter mode the rank needs, got: ${TEST_RESPONSE.text}
+
+The deploy should be refused as a rank that is not a whole number
+    [Documentation]    Without this refusal the deployment would come up at whichever supported
+    ...    rank the value passed for, without ever saying so.
+    The deploy should have been refused
+    Should Contain    ${TEST_RESPONSE.text}    maxLoraRank
+    ...    msg=Refusal should name the field at fault, got: ${TEST_RESPONSE.text}
+    Should Contain    ${TEST_RESPONSE.text}    must be an integer
+    ...    msg=Refusal should say the rank has to be a whole number, got: ${TEST_RESPONSE.text}
+
+The deployed AIMService CR
+    [Documentation]    Reads the deployment the engine reconciles, rather than the API's echo of
+    ...    the request. Requires: TEST_AIM_ID.
+    Variable Should Exist    ${TEST_AIM_ID}    msg=TEST_AIM_ID is not set
+    ${response}=    Get AIM Service By ID    ${TEST_AIM_ID}    expected_status=200
+    VAR    ${data}    ${response.json()}
+    VAR    ${name}    ${data}[metadata][name]
+    VAR    ${namespace}    ${data}[metadata][namespace]
+    ${result}=    Run Process    kubectl    get    aimservices    ${name}
+    ...    -n    ${namespace}    -o    json    stderr=PIPE
+    Should Be Equal As Integers    ${result.rc}    0
+    ...    msg=kubectl get aimservices failed: ${result.stderr}
+    ${cr}=    Evaluate    json.loads(r'''${result.stdout}''')    modules=json
+    RETURN    ${cr}
+
+The deployment details should report the maximum LoRA adapter rank
+    [Documentation]    The rank ceiling the operator chose is readable back from the deployment
+    ...    details, so they can confirm what the deployment will serve without reaching for the
+    ...    cluster.
+    [Arguments]    ${expected_rank}
+    Variable Should Exist    ${TEST_AIM_ID}    msg=TEST_AIM_ID is not set
+    ${response}=    Get AIM Service By ID    ${TEST_AIM_ID}    expected_status=200
+    VAR    ${data}    ${response.json()}
+    Should Be Equal As Integers
+    ...    ${data}[spec][adapterRuntime][maxRank]
+    ...    ${expected_rank}
+    ...    msg=Deployment details should report the maximum LoRA rank the operator chose
 
 AIMService CR should pin namespace profile for model in kubernetes
     [Documentation]    When a Ready namespace AIMProfile exists, fine-tuned deploy pins
@@ -1417,6 +1939,29 @@ The running inference pod should use image "${expected_image}"
     Wait Until Keyword Succeeds    2 min    10 sec
     ...    Inference Pod Should Use Image    ${name}    ${namespace}    ${expected_image}
 
+The running inference pod should use image pull secret "${secret_name}"
+    [Documentation]    Asserts the live inference pod was given the named registry credential,
+    ...    the on-pod proof that a pull secret chosen at deploy time reached the model server.
+    ...    Waits for Running first because the predictor pod only exists once scheduled.
+    ...    Requires: TEST_AIM_ID.
+    Wait for AIM workload to be running
+    ${name}    ${namespace}=    Resolve deployed inference service
+    Wait Until Keyword Succeeds    2 min    10 sec
+    ...    Inference Pod Should Use Image Pull Secrets    ${name}    ${namespace}    ${secret_name}
+
+The selected model has no deployment in the project
+    [Documentation]    Undeploys any existing deployment of the selected model so a deployment
+    ...    created next can be identified unambiguously. Other scenarios in the same suite
+    ...    leave the model deployed for reuse.
+    ...    Requires: TEST_AIM_NAME
+    ${namespace}=    Get Project Namespace
+    ${existing}=    Find Existing AIM Service    ${namespace}    ${TEST_AIM_NAME}
+    IF    $existing != $None
+        VAR    ${TEST_AIM_ID}    ${existing}[id]    scope=TEST
+        Undeploy AIM    ${TEST_AIM_ID}    ${namespace}    expected_status=any
+        Wait for AIM workload to reach state    Deleted    timeout=120
+    END
+
 The running inference pod should request ${expected_count:\d+} accelerators
     [Documentation]    Asserts the live inference container requests the expected
     ...    accelerator count via its resource limits. Requires: TEST_AIM_ID.
@@ -1432,13 +1977,26 @@ The running inference pod should run on "${product}" accelerators
     Wait Until Keyword Succeeds    2 min    10 sec
     ...    Inference Pod Should Be Scheduled On Accelerator    ${name}    ${namespace}    ${product}
 
-The running inference pod should expose env "${name}" set to "${value}"
-    [Documentation]    Asserts the live inference container exposes the given env var —
-    ...    the on-pod proof that an engine/container env override reached the model
-    ...    server. Requires: TEST_AIM_ID.
+The AIM should be served on CPU/EPYC hardware
+    [Documentation]    Proves the deployed AIM requests no GPU and is scheduled on the accelerator
+    ...    model declared by the selected CPU profile (for example EPYC_9965), using the pod's node
+    ...    selector/affinity or the scheduled node's labels. Requires: TEST_AIM_ID,
+    ...    TEST_AIM_ACCELERATOR_MODEL.
+    ${name}    ${namespace}=    Resolve deployed inference service
+    Wait Until Keyword Succeeds    2 min    10 sec
+    ...    Inference Pod Should Request No Accelerators    ${name}    ${namespace}
+    Should Not Be Empty    ${TEST_AIM_ACCELERATOR_MODEL}
+    ...    msg=Selected CPU profile did not report an acceleratorModel
+    Wait Until Keyword Succeeds    2 min    10 sec
+    ...    Inference Pod Should Be Scheduled On Accelerator    ${name}    ${namespace}    ${TEST_AIM_ACCELERATOR_MODEL}
+
+The running inference pod should use engine env "${name}" set to "${value}"
+    [Documentation]    Asserts the live inference runtime uses the given engine env var —
+    ...    the on-pod proof that an engine env override reached the model server through
+    ...    the runtime contract selected by the deployed image. Requires: TEST_AIM_ID.
     ${service_name}    ${namespace}=    Resolve deployed inference service
     Wait Until Keyword Succeeds    2 min    10 sec
-    ...    Inference Pod Should Carry Env    ${service_name}    ${namespace}    ${name}    ${value}
+    ...    Inference Pod Should Use Engine Env    ${service_name}    ${namespace}    ${name}    ${value}
 
 The running inference pod should run with engine argument "${value}"
     [Documentation]    Asserts the given engine argument appears in the live inference
@@ -1469,14 +2027,24 @@ Historical inference deployments are listed
     ...    never emits the Deleted status, so this surfaces the database rows only.
     ...    Sets: TEST_RESPONSE
     ${namespace}=    Get Project Namespace
-    ${response}=    List AIM Services    ${namespace}    expected_status=any    status_filter=Deleted
+    ${response}=    List AIM Services    ${namespace}    expected_status=any    status_filter=Deleted    page_size=100
     VAR    ${TEST_RESPONSE}    ${response}    scope=TEST
 
 Historical list should include the undeployed AIM
     [Documentation]    Verifies the historical inference list contains the previously
     ...    deployed AIM marked as Deleted.
-    ...    Requires: TEST_AIM_ID, TEST_RESPONSE
+    ...    Undeploy is asynchronous and the service passes through Deleting before it
+    ...    reaches Deleted, so poll — re-listing each attempt — rather than judging the
+    ...    single response captured right after the undeploy call returned.
+    ...    Requires: TEST_AIM_ID
     Variable Should Exist    ${TEST_AIM_ID}    msg=TEST_AIM_ID is not set
+    Wait Until Keyword Succeeds    2 min    5 sec
+    ...    Historical list contains the undeployed AIM
+
+Historical list contains the undeployed AIM
+    [Documentation]    Single check of the historical list, re-listing so that polling
+    ...    observes fresh state. Requires: TEST_AIM_ID    Sets: TEST_RESPONSE
+    Historical inference deployments are listed
     Should Be Equal As Integers    ${TEST_RESPONSE.status_code}    200
     ...    msg=Historical list request should succeed, got ${TEST_RESPONSE.status_code}: ${TEST_RESPONSE.text}
     VAR    ${body}    ${TEST_RESPONSE.json()}
@@ -1515,32 +2083,46 @@ Chat-capable list should include the running AIM
     ...    msg=Running AIM ${TEST_AIM_ID} should appear in chat-capable inference list
 
 A request metric is requested for the deployed AIM
-    [Documentation]    Requests the 'requests' inference metric for the deployed AIM.
+    [Documentation]    Requests the 'requests' inference metric for the deployed AIM over a
+    ...    nominal recent window. The metric endpoint requires a start/end range, so a 1-hour
+    ...    window ending now is passed (matching the AI-gateway metric caller).
     ...    Requires: TEST_AIM_ID
     ...    Sets: TEST_RESPONSE
     Variable Should Exist    ${TEST_AIM_ID}    msg=TEST_AIM_ID is not set
     ${namespace}=    Get Project Namespace
-    ${response}=    Get AIM Service Metric    ${TEST_AIM_ID}    requests    ${namespace}    expected_status=any
+    # start and end are required query params on the metrics endpoint, so omitting them is a
+    # 422 before the metric is ever read. Ask for the window the deployment has just lived in.
+    ${end}=    Get Current Date    time_zone=UTC    result_format=%Y-%m-%dT%H:%M:%SZ
+    ${start}=    Get Current Date    time_zone=UTC    increment=-1 hour    result_format=%Y-%m-%dT%H:%M:%SZ
+    &{params}=    Create Dictionary    start=${start}    end=${end}
+    ${response}=    Get AIM Service Metric    ${TEST_AIM_ID}    requests    ${namespace}
+    ...    expected_status=any    params=${params}
     VAR    ${TEST_RESPONSE}    ${response}    scope=TEST
 
+Inference metrics are polled until the collector reports a value
+    [Documentation]    When-step action: poll a fresh metric request until the asynchronous
+    ...    collector / Prometheus scrape produces a value (a scalar number including 0, or a
+    ...    timeseries with at least one non-null datapoint). Re-issues the request each attempt —
+    ...    retrying an assertion against one all-null response would never observe a later scrape —
+    ...    and leaves the successful response in TEST_RESPONSE for the Then step. Sets: TEST_RESPONSE.
+    Wait Until Keyword Succeeds    5 min    10 sec    Inference metric request should return a scraped value
+
+Inference metric request should return a scraped value
+    [Documentation]    One poll attempt: issue a fresh metric request and require a scraped value.
+    A request metric is requested for the deployed AIM
+    Metric response should be a successful scraped value
+
 Inference metric response should contain a value
-    [Documentation]    Verifies the inference metric response carries a payload. All three
-    ...    response shapes (MetricsScalar, MetricsScalarWithRange, MetricsTimeseries) wrap
-    ...    their payload under the 'data' key; scalars expose a number (including 0/0.0),
-    ...    timeseries a non-empty list.
+    [Documentation]    Then-step verification: the last polled metric response succeeded and carries
+    ...    a scraped value. Requires: TEST_RESPONSE (set by the When poll step).
+    Metric response should be a successful scraped value
+
+Metric response should be a successful scraped value
+    [Documentation]    Shared predicate for the metric poll attempt and the Then assertion, so the
+    ...    two can never drift apart. Requires: TEST_RESPONSE.
     Should Be Equal As Integers    ${TEST_RESPONSE.status_code}    200
     ...    msg=Metric request should succeed, got ${TEST_RESPONSE.status_code}: ${TEST_RESPONSE.text}
-    VAR    ${body}    ${TEST_RESPONSE.json()}
-    Dictionary Should Contain Key    ${body}    data
-    ...    msg=Metric response should contain a 'data' field; got: ${body}
-    VAR    ${data}    ${body}[data]
-    Should Not Be Equal    ${data}    ${None}
-    ...    msg=Metric response 'data' should not be null; got: ${body}
-    ${is_list}=    Evaluate    isinstance($data, list)
-    IF    ${is_list}
-        Should Not Be Empty    ${data}
-        ...    msg=Metric response 'data' list should not be empty; got: ${body}
-    END
+    Metric Response Should Carry A Scraped Value    ${TEST_RESPONSE.json()}
 
 Inference replicas are requested for the deployed AIM
     [Documentation]    Requests per-replica pod data for the deployed AIM via the inference router.
@@ -1598,6 +2180,7 @@ An API key exists and is assigned to AIM
     # Assign to AIM
     Api key is assigned to AIMS model
     Key assignment should succeed
+    Api key binding should take effect
 
 AIM autoscaling policy is configured
     [Documentation]    Configures autoscaling policy and waits for the AIM to stabilize.

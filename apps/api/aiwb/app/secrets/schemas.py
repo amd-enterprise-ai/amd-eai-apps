@@ -56,7 +56,12 @@ class SecretCreate(BaseModel):
         examples=["hf-token", "openai-api-key"],
     )
     data: dict[str, str] = Field(
-        description="Secret data as key-value pairs; values must be valid for the Kubernetes Secret `data` field (for example, base64-encoded strings) and are passed through without modification",
+        description=(
+            "Secret data as key-value pairs; values must be valid for the Kubernetes Secret `data` field "
+            "(for example, base64-encoded strings) and are passed through without modification. "
+            "Keys follow the camelCase API convention. For an S3 use case, include an access key and a "
+            "secret key under an accepted alias (e.g. accessKeyId / secretAccessKey), optionally an endpoint."
+        ),
         examples=[{"token": "aGZfeHh4eHh4eHh4eHh4eA=="}],
     )
     use_case: SecretUseCase | None = Field(default=None, description="Optional use case classification for the secret")

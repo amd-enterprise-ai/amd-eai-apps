@@ -1,0 +1,55 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# The authz binary only reads Secrets and InferenceServices to authorize requests. Splitting it from
+# the controller lets it drop every write permission the reconciler needs (SecurityPolicies,
+# Deployments, Services, Roles, ReferenceGrants, InferencePools, leases): a data-path authenticator
+# that can be reached from the network should not be able to mutate cluster state. This is a
+# read-only ServiceAccount, ClusterRole, and binding, separate from the controller's.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-authz-sa
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}-authz
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: authz
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-authz
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}-authz
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: authz
+rules:
+  # Read the per-key API-key Secrets to match a presented key against a model's bound membership.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+
+  # Read managed InferenceServices to resolve a model name to its backend workload ids.
+  - apiGroups: ["serving.kserve.io"]
+    resources: ["inferenceservices"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-authz
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}-authz
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: authz
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-authz
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-authz-sa
+    namespace: {{ .Release.Namespace }}

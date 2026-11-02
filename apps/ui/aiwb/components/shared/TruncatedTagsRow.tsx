@@ -81,12 +81,7 @@ export const TruncatedTagsRow = ({
       className={`flex flex-nowrap gap-1 overflow-hidden min-w-0 ${className}`.trim()}
     >
       {visibleTags.map((tag) => (
-        <Chip
-          key={tag}
-          variant="bordered"
-          size="sm"
-          classNames={{ base: 'flex-shrink-0' }}
-        >
+        <Chip key={tag} variant="flat" size="sm" className="flex-shrink-0">
           {tag}
         </Chip>
       ))}
@@ -95,14 +90,14 @@ export const TruncatedTagsRow = ({
           content={
             <div className="flex flex-wrap gap-1 py-1">
               {remainingTags.map((tag) => (
-                <Chip key={tag} variant="bordered" size="sm">
+                <Chip key={tag} variant="flat" size="sm">
                   {tag}
                 </Chip>
               ))}
             </div>
           }
         >
-          <Chip variant="light" size="sm" className="cursor-help shrink-0">
+          <Chip variant="tertiary" size="sm" className="cursor-help shrink-0">
             {formatMoreCount(remainingCount)}
           </Chip>
         </Tooltip>

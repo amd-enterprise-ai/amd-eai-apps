@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MIT
 
 # Build stage
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o agent ./cmd/agent && \
     CGO_ENABLED=0 GOOS=linux go build -o webhook ./cmd/webhooks && \
     CGO_ENABLED=0 GOOS=linux go build -o cleanup ./cmd/cleanup
 
-FROM alpine:3.23
+FROM alpine:3.24
 
 COPY --from=builder /app/agent /agent
 COPY --from=builder /app/webhook /webhook

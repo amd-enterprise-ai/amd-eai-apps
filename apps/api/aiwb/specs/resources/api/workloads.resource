@@ -6,7 +6,7 @@
 Documentation       Low-level keywords for AIWB workloads endpoints.
 ...                 Provides API operations for the polymorphic read-only workloads view.
 ...                 Mutations (deletion, chat) and capability-specific filters were moved
-...                 to capability routers (inference, fine-tuning, workspaces) in EAI-6313.
+...                 to capability routers (inference, fine-tuning, workspaces).
 ...                 Uses project-scoped endpoints: /projects/{project}/workloads/
 ...                 The project identifier maps 1:1 to the underlying workbench namespace,
 ...                 so the `namespace` kwarg below holds the project value.

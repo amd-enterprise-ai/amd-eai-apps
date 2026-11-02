@@ -170,7 +170,7 @@ describe('Projects', () => {
     });
 
     const addButton = screen.getByLabelText(
-      'detail.projectsAndRoles.projects.actions.add',
+      'detail.projectsAndRoles.projects.actions.add.title',
     );
 
     fireEvent.click(addButton);
@@ -193,7 +193,7 @@ describe('Projects', () => {
     });
 
     const deleteButton = screen.getByLabelText(
-      'detail.projectsAndRoles.projects.actions.delete',
+      'detail.projectsAndRoles.projects.actions.delete.title',
     );
     fireEvent.click(deleteButton);
 
@@ -215,7 +215,7 @@ describe('Projects', () => {
     });
 
     const deleteButton = screen.getByLabelText(
-      'detail.projectsAndRoles.projects.actions.delete',
+      'detail.projectsAndRoles.projects.actions.delete.title',
     );
     fireEvent.click(deleteButton);
 
@@ -252,7 +252,7 @@ describe('Projects', () => {
     });
 
     const deleteButton = screen.getByLabelText(
-      'detail.projectsAndRoles.projects.actions.delete',
+      'detail.projectsAndRoles.projects.actions.delete.title',
     );
     fireEvent.click(deleteButton);
 
@@ -286,7 +286,7 @@ describe('Projects', () => {
     );
 
     const addButton = screen.getByLabelText(
-      'detail.projectsAndRoles.projects.actions.add',
+      'detail.projectsAndRoles.projects.actions.add.title',
     ) as HTMLInputElement;
 
     expect(addButton.disabled).toBeTruthy();
@@ -304,7 +304,7 @@ describe('Projects', () => {
     });
 
     const addButton = screen.getByLabelText(
-      'detail.projectsAndRoles.projects.actions.add',
+      'detail.projectsAndRoles.projects.actions.add.title',
     );
 
     fireEvent.click(addButton);
@@ -314,23 +314,19 @@ describe('Projects', () => {
     );
     expect(modalTitle[0]).toBeInTheDocument();
 
-    const selectComponent = screen.queryAllByText(
-      'detail.projectsAndRoles.projects.form.project.label',
-    );
-    expect(selectComponent[0]).toBeInTheDocument();
-
-    mockedProjects.forEach((project, idx) => {
-      if (idx === 0) {
-        expect(selectComponent[0].querySelectorAll('Admin Group').length).toBe(
-          0,
-        );
-        return;
-      }
-
-      expect(
-        selectComponent[0].querySelectorAll('option')[idx].textContent,
-      ).toBe(project.name);
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /detail.projectsAndRoles.projects.form.project.label/,
+        }),
+      );
     });
+
+    expect(screen.getByRole('option', { name: 'Group 2' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Group 3' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('option', { name: 'Admin Group' }),
+    ).not.toBeInTheDocument();
   });
 
   it('calls addUsersToProjectAPI with the correct value when the third option is selected and confirmed', async () => {
@@ -345,22 +341,20 @@ describe('Projects', () => {
     });
 
     const addButton = screen.getByLabelText(
-      'detail.projectsAndRoles.projects.actions.add',
+      'detail.projectsAndRoles.projects.actions.add.title',
     );
 
     fireEvent.click(addButton);
 
-    const selectTrigger = screen.getAllByLabelText(
-      'detail.projectsAndRoles.projects.form.project.label',
-    );
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /detail.projectsAndRoles.projects.form.project.label/,
+        }),
+      );
+    });
 
-    expect(selectTrigger[1]).toBeInTheDocument();
-
-    fireEvent.click(selectTrigger[1]);
-
-    const selectOption = screen.getAllByText('Group 3');
-
-    fireEvent.click(selectOption[1]);
+    fireEvent.click(screen.getByRole('option', { name: 'Group 3' }));
 
     const confirmButton = screen.getByText(
       'detail.projectsAndRoles.projects.actions.add.confirm',
@@ -394,21 +388,20 @@ describe('Projects', () => {
     });
 
     const addButton = screen.getByLabelText(
-      'detail.projectsAndRoles.projects.actions.add',
+      'detail.projectsAndRoles.projects.actions.add.title',
     );
 
     fireEvent.click(addButton);
 
-    const selectTrigger = screen.getAllByLabelText(
-      'detail.projectsAndRoles.projects.form.project.label',
-    );
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /detail.projectsAndRoles.projects.form.project.label/,
+        }),
+      );
+    });
 
-    expect(selectTrigger[1]).toBeInTheDocument();
-    fireEvent.click(selectTrigger[1]);
-
-    const selectOption = screen.getAllByText('Group 3');
-
-    fireEvent.click(selectOption[1]);
+    fireEvent.click(screen.getByRole('option', { name: 'Group 3' }));
 
     const confirmButton = screen.getByText(
       'detail.projectsAndRoles.projects.actions.add.confirm',

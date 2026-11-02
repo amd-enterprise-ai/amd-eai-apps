@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { SelectItem, ManagedForm } from '@amdenterpriseai/components';
 import {
   act,
   fireEvent,
@@ -10,442 +9,318 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
-import { z, ZodType } from 'zod';
 import { vi } from 'vitest';
 
-import { HuggingFaceTokenSelector } from '@/components/shared/HuggingFaceTokenSelector';
-import { HuggingFaceTokenData } from '@/types/secrets';
+import {
+  HuggingFaceTokenSelector,
+  HuggingFaceTokenSelectorLabels,
+  HuggingFaceTokenSelectorProps,
+} from '@/components/shared/HuggingFaceTokenSelector/HuggingFaceTokenSelector';
 
-// Mock useTranslation
-vi.mock('next-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string) => key,
-  }),
-}));
+const VALID_HF_TOKEN = 'hf_abcdefghijklmnopqrstuvwxyz123456';
 
-const formSchema: ZodType<HuggingFaceTokenData> = z.object({
-  selectedToken: z.string().optional(),
-  name: z.string().optional(),
-  token: z.string().optional(),
-});
+const defaultLabels: HuggingFaceTokenSelectorLabels = {
+  selectLabel: 'Hugging Face token',
+  selectPlaceholder: 'Select a token',
+  addNewItemLabel: 'Add new token',
+  dialogTitle: 'Add Hugging Face token',
+  dialogNameLabel: 'Name',
+  dialogNamePlaceholder: 'my-hf-token',
+  dialogTokenLabel: 'Token',
+  dialogTokenPlaceholder: 'hf_...',
+  dialogCancelLabel: 'Cancel',
+  dialogSubmitLabel: 'Add',
+  validation: {
+    nameRequired: 'Name is required when entering a new token',
+    invalidSecretName:
+      "The secret name must be lowercase alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character",
+    tokenRequired: 'Token is required when entering a new token',
+    invalidTokenFormat:
+      "Please enter a valid Hugging Face token (starts with 'hf_')",
+    duplicateName: 'A secret with this name already exists.',
+  },
+};
 
-const mockExistingTokens = [
-  { id: 'token-1', displayName: 'Production Token' },
-  { id: 'token-2', displayName: 'Development Token' },
+const existingTokens = [
+  { name: 'token-1-hf', displayName: 'token-1-hf' },
+  { name: 'token-2-hf', displayName: 'token-2-hf' },
 ];
 
-const renderHuggingFaceTokenSelector = (
-  existingTokens: {
-    id: string;
-    displayName: string;
-  }[] = mockExistingTokens,
-  formProps: Partial<
-    React.ComponentProps<typeof ManagedForm<HuggingFaceTokenData>>
-  > = {},
+const renderSelector = (
+  overrides: Partial<HuggingFaceTokenSelectorProps> = {},
 ) => {
-  const defaultFormProps = {
-    onFormSuccess: vi.fn(),
-    validationSchema: formSchema,
-    defaultValues: { selectedToken: '', name: '', token: '' },
-  };
+  const onChange = vi.fn();
+  const onCreateToken = vi.fn(
+    async ({ displayName }: { displayName: string }) => ({
+      secretName: displayName,
+    }),
+  );
 
-  return render(
-    <ManagedForm<HuggingFaceTokenData>
-      {...defaultFormProps}
-      {...formProps}
-      renderFields={(form) => (
-        <HuggingFaceTokenSelector form={form} existingTokens={existingTokens} />
-      )}
+  render(
+    <HuggingFaceTokenSelector
+      value={null}
+      onChange={onChange}
+      existingTokens={existingTokens}
+      onCreateToken={onCreateToken}
+      labels={defaultLabels}
+      {...overrides}
     />,
   );
+
+  return { onChange, onCreateToken };
+};
+
+const openDropdown = async () => {
+  const trigger = screen.getByRole('button', { name: /Hugging Face token/i });
+  await act(async () => {
+    fireEvent.click(trigger);
+  });
+};
+
+const clickAddNew = async () => {
+  await waitFor(() => {
+    expect(screen.getByTestId('hf-token-selector-add-new')).toBeInTheDocument();
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('hf-token-selector-add-new'));
+  });
+  await waitFor(() => {
+    expect(screen.getByText('Add Hugging Face token')).toBeInTheDocument();
+  });
+};
+
+const fillCreateForm = async (name: string, token: string) => {
+  fireEvent.change(screen.getByTestId('hf-token-selector-dialog-name'), {
+    target: { value: name },
+  });
+  fireEvent.change(screen.getByTestId('hf-token-selector-dialog-token'), {
+    target: { value: token },
+  });
 };
 
 describe('HuggingFaceTokenSelector', () => {
-  describe('Rendering', () => {
-    it('renders both tabs when existing tokens are available', () => {
-      renderHuggingFaceTokenSelector();
-
-      expect(
-        screen.getByText('huggingFaceTokenDrawer.fields.selectExisting'),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText('huggingFaceTokenDrawer.fields.addNew'),
-      ).toBeInTheDocument();
-    });
-
-    it('renders with "Select existing" tab active by default when tokens exist', () => {
-      renderHuggingFaceTokenSelector();
-
-      const selectTokenTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.selectExisting/i,
-      });
-      expect(selectTokenTab).toHaveAttribute('aria-selected', 'true');
-    });
-
-    it('renders with "Add new" tab active by default when no tokens exist', () => {
-      renderHuggingFaceTokenSelector([]);
-
-      const addNewTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.addNew/i,
-      });
-      expect(addNewTab).toHaveAttribute('aria-selected', 'true');
-    });
-
-    it('disables "Select existing" tab when no tokens exist', () => {
-      renderHuggingFaceTokenSelector([]);
-
-      const selectTokenTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.selectExisting/i,
-      });
-      expect(selectTokenTab).toHaveAttribute('aria-disabled', 'true');
-    });
-
-    it('renders dropdown when "Select existing" tab is active', () => {
-      renderHuggingFaceTokenSelector();
-
-      expect(
-        screen.getByRole('button', {
-          name: /huggingFaceTokenDrawer.fields.selectToken.label/i,
-        }),
-      ).toBeInTheDocument();
-    });
-
-    it('renders input fields when "Add new" tab is active', () => {
-      renderHuggingFaceTokenSelector();
-
-      const addNewTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.addNew/i,
-      });
-      fireEvent.click(addNewTab);
-
-      expect(
-        screen.getByLabelText(/huggingFaceTokenDrawer.fields.name.label/i),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByLabelText(/huggingFaceTokenDrawer.fields.token.label/i),
-      ).toBeInTheDocument();
+  // jsdom has no `CSS.supports`; simulate a browser that supports
+  // `-webkit-text-security` so the token field's password-manager-prompt
+  // avoidance (via PasswordInput's `preventPasswordManagerPrompt`) behaves
+  // as it does in Chrome/Safari.
+  beforeEach(() => {
+    vi.stubGlobal('CSS', {
+      ...(globalThis.CSS ?? {}),
+      supports: vi.fn().mockReturnValue(true),
     });
   });
 
-  describe('Tab Switching', () => {
-    it('switches from "Select existing" to "Add new" when clicking Add new tab', async () => {
-      renderHuggingFaceTokenSelector();
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
-      const addNewTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.addNew/i,
-      });
-      fireEvent.click(addNewTab);
+  it('renders the select with the configured label and placeholder', () => {
+    renderSelector();
+    expect(screen.getAllByText('Hugging Face token').length).toBeGreaterThan(0);
+    expect(screen.getByText('Select a token')).toBeInTheDocument();
+  });
 
-      await waitFor(() => {
-        expect(
-          screen.getByLabelText(/huggingFaceTokenDrawer.fields.name.label/i),
-        ).toBeInTheDocument();
-        expect(
-          screen.getByLabelText(/huggingFaceTokenDrawer.fields.token.label/i),
-        ).toBeInTheDocument();
-      });
+  it('lists existing tokens and the add-new action in bottom content', async () => {
+    renderSelector();
+    await openDropdown();
 
+    await waitFor(() => {
+      expect(screen.getAllByText('token-1-hf').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('token-2-hf').length).toBeGreaterThan(0);
       expect(
-        screen.queryByRole('button', {
-          name: /huggingFaceTokenDrawer.fields.selectToken.label/i,
-        }),
-      ).not.toBeInTheDocument();
-    });
-
-    it('switches from "Add new" to "Select existing" when clicking Select existing tab', async () => {
-      renderHuggingFaceTokenSelector();
-
-      const addNewTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.addNew/i,
-      });
-      fireEvent.click(addNewTab);
-
-      await waitFor(() => {
-        expect(
-          screen.getByLabelText(/huggingFaceTokenDrawer.fields.name.label/i),
-        ).toBeInTheDocument();
-      });
-
-      const selectExistingTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.selectExisting/i,
-      });
-      fireEvent.click(selectExistingTab);
-
-      await waitFor(() => {
-        expect(
-          screen.getByRole('button', {
-            name: /huggingFaceTokenDrawer.fields.selectToken.label/i,
-          }),
-        ).toBeInTheDocument();
-      });
-
-      expect(
-        screen.queryByLabelText(/huggingFaceTokenDrawer.fields.name.label/i),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.queryByLabelText(/huggingFaceTokenDrawer.fields.token.label/i),
-      ).not.toBeInTheDocument();
-    });
-
-    it('clears manual input fields when switching to "Select existing" tab', async () => {
-      const onFormSuccess = vi.fn();
-      renderHuggingFaceTokenSelector(mockExistingTokens, {
-        onFormSuccess,
-        showSubmitButton: true,
-        submitButtonText: 'Submit',
-      });
-
-      const addNewTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.addNew/i,
-      });
-      fireEvent.click(addNewTab);
-
-      await waitFor(() => {
-        expect(
-          screen.getByLabelText(/huggingFaceTokenDrawer.fields.name.label/i),
-        ).toBeInTheDocument();
-      });
-
-      const nameInput = screen.getByLabelText(
-        /huggingFaceTokenDrawer.fields.name.label/i,
-      );
-      const tokenInput = screen.getByLabelText(
-        /huggingFaceTokenDrawer.fields.token.label/i,
-      );
-
-      fireEvent.change(nameInput, { target: { value: 'Test Token' } });
-      fireEvent.change(tokenInput, { target: { value: 'hf_testtoken123' } });
-
-      const selectExistingTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.selectExisting/i,
-      });
-      fireEvent.click(selectExistingTab);
-
-      await waitFor(() => {
-        const addNewTabAgain = screen.getByRole('tab', {
-          name: /huggingFaceTokenDrawer.fields.addNew/i,
-        });
-        fireEvent.click(addNewTabAgain);
-      });
-
-      await waitFor(() => {
-        const clearedNameInput = screen.getByLabelText(
-          /huggingFaceTokenDrawer.fields.name.label/i,
-        );
-        const clearedTokenInput = screen.getByLabelText(
-          /huggingFaceTokenDrawer.fields.token.label/i,
-        );
-        expect(clearedNameInput).toHaveValue('');
-        expect(clearedTokenInput).toHaveValue('');
-      });
-    });
-
-    it('clears selected token when switching to "Add new" tab', async () => {
-      renderHuggingFaceTokenSelector();
-
-      const selectButton = screen.getByRole('button', {
-        name: /huggingFaceTokenDrawer.fields.selectToken.label/i,
-      });
-      fireEvent.click(selectButton);
-
-      await waitFor(() => {
-        expect(
-          screen.getByRole('option', { name: 'Production Token' }),
-        ).toBeInTheDocument();
-      });
-
-      const productionTokenOption = screen.getByRole('option', {
-        name: 'Production Token',
-      });
-      fireEvent.click(productionTokenOption);
-
-      // Wait for dropdown to close
-      await waitFor(() => {
-        expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
-      });
-
-      const addNewTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.addNew/i,
-      });
-      fireEvent.click(addNewTab);
-
-      const selectExistingTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.selectExisting/i,
-      });
-      fireEvent.click(selectExistingTab);
-
-      await waitFor(() => {
-        const selectButtonAgain = screen.getByRole('button', {
-          name: /huggingFaceTokenDrawer.fields.selectToken.label/i,
-        });
-        expect(selectButtonAgain).toBeInTheDocument();
-      });
+        screen.getByTestId('hf-token-selector-add-new'),
+      ).toBeInTheDocument();
+      expect(screen.getByText('Add new token')).toBeInTheDocument();
     });
   });
 
-  describe('Form Interactions', () => {
-    it('allows typing in Name field when in "Add new" mode', async () => {
-      renderHuggingFaceTokenSelector();
+  it('opens the add-new popover when the bottom action is clicked', async () => {
+    renderSelector();
+    await openDropdown();
+    await clickAddNew();
 
-      const addNewTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.addNew/i,
-      });
-      fireEvent.click(addNewTab);
-
-      await waitFor(() => {
-        expect(
-          screen.getByLabelText(/huggingFaceTokenDrawer.fields.name.label/i),
-        ).toBeInTheDocument();
-      });
-
-      const nameInput = screen.getByLabelText(
-        /huggingFaceTokenDrawer.fields.name.label/i,
-      );
-      fireEvent.change(nameInput, { target: { value: 'My New Token' } });
-
-      expect(nameInput).toHaveValue('My New Token');
-    });
-
-    it('allows typing in Token field when in "Add new" mode', async () => {
-      renderHuggingFaceTokenSelector();
-
-      const addNewTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.addNew/i,
-      });
-      fireEvent.click(addNewTab);
-
-      await waitFor(() => {
-        expect(
-          screen.getByLabelText(/huggingFaceTokenDrawer.fields.token.label/i),
-        ).toBeInTheDocument();
-      });
-
-      const tokenInput = screen.getByLabelText(
-        /huggingFaceTokenDrawer.fields.token.label/i,
-      );
-      fireEvent.change(tokenInput, { target: { value: 'hf_abc123' } });
-
-      expect(tokenInput).toHaveValue('hf_abc123');
-    });
-
-    it('allows selecting from dropdown when in "Select existing" mode', async () => {
-      renderHuggingFaceTokenSelector();
-
-      const selectButton = screen.getByRole('button', {
-        name: /huggingFaceTokenDrawer.fields.selectToken.label/i,
-      });
-      fireEvent.click(selectButton);
-
-      await waitFor(() => {
-        expect(
-          screen.getByRole('option', { name: 'Production Token' }),
-        ).toBeInTheDocument();
-      });
-
-      const productionTokenOption = screen.getByRole('option', {
-        name: 'Production Token',
-      });
-      fireEvent.click(productionTokenOption);
-
-      await waitFor(() => {
-        const selectButtonAfterSelection = screen.getByRole('button', {
-          name: /huggingFaceTokenDrawer.fields.selectToken.label/i,
-        });
-        expect(selectButtonAfterSelection.textContent).toContain(
-          'Production Token',
-        );
-      });
+    expect(screen.getByText('Add Hugging Face token')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('hf-token-selector-dialog-name')).toHaveFocus();
     });
   });
 
-  describe('Derived State Behavior', () => {
-    it('stays in "Add new" mode when Name field has value', async () => {
-      renderHuggingFaceTokenSelector();
+  it('never renders the token field as a native password input, so the browser cannot offer to save it', async () => {
+    renderSelector();
+    await openDropdown();
+    await clickAddNew();
 
-      const addNewTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.addNew/i,
-      });
-      fireEvent.click(addNewTab);
+    const tokenInput = screen.getByTestId('hf-token-selector-dialog-token');
+    expect(tokenInput).not.toHaveAttribute('type', 'password');
+    expect(tokenInput).toHaveAttribute('type', 'text');
+  });
 
-      await waitFor(() => {
-        expect(
-          screen.getByLabelText(/huggingFaceTokenDrawer.fields.name.label/i),
-        ).toBeInTheDocument();
-      });
+  it('submits a new token, auto-selects it, and closes the popover on success', async () => {
+    const onCreateToken = vi.fn(
+      async ({ displayName }: { displayName: string }) => ({
+        secretName: displayName,
+      }),
+    );
+    const onChange = vi.fn();
 
-      const nameInput = screen.getByLabelText(
-        /huggingFaceTokenDrawer.fields.name.label/i,
-      );
-      fireEvent.change(nameInput, { target: { value: 'Test' } });
+    render(
+      <HuggingFaceTokenSelector
+        value={null}
+        onChange={onChange}
+        existingTokens={existingTokens}
+        onCreateToken={onCreateToken}
+        labels={defaultLabels}
+      />,
+    );
 
+    await openDropdown();
+    await clickAddNew();
+    await fillCreateForm('my-new-token', VALID_HF_TOKEN);
+
+    await waitFor(() => {
       expect(
-        screen.getByLabelText(/huggingFaceTokenDrawer.fields.name.label/i),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByLabelText(/huggingFaceTokenDrawer.fields.token.label/i),
-      ).toBeInTheDocument();
+        screen.getByTestId('hf-token-selector-dialog-submit'),
+      ).not.toBeDisabled();
     });
 
-    it('stays in "Add new" mode when Token field has value', async () => {
-      renderHuggingFaceTokenSelector();
-
-      const addNewTab = screen.getByRole('tab', {
-        name: /huggingFaceTokenDrawer.fields.addNew/i,
-      });
-      fireEvent.click(addNewTab);
-
-      await waitFor(() => {
-        expect(
-          screen.getByLabelText(/huggingFaceTokenDrawer.fields.token.label/i),
-        ).toBeInTheDocument();
-      });
-
-      const tokenInput = screen.getByLabelText(
-        /huggingFaceTokenDrawer.fields.token.label/i,
-      );
-      fireEvent.change(tokenInput, { target: { value: 'hf_test' } });
-
-      expect(
-        screen.getByLabelText(/huggingFaceTokenDrawer.fields.name.label/i),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByLabelText(/huggingFaceTokenDrawer.fields.token.label/i),
-      ).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('hf-token-selector-dialog-submit'));
     });
 
-    it('stays in "Select existing" mode when a token is selected', async () => {
-      renderHuggingFaceTokenSelector();
-
-      const selectButton = screen.getByRole('button', {
-        name: /huggingFaceTokenDrawer.fields.selectToken.label/i,
+    await waitFor(() => {
+      expect(onCreateToken).toHaveBeenCalledWith({
+        displayName: 'my-new-token',
+        token: VALID_HF_TOKEN,
       });
-      fireEvent.click(selectButton);
+      expect(onChange).toHaveBeenCalledWith('my-new-token');
+    });
+    expect(
+      screen.queryByTestId('hf-token-selector-dialog-name'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('hf-token-selector-add-new'),
+    ).not.toBeInTheDocument();
+  });
 
-      await waitFor(() => {
-        expect(
-          screen.getByRole('option', { name: 'Production Token' }),
-        ).toBeInTheDocument();
-      });
+  it('shows an error message and stays open when create fails', async () => {
+    const onCreateToken = vi
+      .fn<HuggingFaceTokenSelectorProps['onCreateToken']>()
+      .mockRejectedValue(new Error('Server rejected'));
 
-      const productionTokenOption = screen.getByRole('option', {
-        name: 'Production Token',
-      });
-      fireEvent.click(productionTokenOption);
+    renderSelector({ onCreateToken });
 
-      await waitFor(() => {
-        expect(
-          screen.getByRole('button', {
-            name: /huggingFaceTokenDrawer.fields.selectToken.label/i,
-          }),
-        ).toBeInTheDocument();
-      });
+    await openDropdown();
+    await clickAddNew();
+    await fillCreateForm('broken', VALID_HF_TOKEN);
 
+    await waitFor(() => {
       expect(
-        screen.queryByLabelText(/huggingFaceTokenDrawer.fields.name.label/i),
+        screen.getByTestId('hf-token-selector-dialog-submit'),
+      ).not.toBeDisabled();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('hf-token-selector-dialog-submit'));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('Server rejected');
+      expect(screen.getByText('Add Hugging Face token')).toBeInTheDocument();
+    });
+  });
+
+  it('disables submit until the schema is valid', async () => {
+    renderSelector();
+
+    await openDropdown();
+    await clickAddNew();
+
+    const submit = screen.getByTestId('hf-token-selector-dialog-submit');
+    expect(submit).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId('hf-token-selector-dialog-name'), {
+      target: { value: 'name-only' },
+    });
+    expect(submit).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId('hf-token-selector-dialog-token'), {
+      target: { value: 'hf_x' },
+    });
+    expect(submit).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId('hf-token-selector-dialog-token'), {
+      target: { value: VALID_HF_TOKEN },
+    });
+    await waitFor(() => {
+      expect(submit).not.toBeDisabled();
+    });
+  });
+
+  it('shows token format error for invalid tokens', async () => {
+    renderSelector();
+
+    await openDropdown();
+    await clickAddNew();
+    await fillCreateForm('my-new-token', 'not-a-token');
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(defaultLabels.validation.invalidTokenFormat),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByTestId('hf-token-selector-dialog-submit'),
+    ).toBeDisabled();
+  });
+
+  it('shows duplicate name error for existing display names', async () => {
+    renderSelector();
+
+    await openDropdown();
+    await clickAddNew();
+    await fillCreateForm('token-1-hf', VALID_HF_TOKEN);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(defaultLabels.validation.duplicateName),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByTestId('hf-token-selector-dialog-submit'),
+    ).toBeDisabled();
+  });
+
+  it('does not dismiss the popover when clicking outside', async () => {
+    renderSelector();
+
+    await openDropdown();
+    await clickAddNew();
+
+    await act(async () => {
+      fireEvent.mouseDown(document.body);
+      fireEvent.click(document.body);
+    });
+
+    expect(screen.getByText('Add Hugging Face token')).toBeInTheDocument();
+  });
+
+  it('closes the popover and reopens the select when Cancel is pressed', async () => {
+    renderSelector();
+
+    await openDropdown();
+    await clickAddNew();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('hf-token-selector-dialog-name'),
       ).not.toBeInTheDocument();
       expect(
-        screen.queryByLabelText(/huggingFaceTokenDrawer.fields.token.label/i),
-      ).not.toBeInTheDocument();
+        screen.getByTestId('hf-token-selector-add-new'),
+      ).toBeInTheDocument();
     });
   });
 });

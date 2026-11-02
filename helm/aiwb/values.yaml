@@ -107,6 +107,18 @@ backend:
   polling:
     syncerPollingIntervalSeconds: 5
     syncerPendingTimeoutSeconds: 60
+  # Reclaim the object storage, API keys and credentials a deleted project leaves behind.
+  # Opt-in: what it removes cannot be restored, and it decides what is abandoned by comparing
+  # timestamps, so it is for an operator to enable deliberately. Left disabled, nothing is
+  # scheduled.
+  deletedProjectCleanup:
+    enabled: false
+    intervalSeconds: 3600
+    # Data is only credited to a previous holder of a project name once it predates that name's
+    # current namespace by this much. It guards a comparison between the API pod's clock and the
+    # Kubernetes API server's, so raise it where those may drift; lowering it makes reclamation
+    # quicker to act after a name is reused, and quicker to get that wrong.
+    skewMarginSeconds: 3600
   # Dataset Configuration
   datasets:
     maxFileSizeMB: 100
@@ -140,15 +152,35 @@ frontend:
     targetPort: 8000
   resources:
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: 2000m
+      memory: 4Gi
     requests:
       cpu: 100m
-      memory: 128Mi
+      memory: 512Mi
   imagePullSecrets: []
   nextAuthSecretName: "aiwb-nextauth-secret"
 
-# Keycloak/OIDC configuration
+# OIDC login. Any issuer works. An empty value derives from the keycloak block
+# below, so an installation with Keycloak needs no change here.
+oidc:
+  # The public issuer URL: the browser goes there, and the tokens carry it as
+  # `iss`. Example: https://auth.example.com
+  issuer: ""
+  # The issuer URL as the Pods reach it, when the public name does not resolve
+  # inside the cluster. Example: http://dex.dex.svc.cluster.local:5556
+  internalUrl: ""
+  clientId: ""
+  # Secret in the release namespace with the client secret under the key `value`.
+  secretName: ""
+  # The JWKS URL as the API reaches it. Required when issuer or internalUrl
+  # is set, because the chart knows the JWKS path of Keycloak only.
+  jwksUrl: ""
+  # The audience the API requires in the access token. Empty: not checked.
+  audience: ""
+  # The scopes the UI asks for. Empty: "openid profile email".
+  scopes: ""
+
+# Keycloak as the OIDC issuer. Gives the defaults of the oidc block.
 keycloak:
   url: "http://keycloak.keycloak.svc.cluster.local:8080"
   internalUrl: "http://keycloak.keycloak.svc.cluster.local:8080"
@@ -159,19 +191,42 @@ keycloak:
 # MinIO (or compatible S3 object storage provider) configuration
 minio:
   url: "http://filer-s3.seaweedfs-instance.svc.cluster.local:80"
+  # Signs presigned URLs for callers outside the cluster, which cannot resolve the service name
+  # above. Defaults to the seaweed.<appDomain> convention the SeaweedFS environments publish.
+  # Set it explicitly on any other object store -- no chart here creates that route.
+  externalUrl: ""
   bucket: "default-bucket"
   credentialsSecretName: "minio-credentials"
   accessKeyKey: "minio-access-key"
   secretKeyKey: "minio-secret-key"
 
-# ClusterAuth configuration (for API key management and AIM access control)
-# Set enabled: false to disable cluster-auth integration. When disabled:
-#   - AIMs deploy without access restrictions (no cluster-auth/allowed-group annotation)
-#   - API key endpoints return 503 Service Unavailable
-clusterAuth:
+# SECURITY: with cluster-auth removed, this chart no longer applies any access control to AIM
+# serving routes. Per-AIM inference routes on the workloads host are UNAUTHENTICATED unless the
+# workloads gateway is separately configured default-deny with per-model API-key auth. Do not
+# deploy this to an environment lacking that gateway-side enforcement.
+# TODO: drop this note once native workloads-path apiKeyAuth enforcement is in place.
+
+# API-keys feature flag. Gates the API-keys page/menu in the UI. The page also
+# hides when openBao.enabled is false, because there is no key store then.
+apiKeysManagement:
   enabled: true
-  url: "http://cluster-auth.cluster-auth.svc.cluster.local:8081"
-  secretName: "cluster-auth-admin-token"
+
+# OpenBao/ESO API-key store — the sole API-key path.
+openBao:
+  # Install-time choice. With enabled false the chart renders no OpenBao
+  # configuration and needs no token Secret; the API refuses to create, rebind
+  # or delete API keys and the UI hides the API-key page. Do not disable it on
+  # an installation that already has API keys: the API refuses to start until
+  # the keys are deleted with OpenBao enabled. Set openbaoToken.enabled in the
+  # aiwb-external-secrets chart to the same value.
+  enabled: true
+  url: "http://openbao.cf-openbao.svc.cluster.local:8200"
+  kvMount: "secrets"
+  secretStoreRef: "openbao-secret-store"
+  # k8s Secret (AIWB namespace) holding the scoped write token (apikeys-write-policy), materialized
+  # by the aiwb-external-secrets chart from the cluster-forge-minted secrets/aiwb-openbao-token.
+  secretName: "aiwb-openbao-token"
+  secretKey: "value"
 
 # AI Gateway feature flag.
 # When enabled, the API key metrics view is shown in the UI (the chart icon
@@ -203,8 +258,34 @@ prometheus:
 aim:
   clusterRuntimeConfigName: "default"
   pvcHeadroomPercent: 100
+  # Runtime fallbacks the AIM operator uses to generate profiles for
+  # modelId-backed models on matching cluster hardware; image-backed catalog
+  # models never consult them. Set to [] to generate no fallback profiles.
+  profileGenerationFallbacks:
+    - name: nvidia-vllm
+      priority: 10
+      type: unoptimized
+      autoSelectionPolicy: any
+      match:
+        acceleratorVendor: nvidia
+        acceleratorType: gpu
+      runtime:
+        image: vllm/vllm-openai:v0.17.1-cu130
+        engine: vllm
+        engineArgs:
+          max-model-len: 8192
+          gpu-memory-utilization: 0.9
   routing:
     enabled: true
+    # Request timeout applied to every generated AIM serving HTTPRoute (pinned to
+    # the hostnames below, which default to workloads.<appDomain>). Sized for
+    # long-running inference including batch speech-to-text transcription, which
+    # can run far longer than a chat completion.
+    # Multipart audio uploads stream through this route — the workloads ext_authz
+    # authorizes on the request path and never buffers the body — so this timeout,
+    # not a request-body-size buffer, is the ceiling that matters for large audio
+    # requests. A hard per-route upload-size cap would have to live on the
+    # AIM-engine-generated route itself; see the routing notes in helm/INSTALL.md.
     requestTimeout: "30m"
     # Hostnames to pin generated inference HTTPRoutes to a single Gateway
     # listener, preventing them from attaching to every listener on the parent

@@ -28,7 +28,7 @@ Test Teardown       Close test browser
 
 *** Test Cases ***
 # =============================================================================
-# Dashboard Layout (EAI-2374)
+# Dashboard Layout
 # =============================================================================
 
 Dashboard displays overview and workloads sections
@@ -44,8 +44,19 @@ Dashboard displays overview and workloads sections
     Then dashboard should display the overview section
     And dashboard should display the workloads section
 
+Shared component labels on the dashboard show readable text
+    [Documentation]    Verify that shared chart controls show human-readable labels
+    ...                instead of untranslated key strings.
+    [Tags]    ui    dashboard    i18n    shared-components    smoke
+
+    Given a ready project with user access exists
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    And user is on the dashboard page
+    Then the chart time range control should be labeled for selection
+
 # =============================================================================
-# Dashboard Stats (EAI-2374)
+# Dashboard Stats
 # =============================================================================
 
 Dashboard shows workload stats and counts
@@ -65,7 +76,7 @@ Dashboard shows workload stats and counts
     And dashboard should show workloads table
 
 # =============================================================================
-# Project Navigation (EAI-2374)
+# Project Navigation
 # =============================================================================
 
 Switching projects updates dashboard content

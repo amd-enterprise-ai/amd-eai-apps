@@ -37,3 +37,9 @@ spec:
       {{- end }}
     pathTemplate: "{.metadata.namespace}/{.metadata.labels['{{ .Values.metadataPrefix.eaiApps }}/workload-id']}"
     requestTimeout: {{ .Values.aim.routing.requestTimeout }}
+  {{- with .Values.aim.profileGenerationFallbacks }}
+  model:
+    profileGeneration:
+      fallbacks:
+        {{- toYaml . | nindent 8 }}
+  {{- end }}

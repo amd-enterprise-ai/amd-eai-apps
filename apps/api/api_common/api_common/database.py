@@ -105,10 +105,25 @@ async def session_scope() -> AsyncGenerator[AsyncSession]:
         yield session
         await session.commit()
     except Exception:
-        await session.rollback()
+        # Never let a failing rollback replace the error that caused it — the original
+        # exception is what the caller needs to see. Log instead of discarding: a
+        # rollback that cannot complete usually means the connection is already broken,
+        # which is a pool-health signal worth surfacing.
+        #
+        # Unlike the test fixture's teardown, this does not invalidate() the connection
+        # on a failed rollback: the production engine uses a pooled QueuePool with
+        # pool_pre_ping, so a broken connection is detected and discarded on next
+        # checkout rather than needing to be force-invalidated here.
+        try:
+            await session.rollback()
+        except Exception:
+            logger.exception("Failed to roll back database session")
         raise
     finally:
-        await session.close()
+        try:
+            await session.close()
+        except Exception:
+            logger.exception("Failed to close database session")
 
 
 async def get_session() -> AsyncGenerator[AsyncSession]:

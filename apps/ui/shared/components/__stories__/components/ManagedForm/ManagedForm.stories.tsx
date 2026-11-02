@@ -12,6 +12,7 @@ import { FormNumberInput } from '../../../src/ManagedForm/FormNumberInput';
 import { FormPasswordInput } from '../../../src/ManagedForm/FormPasswordInput';
 import { FormSelect } from '../../../src/ManagedForm/FormSelect';
 import { FormSlider } from '../../../src/ManagedForm/FormSlider';
+import { FormSliderNumberInput } from '../../../src/ManagedForm/FormSliderNumberInput';
 import { FormFileUpload } from '../../../src/ManagedForm/FormFileUpload/FormFileUpload';
 import type { FormField } from '@amdenterpriseai/types';
 import { SelectItem } from '@amdenterpriseai/components';
@@ -47,7 +48,7 @@ export const FormFieldComponentWithFormOnly: Story = () => {
 
   return (
     <div className="flex flex-col gap-4 max-w-md">
-      <p className="text-small text-default-500">
+      <p className="text-sm text-muted">
         Pass only <code>form</code> to FormFieldComponent; register and
         errorMessage are derived. Fill the fields and submit to see the payload
         below.
@@ -71,7 +72,7 @@ export const FormFieldComponentWithFormOnly: Story = () => {
         )}
       />
       {lastSubmit && (
-        <pre className="text-tiny p-3 bg-default-100 rounded-lg overflow-auto">
+        <pre className="text-xs p-3 bg-default rounded-lg overflow-auto">
           {JSON.stringify(lastSubmit, null, 2)}
         </pre>
       )}
@@ -103,7 +104,7 @@ export const ConditionalFieldExcludedFromSubmit: Story = () => {
 
   return (
     <div className="flex flex-col gap-4 max-w-md">
-      <p className="text-small text-default-500">
+      <p className="text-sm text-muted">
         With <code>shouldUnregister: true</code>, only mounted fields are in the
         submit payload. Toggle the category FormSelect off, then submit — the
         payload below will not include <code>category</code>.
@@ -137,7 +138,7 @@ export const ConditionalFieldExcludedFromSubmit: Story = () => {
       />
       <button
         type="button"
-        className="px-3 py-1.5 text-small rounded-md bg-default-200 hover:bg-default-300"
+        className="px-3 py-1.5 text-sm rounded-md bg-default-hover hover:bg-default-hover"
         onClick={() => setShowCategory((prev) => !prev)}
       >
         {showCategory
@@ -145,7 +146,7 @@ export const ConditionalFieldExcludedFromSubmit: Story = () => {
           : 'Show category (FormSelect)'}
       </button>
       {lastSubmit && (
-        <pre className="text-tiny p-3 bg-default-100 rounded-lg overflow-auto">
+        <pre className="text-xs p-3 bg-default rounded-lg overflow-auto">
           {JSON.stringify(lastSubmit, null, 2)}
         </pre>
       )}
@@ -188,7 +189,7 @@ export const BasicWithSubmitPayload: Story = () => {
         )}
       />
       {lastSubmit && (
-        <pre className="text-tiny p-3 bg-default-100 rounded-lg overflow-auto">
+        <pre className="text-xs p-3 bg-default rounded-lg overflow-auto">
           {JSON.stringify(lastSubmit, null, 2)}
         </pre>
       )}
@@ -206,6 +207,7 @@ type AllInputsFormData = {
   password: string;
   choice: string;
   volume: number;
+  cpuCores: number;
   attachment?: File | FileList | null;
 };
 
@@ -215,6 +217,7 @@ const allInputsSchema: ZodType<AllInputsFormData> = z.object({
   password: z.string().min(6, 'Min 6 characters'),
   choice: z.string().min(1, 'Pick one'),
   volume: z.number().min(0).max(100),
+  cpuCores: z.number().min(0).max(85),
   attachment: z.any().optional(),
 });
 
@@ -223,9 +226,10 @@ export const FormInputComponentsShowcase: Story = () => {
 
   return (
     <div className="flex flex-col gap-4 max-w-md">
-      <p className="text-small text-default-500">
+      <p className="text-sm text-muted">
         Example usage of each Form* component: FormInput, FormNumberInput,
-        FormPasswordInput, FormSelect, FormSlider, FormFileUpload.
+        FormPasswordInput, FormSelect, FormSlider, FormSliderNumberInput,
+        FormFileUpload.
       </p>
       <ManagedForm<AllInputsFormData>
         showSubmitButton
@@ -238,6 +242,7 @@ export const FormInputComponentsShowcase: Story = () => {
           password: '',
           choice: '',
           volume: 50,
+          cpuCores: 14,
           attachment: null,
         }}
         renderFields={(form) => (
@@ -291,6 +296,20 @@ export const FormInputComponentsShowcase: Story = () => {
               description="0–100"
             />
 
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium">
+                CPU cores (FormSliderNumberInput)
+              </span>
+              <FormSliderNumberInput<AllInputsFormData>
+                form={form}
+                name="cpuCores"
+                aria-label="CPU cores"
+                minValue={0}
+                maxValue={85}
+                step={1}
+              />
+            </div>
+
             {/* FormFileUpload — single or multiple files */}
             <FormFileUpload<AllInputsFormData>
               form={form}
@@ -303,7 +322,7 @@ export const FormInputComponentsShowcase: Story = () => {
         )}
       />
       {lastSubmit && (
-        <pre className="text-tiny p-3 bg-default-100 rounded-lg overflow-auto max-h-48">
+        <pre className="text-xs p-3 bg-default rounded-lg overflow-auto max-h-48">
           {JSON.stringify(
             {
               ...lastSubmit,

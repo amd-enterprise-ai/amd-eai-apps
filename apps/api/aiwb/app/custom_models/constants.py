@@ -13,8 +13,7 @@ from ..config import AIWB_METADATA_PREFIX, EAI_APPS_METADATA_PREFIX
 
 # HuggingFace lives on a single host; the API base and the set of accepted
 # source hostnames both derive from it, so the host string is defined in
-# exactly one place. (Weight blobs are fetched via huggingface_hub, which
-# resolves its own URLs, so no resolve-base constant is needed.)
+# exactly one place.
 HF_HOST = "huggingface.co"
 HF_API_BASE = f"https://{HF_HOST}/api/models"
 
@@ -23,50 +22,30 @@ SOURCE_URI_ANNOTATION = f"{EAI_APPS_METADATA_PREFIX}/source-uri"
 REVISION_ANNOTATION = f"{EAI_APPS_METADATA_PREFIX}/revision"
 
 MODEL_DISPLAY_NAME_ANNOTATION = f"{AIWB_METADATA_PREFIX}/model-display-name"
+PROFILE_DISPLAY_NAME_ANNOTATION = f"{AIWB_METADATA_PREFIX}/profile-display-name"
 CANONICAL_REPO_ID_ANNOTATION = f"{AIWB_METADATA_PREFIX}/canonical-repo-id"
 SOURCE_SHA_ANNOTATION = f"{AIWB_METADATA_PREFIX}/source-sha"
 SOURCE_DESCRIPTION_ANNOTATION = f"{AIWB_METADATA_PREFIX}/source-description"
 SOURCE_TAGS_ANNOTATION = f"{AIWB_METADATA_PREFIX}/source-tags"
 
-# Workbench-owned annotations tracking the HuggingFace-to-S3 weight import. The
-# AIMModel status subresource is owned by aim-engine, so the import pipeline
-# records its state in annotations AIWB controls. import-state holds an
-# OnboardPhase value (Importing/Ready/Failed); import-error the last failure
-# message.
+# Chosen precision; CRD prunes it from overrides.
+MODEL_PRECISION_ANNOTATION = f"{AIWB_METADATA_PREFIX}/precision"
+
+# Reserved profile identifier that resolves to a model's engine-created Default
+# AIMProfileSet, so clients need not carry the generated `<model>-profiles-<hash>`
+# name. The real resource name is always returned as `resourceName`.
+DEFAULT_PROFILE_ALIAS = "default"
+
+# Workbench-owned import annotations kept for backward compatibility with
+# previously onboarded records. The active onboarding flow now points model
+# sources directly at hf:// or user-provided s3:// URIs, but these fields are
+# still read when present to preserve legacy phase/error semantics.
 IMPORT_STATE_ANNOTATION = f"{AIWB_METADATA_PREFIX}/import-state"
 IMPORT_ERROR_ANNOTATION = f"{AIWB_METADATA_PREFIX}/import-error"
 
 HF_REQUEST_TIMEOUT = httpx.Timeout(connect=5.0, read=25.0, write=10.0, pool=5.0)
 
 HF_MAX_RESPONSE_BYTES = 1 * 1024 * 1024
-
-# Non-runtime repo files excluded from the HF-to-S3 import (fnmatch globs, matched
-# against the full repo path). Deliberately conservative: it drops only documentation,
-# licensing, VCS, CI, and media files that inference never loads. It does NOT exclude
-# by weight format or extension, so runtime-critical assets a curated allow-list would
-# miss — sharded ``*.safetensors.index.json``, ``.bin``/``.pth`` weights, custom
-# ``modeling_*.py`` for trust_remote_code models, unusually named tokenizer files —
-# are still imported.
-WEIGHT_IMPORT_IGNORE_PATTERNS = (
-    "*.gitattributes",
-    "*.gitignore",
-    "*README*.md",
-    "*LICENSE*",
-    "*LICENCE*",
-    ".github/*",
-    "*.png",
-    "*.jpg",
-    "*.jpeg",
-    "*.gif",
-    "*.svg",
-    "*.webp",
-    "*.bmp",
-    "*.ico",
-    "*.mp4",
-    "*.mov",
-    "*.avi",
-    "*.pdf",
-)
 
 _HF_HOSTS = frozenset({HF_HOST, f"www.{HF_HOST}"})
 
@@ -80,18 +59,62 @@ _CONFIG_FILENAMES = frozenset({"merges.txt", "vocab.txt", "special_tokens_map.js
 
 _INDEX_PATTERN = re.compile(r"\.safetensors\.index\.json$")
 
-# Name of the platform-provisioned Kubernetes Secret that holds MinIO credentials,
-# and the key names within it. These are fixed by the Helm chart and must match
-# helm/aiwb/values.yaml (minio.credentialsSecretName / accessKeyKey / secretKeyKey).
-MINIO_CREDENTIALS_SECRET_NAME = "minio-credentials"
-MINIO_CREDENTIALS_ACCESS_KEY_KEY = "minio-access-key"
-MINIO_CREDENTIALS_SECRET_KEY_KEY = "minio-secret-key"
+# S3 preview/onboard content expectations. Credential key aliases (S3_REQUIRED_CREDENTIAL_KEYS,
+# S3_ENDPOINT_KEYS) are shared with AIWB secret creation and live in api_common.secrets.
+# The MinIO credentials Secret name and key names live in ..minio.config, threaded in from the chart.
+S3_EXPECTED_LAYOUT_FILES = ("config.json",)
+S3_EXPECTED_TOKENIZER_FILES = ("tokenizer.json", "tokenizer_config.json")
+
+# The model card filename tag discovery reads. Held lowercase and matched against
+# the lowercased path relative to the source prefix.
+MODEL_CARD_FILENAME = "readme.md"
+
+# Byte cap for reading an untrusted model card. Cards are usually a few KiB;
+# anything larger is either not what it claims to be or not worth
+# streaming during a synchronous preview. Reads are truncated at this bound
+# rather than rejected, since a truncated card still yields frontmatter (which
+# sits at the top of the file).
+SOURCE_METADATA_MAX_BYTES = 256 * 1024
+
+# Bounds applied to every tag list assembled from untrusted source content.
+# Tags land in a K8s annotation (1MiB total per object) and render in the UI, so
+# a card advertising thousands of tags must not become an unbounded payload.
+MAX_DISCOVERED_TAGS = 32
+MAX_DISCOVERED_TAG_LENGTH = 64
+
+S3_REGION_KEYS = (
+    "AWS_DEFAULT_REGION",
+    "awsDefaultRegion",
+    "aws_default_region",
+    "AWS_REGION",
+    "aws_region",
+    "region",
+)
 
 # BYOM image override; aim-engine prefers this over ``spec.image`` on AIMProfile.
 AIM_DEPLOYMENT_IMAGE_REF_ANNOTATION = "aim.eai.amd.com/deployment-image-ref"
 
-DEFAULT_AIM_DEPLOYMENT_IMAGE_REF = os.getenv("AIM_DEFAULT_DEPLOYMENT_IMAGE_REF", "amdenterpriseai/aim-base:0.11")
+DEFAULT_AIM_DEPLOYMENT_IMAGE_REF = os.getenv("AIM_DEFAULT_DEPLOYMENT_IMAGE_REF", "amdenterpriseai/aim-base:0.13.1")
 RADEON_AIM_DEPLOYMENT_IMAGE_REF = os.getenv("AIM_RADEON_DEPLOYMENT_IMAGE_REF", "amdenterpriseai/aim-radeon-base:0.12")
+EPYC_AIM_DEPLOYMENT_IMAGE_REF = os.getenv("EPYC_AIM_DEPLOYMENT_IMAGE_REF", "amdenterpriseai/aim-epyc-base:0.13")
+
+# Repository names (the final path segment of an image reference) of the base
+# images whose vLLM build ships the audio runtime (librosa / soundfile /
+# ffmpeg). Speech models only transcribe on one of these, so the list gates the
+# speech-to-text onboard path. An allowlist of repository names rather than a
+# substring scan of the whole reference keeps a chat image that merely mentions
+# "audio" in its registry path or tag from qualifying.
+#
+# An override that parses to nothing falls back to the default instead of being
+# honored: an empty allowlist disqualifies every image, so speech onboarding
+# would reject each model as lacking an audio runtime with no image able to
+# satisfy it. That reads as a product bug rather than the misconfiguration it is.
+DEFAULT_AUDIO_CAPABLE_BASE_REPOSITORY = "aim-audio-base"
+AUDIO_CAPABLE_BASE_REPOSITORIES = frozenset(
+    repository.strip().lower()
+    for repository in os.getenv("AIM_AUDIO_CAPABLE_BASE_REPOSITORIES", "").split(",")
+    if repository.strip()
+) or frozenset({DEFAULT_AUDIO_CAPABLE_BASE_REPOSITORY})
 
 # Base-image AIMModel that custom-model onboards derive their profiles from.
 # In v1alpha2 a BYOM AIMModel does not carry its own runtime profiles; it

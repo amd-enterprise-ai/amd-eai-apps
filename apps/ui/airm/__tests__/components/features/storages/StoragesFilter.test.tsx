@@ -78,7 +78,7 @@ describe('StoragesListFilter', () => {
     );
 
     const refreshButton = screen.getByRole('button', {
-      name: 'data.refresh',
+      name: 'actions.refresh.title',
     });
     await fireEvent.click(refreshButton);
 

@@ -1,0 +1,6 @@
+{"messages": [{"role": "user", "content": "What is the capital of France?"}, {"role": "assistant", "content": "Paris"}]}
+{"messages": [{"role": "user", "content": "Who wrote Hamlet?"}, {"role": "assistant", "content": "William Shakespeare"}]}
+{"messages": [{"role": "user", "content": "What is the square root of 144?"}, {"role": "assistant", "content": "12"}]}
+{"messages": [{"role": "user", "content": "What is the capital of Japan?"}, {"role": "assistant", "content": "Tokyo"}]}
+{"messages": [{"role": "user", "content": "Who painted the Mona Lisa?"}, {"role": "assistant", "content": "Leonardo da Vinci"}]}
+{"messages": [{"role": "user", "content": "What is the boiling point of water?"}, {"role": "assistant", "content": "100 degrees Celsius at sea level"}]}

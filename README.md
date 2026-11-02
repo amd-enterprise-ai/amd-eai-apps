@@ -101,7 +101,7 @@ git clone <this-repo>
 cd <repo>
 
 # Install prek hooks (both pre-commit and pre-push)
-prek install --install-hooks --hook-type pre-commit --hook-type pre-push
+prek install --prepare-hooks --hook-type pre-commit --hook-type pre-push
 ```
 
 > **Note**: The pre-push hooks run tests for any changed components and exit at the first failure:

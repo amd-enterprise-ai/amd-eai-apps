@@ -9,8 +9,8 @@ from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from api_common.exceptions import ValidationException
+from api_common.slugs import slugify
 
-from ..datasets.utils import slugify
 from ..minio import MinioClient
 from ..minio.client import handle_s3_operation
 from ..minio.config import MINIO_BUCKET, MINIO_MAX_ATTEMPTS, MINIO_MAX_WAIT, MINIO_MIN_WAIT
@@ -52,6 +52,24 @@ def get_custom_model_root_path(namespace: str, resource_name: str) -> str:
     return os.path.join(slugify(namespace), "custom-models", resource_name) + "/"
 
 
+def get_adapter_artifacts_root(namespace: str) -> str:
+    """S3 key prefix holding every adapter artifact the platform allocates for a project.
+
+    Format: {slugified_namespace}/adapters/
+    One level below it is one adapter, which is what makes a single listing under this root
+    enough to discover adapters whose weights exist without a CR backing them.
+    """
+    return os.path.join(slugify(namespace), "adapters") + "/"
+
+
+def get_adapter_artifact_prefix(namespace: str, resource_name: str) -> str:
+    """S3 key prefix for a LoRA adapter artifact.
+
+    Format: {slugified_namespace}/adapters/{resource_name}/
+    """
+    return f"{get_adapter_artifacts_root(namespace)}{resource_name}/"
+
+
 def get_custom_model_weights_path(namespace: str, resource_name: str) -> str:
     """S3 key prefix where weights for a custom (BYOM) AIMModel are imported.
 
@@ -69,7 +87,22 @@ def get_custom_model_weights_path(namespace: str, resource_name: str) -> str:
     stop=stop_after_attempt(MINIO_MAX_ATTEMPTS),
     reraise=True,
 )
-async def delete_from_s3(prefix: str, client: MinioClient, model_name: str = "") -> None:
-    with handle_s3_operation("deleting model weights", f"s3://{MINIO_BUCKET}/{prefix}", model_name):
+async def delete_from_s3(
+    prefix: str, client: MinioClient, model_name: str = "", operation: str = "deleting model weights"
+) -> None:
+    with handle_s3_operation(operation, f"s3://{MINIO_BUCKET}/{prefix}", model_name):
         await asyncio.to_thread(client.delete_objects, bucket_name=MINIO_BUCKET, prefix=prefix)
-        logger.info(f"Successfully deleted model weights from S3: {prefix}")
+        logger.info(f"Finished {operation} from S3: {prefix}")
+
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=MINIO_MIN_WAIT, max=MINIO_MAX_WAIT),
+    stop=stop_after_attempt(MINIO_MAX_ATTEMPTS),
+    reraise=True,
+)
+async def delete_object_from_s3(
+    object_key: str, client: MinioClient, model_name: str = "", operation: str = "deleting model folder marker"
+) -> None:
+    with handle_s3_operation(operation, f"s3://{MINIO_BUCKET}/{object_key}", model_name):
+        await asyncio.to_thread(client.delete_object, bucket_name=MINIO_BUCKET, object_name=object_key)
+        logger.info(f"Finished {operation} from S3: {object_key}")

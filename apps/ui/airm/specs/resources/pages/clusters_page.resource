@@ -13,7 +13,7 @@ ${CLUSTERS_PATH}                    /clusters
 ${SEARCH_INPUT_PLACEHOLDER}         Search
 ${CONNECT_CLUSTER_BUTTON}           Connect a cluster
 ${CONNECT_WIZARD_TITLE}             Connect a new cluster
-${ACTIVE_CLUSTERS_HEADING}          Active Clusters
+${ACTIVE_CLUSTERS_HEADING}          Active clusters
 
 
 *** Keywords ***
@@ -53,7 +53,7 @@ Click cluster row
     Click    text="${cluster_name}"
 
 Active clusters heading should be visible
-    [Documentation]    Waits for the "Active Clusters" accordion heading to be visible.
+    [Documentation]    Waits for the "Active clusters" accordion heading to be visible.
     Wait For Elements State    css=h2:has-text("${ACTIVE_CLUSTERS_HEADING}")    visible    timeout=15s
 
 Enter cluster search text

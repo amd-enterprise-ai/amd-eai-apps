@@ -2,232 +2,124 @@
 //
 // SPDX-License-Identifier: MIT
 
+import { afterEach, beforeEach, describe, expect, it, Mock, vi } from 'vitest';
+
 import {
   cancelFineTuningJob,
   deleteModel,
   finetuneModel,
 } from '@/lib/app/models';
+import { apiClient } from '@/lib/api-client';
 
 import { APIRequestError } from '@amdenterpriseai/utils/app';
-import { getStorageItem } from '@amdenterpriseai/utils/app';
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+// deleteModel, finetuneModel and cancelFineTuningJob go through the typed
+// apiClient (openapi-fetch), which builds a Request from a browser-relative URL
+// — jsdom's Request rejects that, so a raw global-fetch mock can't intercept
+// them. Mock the apiClient methods directly and assert on the typed call
+// arguments (path key + params/body) instead of a raw fetch URL string.
+vi.mock('@/lib/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api-client')>();
+  return {
+    ...actual,
+    apiClient: { GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() },
+  };
+});
 
-// Mock the storage utility
-vi.mock('@amdenterpriseai/utils/app', async (importOriginal) => ({
-  ...(await importOriginal()),
-  getStorageItem: vi.fn(),
-}));
+const mockPost = apiClient.POST as Mock;
+const mockDelete = apiClient.DELETE as Mock;
 
-// Mock fetch globally
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
+const errResponse = (status: number) => ({
+  status,
+  json: () => Promise.resolve({ detail: 'boom' }),
+  text: () => Promise.resolve('boom'),
+});
 
-describe('Models Service - Delete Functionality', () => {
+describe('Models Service', () => {
   const mockProjectId = 'test-project-id';
   const mockModelId = 'test-model-id';
 
   beforeEach(() => {
     vi.clearAllMocks();
-    (getStorageItem as any).mockReturnValue(mockProjectId);
+  });
+
+  afterEach(() => {
+    mockPost.mockReset();
+    mockDelete.mockReset();
   });
 
   describe('deleteModel', () => {
-    it('should successfully delete a model', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true });
+    it('DELETEs the typed fine-tuning model path with path params', async () => {
+      mockDelete.mockResolvedValueOnce({ data: undefined, error: undefined });
 
       const result = await deleteModel(mockModelId, mockProjectId);
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        `/api/projects/${mockProjectId}/fine-tuning/models/${mockModelId}`,
+      expect(mockDelete).toHaveBeenCalledWith(
+        '/api/projects/{project}/fine-tuning/models/{model_id}',
         {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          params: { path: { project: mockProjectId, model_id: mockModelId } },
         },
       );
       // 204 No Content — deleteModel returns void
       expect(result).toBeUndefined();
     });
 
-    it('should delete a model successfully', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true });
+    it('adds the force query param when force is true', async () => {
+      mockDelete.mockResolvedValueOnce({ data: undefined, error: undefined });
 
-      const result = await deleteModel(mockModelId, mockProjectId);
+      await deleteModel(mockModelId, mockProjectId, true);
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        `/api/projects/${mockProjectId}/fine-tuning/models/${mockModelId}`,
+      expect(mockDelete).toHaveBeenCalledWith(
+        '/api/projects/{project}/fine-tuning/models/{model_id}',
         {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-      expect(result).toBeUndefined();
-    });
-
-    it('should handle undefined project ID gracefully', async () => {
-      (getStorageItem as any).mockReturnValue(undefined);
-      mockFetch.mockResolvedValueOnce({ ok: true });
-
-      await deleteModel(mockModelId, mockProjectId);
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        `/api/projects/${mockProjectId}/fine-tuning/models/${mockModelId}`,
-        {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
+          params: {
+            path: { project: mockProjectId, model_id: mockModelId },
+            query: { force: true },
           },
         },
       );
     });
 
-    it('should throw APIRequestError when request fails with 404', async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 404,
-        text: () => Promise.resolve('Model not found'),
-      });
-
-      await expect(deleteModel(mockModelId, mockProjectId)).rejects.toThrow(
-        APIRequestError,
-      );
-    });
-
-    it('should throw APIRequestError when request fails with 500', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        text: () => Promise.resolve('Internal server error'),
-      });
-
-      await expect(deleteModel(mockModelId, mockProjectId)).rejects.toThrow(
-        APIRequestError,
-      );
-    });
-
-    it('should throw APIRequestError when request fails with 403', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 403,
-        text: () => Promise.resolve('Forbidden'),
+    it('throws APIRequestError when the typed client returns an error', async () => {
+      mockDelete.mockResolvedValueOnce({
+        data: undefined,
+        error: { detail: 'boom' },
+        response: errResponse(404),
       });
 
       const error = await deleteModel(mockModelId, mockProjectId).catch(
         (e) => e,
       );
       expect(error).toBeInstanceOf(APIRequestError);
-      expect(error.statusCode).toBe(403);
+      expect(error.statusCode).toBe(404);
+      expect((error as APIRequestError).message).toContain(
+        'Failed to delete model',
+      );
     });
 
-    it('should handle network errors correctly', async () => {
-      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+    it('propagates network rejections from the typed client', async () => {
+      mockDelete.mockRejectedValueOnce(new Error('Network error'));
 
       await expect(deleteModel(mockModelId, mockProjectId)).rejects.toThrow(
         'Network error',
       );
     });
-
-    it('should return void regardless of response body', async () => {
-      // deleteModel returns void (204 No Content) — response body is not parsed
-      mockFetch.mockResolvedValueOnce({ ok: true });
-
-      const result = await deleteModel(mockModelId, mockProjectId);
-
-      expect(result).toBeUndefined();
-    });
-
-    it('should handle empty response correctly', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true });
-
-      const result = await deleteModel(mockModelId, mockProjectId);
-      expect(result).toBeUndefined();
-    });
-
-    it('should handle response without JSON correctly', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true });
-
-      const result = await deleteModel(mockModelId, mockProjectId);
-      expect(result).toBeUndefined();
-    });
-  });
-
-  describe('Error handling and edge cases', () => {
-    it('should handle malformed JSON response', async () => {
-      // deleteModel does not parse the response body, so a broken json() has no effect
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.reject(new Error('Invalid JSON')),
-      });
-
-      const result = await deleteModel(mockModelId, mockProjectId);
-      expect(result).toBeUndefined();
-    });
-
-    it('should handle special characters in model ID', async () => {
-      const specialModelId = 'model-with-special-chars-!@#$%';
-      mockFetch.mockResolvedValueOnce({ ok: true });
-
-      await deleteModel(specialModelId, mockProjectId);
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        `/api/projects/${mockProjectId}/fine-tuning/models/${encodeURIComponent(specialModelId)}`,
-        expect.objectContaining({
-          method: 'DELETE',
-        }),
-      );
-    });
-
-    it('should handle very long model ID', async () => {
-      const longModelId = 'a'.repeat(1000);
-      mockFetch.mockResolvedValueOnce({ ok: true });
-
-      await deleteModel(longModelId, mockProjectId);
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        `/api/projects/${mockProjectId}/fine-tuning/models/${longModelId}`,
-        expect.objectContaining({
-          method: 'DELETE',
-        }),
-      );
-    });
-
-    it('should handle timeout scenarios', async () => {
-      // Simulate a timeout by rejecting after a delay
-      mockFetch.mockImplementationOnce(() => {
-        return new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Request timeout')), 100);
-        });
-      });
-
-      await expect(deleteModel(mockModelId, mockProjectId)).rejects.toThrow(
-        'Request timeout',
-      );
-    });
   });
 
   describe('finetuneModel', () => {
-    it('should successfully finetune a model without hfTokenSecretName', async () => {
+    it('POSTs the typed fine-tuning jobs path without hfTokenSecretName', async () => {
       const mockParams = {
         displayName: 'test-finetuned-model',
-        datasetId: 'dataset-123',
+        datasetIds: ['dataset-123'],
         epochs: 10,
         learningRate: 0.001,
         batchSize: 8,
       };
-
       const mockResponse = {
         id: 'model-123',
         displayName: 'test-finetuned-model',
       };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
+      mockPost.mockResolvedValueOnce({ data: mockResponse, error: undefined });
 
       const result = await finetuneModel(
         mockModelId,
@@ -235,110 +127,156 @@ describe('Models Service - Delete Functionality', () => {
         mockProjectId,
       );
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        `/api/projects/${mockProjectId}/fine-tuning/jobs`,
+      expect(mockPost).toHaveBeenCalledWith(
+        '/api/projects/{project}/fine-tuning/jobs',
         {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
+          params: { path: { project: mockProjectId } },
+          body: {
             baseModel: mockModelId,
             displayName: mockParams.displayName,
-            datasetId: mockParams.datasetId,
+            datasetIds: mockParams.datasetIds,
             epochs: mockParams.epochs,
             learningRate: mockParams.learningRate,
             batchSize: mockParams.batchSize,
-          }),
+          },
         },
       );
-
-      expect(result).toEqual({
-        id: 'model-123',
-        displayName: 'test-finetuned-model',
-      });
+      expect(result).toEqual(mockResponse);
     });
 
-    it('should include hfTokenSecretName when provided', async () => {
+    it('includes hfTokenSecretName in the body when provided', async () => {
       const mockParams = {
         displayName: 'test-finetuned-model',
-        datasetId: 'dataset-123',
+        datasetIds: ['dataset-123'],
         epochs: 10,
         learningRate: 0.001,
         batchSize: 8,
         hfTokenSecretName: 'hf-token-secret',
       };
-
-      const mockResponse = {
-        id: 'model-123',
-        displayName: 'test-finetuned-model',
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
+      mockPost.mockResolvedValueOnce({ data: {}, error: undefined });
 
       await finetuneModel(mockModelId, mockParams, mockProjectId);
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        `/api/projects/${mockProjectId}/fine-tuning/jobs`,
+      expect(mockPost).toHaveBeenCalledWith(
+        '/api/projects/{project}/fine-tuning/jobs',
         {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
+          params: { path: { project: mockProjectId } },
+          body: {
             baseModel: mockModelId,
             displayName: mockParams.displayName,
-            datasetId: mockParams.datasetId,
+            datasetIds: mockParams.datasetIds,
             epochs: mockParams.epochs,
             learningRate: mockParams.learningRate,
             batchSize: mockParams.batchSize,
             hfTokenSecretName: mockParams.hfTokenSecretName,
-          }),
+          },
         },
       );
     });
 
-    it('should not include hfTokenSecretName when not provided', async () => {
+    it('omits hfTokenSecretName from the body when not provided', async () => {
       const mockParams = {
         displayName: 'test-finetuned-model',
-        datasetId: 'dataset-123',
+        datasetIds: ['dataset-123'],
         epochs: 10,
         learningRate: 0.001,
         batchSize: 8,
       };
-
-      const mockResponse = {
-        id: 'model-123',
-        displayName: 'test-finetuned-model',
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
+      mockPost.mockResolvedValueOnce({ data: {}, error: undefined });
 
       await finetuneModel(mockModelId, mockParams, mockProjectId);
 
-      const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body as string);
-      expect(requestBody).not.toHaveProperty('hfTokenSecretName');
+      const body = mockPost.mock.calls[0][1].body as Record<string, unknown>;
+      expect(body).not.toHaveProperty('hfTokenSecretName');
     });
 
-    it('should throw APIRequestError when finetune fails', async () => {
+    it('omits missing hyperparameters so the server applies its own defaults', async () => {
       const mockParams = {
         displayName: 'test-finetuned-model',
-        datasetId: 'dataset-123',
+        datasetIds: ['dataset-123'],
+      };
+      mockPost.mockResolvedValueOnce({ data: {}, error: undefined });
+
+      await finetuneModel(mockModelId, mockParams, mockProjectId);
+
+      const body = mockPost.mock.calls[0][1].body as Record<string, unknown>;
+      expect(body).not.toHaveProperty('epochs');
+      expect(body).not.toHaveProperty('learningRate');
+      expect(body).not.toHaveProperty('batchSize');
+    });
+
+    it('includes description in the body when provided', async () => {
+      const mockParams = {
+        displayName: 'test-finetuned-model',
+        datasetIds: ['dataset-123'],
+        description: 'A helpful description',
+      };
+      mockPost.mockResolvedValueOnce({ data: {}, error: undefined });
+
+      await finetuneModel(mockModelId, mockParams, mockProjectId);
+
+      const body = mockPost.mock.calls[0][1].body as Record<string, unknown>;
+      expect(body).toHaveProperty('description', 'A helpful description');
+    });
+
+    it('omits description from the body when not provided', async () => {
+      const mockParams = {
+        displayName: 'test-finetuned-model',
+        datasetIds: ['dataset-123'],
+      };
+      mockPost.mockResolvedValueOnce({ data: {}, error: undefined });
+
+      await finetuneModel(mockModelId, mockParams, mockProjectId);
+
+      const body = mockPost.mock.calls[0][1].body as Record<string, unknown>;
+      expect(body).not.toHaveProperty('description');
+    });
+
+    it('includes adapter output and LoRA settings when provided', async () => {
+      const mockParams = {
+        displayName: 'test-lora',
+        datasetIds: ['dataset-123'],
+        output: 'adapter' as const,
+        lora: { rank: 16, alpha: 32, dropout: 0.05 },
+      };
+      mockPost.mockResolvedValueOnce({ data: {}, error: undefined });
+
+      await finetuneModel(mockModelId, mockParams, mockProjectId);
+
+      expect(mockPost.mock.calls[0][1].body).toMatchObject({
+        output: 'adapter',
+        lora: mockParams.lora,
+      });
+    });
+
+    it('omits a non-finite hyperparameter (e.g. NaN from an untouched field) rather than sending it', async () => {
+      const mockParams = {
+        displayName: 'test-finetuned-model',
+        datasetIds: ['dataset-123'],
+        epochs: Number.NaN,
+        learningRate: 10,
+      };
+      mockPost.mockResolvedValueOnce({ data: {}, error: undefined });
+
+      await finetuneModel(mockModelId, mockParams, mockProjectId);
+
+      const body = mockPost.mock.calls[0][1].body as Record<string, unknown>;
+      expect(body).not.toHaveProperty('epochs');
+      expect(body).toHaveProperty('learningRate', 10);
+    });
+
+    it('throws APIRequestError when the typed client returns an error', async () => {
+      const mockParams = {
+        displayName: 'test-finetuned-model',
+        datasetIds: ['dataset-123'],
         epochs: 10,
         learningRate: 0.001,
         batchSize: 8,
       };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 400,
-        text: () => Promise.resolve('Invalid parameters'),
+      mockPost.mockResolvedValueOnce({
+        data: undefined,
+        error: { detail: 'boom' },
+        response: errResponse(400),
       });
 
       const error = await finetuneModel(
@@ -357,40 +295,25 @@ describe('Models Service - Delete Functionality', () => {
   describe('cancelFineTuningJob', () => {
     const mockJobId = 'job-uuid-1';
 
-    it('should DELETE the fine-tuning job and resolve void on success', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true });
+    it('DELETEs the typed fine-tuning job path with path params', async () => {
+      mockDelete.mockResolvedValueOnce({ data: undefined, error: undefined });
 
       const result = await cancelFineTuningJob(mockJobId, mockProjectId);
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        `/api/projects/${mockProjectId}/fine-tuning/jobs/${mockJobId}`,
+      expect(mockDelete).toHaveBeenCalledWith(
+        '/api/projects/{project}/fine-tuning/jobs/{job_id}',
         {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          params: { path: { project: mockProjectId, job_id: mockJobId } },
         },
       );
       expect(result).toBeUndefined();
     });
 
-    it('should encode special characters in the job ID', async () => {
-      const specialJobId = 'job/with#special';
-      mockFetch.mockResolvedValueOnce({ ok: true });
-
-      await cancelFineTuningJob(specialJobId, mockProjectId);
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        `/api/projects/${mockProjectId}/fine-tuning/jobs/${encodeURIComponent(specialJobId)}`,
-        expect.objectContaining({ method: 'DELETE' }),
-      );
-    });
-
-    it('should throw APIRequestError when the job is not found', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        text: () => Promise.resolve('Fine-tuning job not found'),
+    it('throws APIRequestError when the job is not found', async () => {
+      mockDelete.mockResolvedValueOnce({
+        data: undefined,
+        error: { detail: 'boom' },
+        response: errResponse(404),
       });
 
       const error = await cancelFineTuningJob(mockJobId, mockProjectId).catch(

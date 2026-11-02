@@ -72,6 +72,12 @@ A secret "${name}" with use case "${use_case}" is created via AIWB
         ${docker_config}=    Set Variable    {"auths":{"registry.example.com":{"username":"user","password":"pass","auth":"dXNlcjpwYXNz"}}}
         ${encoded_value}=    Evaluate    base64.b64encode(b'${docker_config}').decode()    modules=base64
         &{secret_data}=    Create Dictionary    .dockerconfigjson=${encoded_value}
+    ELSE IF    "${use_case}" == "S3"
+        ${encoded_access}=    Evaluate    base64.b64encode(b"test-access-key").decode()    modules=base64
+        ${encoded_secret}=    Evaluate    base64.b64encode(b"test-secret-key").decode()    modules=base64
+        &{secret_data}=    Create Dictionary
+        ...    accessKeyId=${encoded_access}
+        ...    secretAccessKey=${encoded_secret}
     ELSE
         ${encoded_value}=    Evaluate    base64.b64encode(b"test-value").decode()    modules=base64
         &{secret_data}=    Create Dictionary    token=${encoded_value}
@@ -94,12 +100,34 @@ A secret "${name}" is created via AIWB
     ...    Convenience wrapper that defaults to Generic use case.
     A secret "${name}" with use case "Generic" is created via AIWB
 
+List All AIWB Secrets
+    [Documentation]    Returns every secret in the namespace as a single list, paging
+    ...    through the API's paginated envelope so callers that scan the full set are
+    ...    not silently truncated at the default page size.
+    [Arguments]    ${namespace}
+    VAR    @{all_secrets}    @{EMPTY}
+    VAR    ${page}    ${1}
+    WHILE    $True    limit=1000
+        ${response}=    List AIWB Secrets    ${namespace}    page=${page}    page_size=100    expected_status=200
+        ${body}=    Set Variable    ${response.json()}
+        ${data}=    Get From Dictionary    ${body}    data
+        ${page_count}=    Get Length    ${data}
+        IF    ${page_count} == 0    BREAK
+        Append To List    ${all_secrets}    @{data}
+        ${pagination}=    Get From Dictionary    ${body}    pagination    default=&{EMPTY}
+        ${total}=    Get From Dictionary    ${pagination}    total    default=${0}
+        ${collected}=    Get Length    ${all_secrets}
+        # Only trust total when the envelope reports it; otherwise page until an empty page.
+        IF    ${total} > 0 and ${collected} >= ${total}    BREAK
+        ${page}=    Evaluate    ${page} + 1
+    END
+    RETURN    ${all_secrets}
+
 Get AIWB Secret K8s Name By Display Name
     [Documentation]    Lists secrets and returns the K8s resource name matching the given display name.
     ...    Fails if no secret with the given display name exists.
     [Arguments]    ${namespace}    ${display_name}
-    ${response}=    List AIWB Secrets    ${namespace}    expected_status=200
-    ${secrets_list}=    Set Variable    ${response.json()['data']}
+    ${secrets_list}=    List All AIWB Secrets    ${namespace}
 
     FOR    ${secret}    IN    @{secrets_list}
         ${dn}=    Get From Dictionary    ${secret}    displayName    default=${None}
@@ -112,18 +140,27 @@ Get AIWB Secret K8s Name By Display Name
 
 AIWB secret "${name}" should exist
     [Documentation]    Verifies that a secret with the given display name exists in the namespace.
+    ...    GET keys on the auto-generated K8s name, so resolve it from the display name first.
     ${full_name}=    Test Name    ${name}
     ${project}=    Get Project Namespace
 
-    ${response}=    Get AIWB Secret    ${project}    ${full_name}    expected_status=200
+    ${k8s_name}=    Get AIWB Secret K8s Name By Display Name    ${project}    ${full_name}
+    Get AIWB Secret    ${project}    ${k8s_name}    expected_status=200
     Log    AIWB secret ${full_name} exists    INFO
 
 AIWB secret "${name}" should not exist
     [Documentation]    Verifies that no secret with the given display name exists (after deletion).
+    ...    Asserts absence from the full paginated list, as the K8s name may be unknown
+    ...    when secret creation was rejected.
     ${full_name}=    Test Name    ${name}
     ${project}=    Get Project Namespace
+    ${secrets_list}=    List All AIWB Secrets    ${project}
 
-    ${response}=    Get AIWB Secret    ${project}    ${full_name}    expected_status=404
+    FOR    ${secret}    IN    @{secrets_list}
+        ${display_name}=    Get From Dictionary    ${secret}    displayName    default=${None}
+        Should Not Be Equal    ${display_name}    ${full_name}
+        ...    msg=Secret with displayName '${full_name}' should be absent but is present
+    END
     Log    AIWB secret ${full_name} confirmed not found    INFO
 
 AIWB secrets are listed
@@ -134,15 +171,6 @@ AIWB secrets are listed
     ${response}=    List AIWB Secrets    ${project}    expected_status=200
     Set Test Variable    ${TEST_RESPONSE}    ${response}
     Log    Listed AIWB secrets for project ${project}    INFO
-
-AIWB secret list should contain "${count}" secrets
-    [Documentation]    Verifies the secret list response contains the expected number of secrets.
-    ...    Requires: TEST_RESPONSE (set by "AIWB secrets are listed")
-    ${secrets_list}=    Set Variable    ${TEST_RESPONSE.json()['data']}
-    ${actual_count}=    Get Length    ${secrets_list}
-    Should Be Equal As Integers    ${actual_count}    ${count}
-    ...    msg=Expected ${count} secrets, found ${actual_count}
-    Log    Secret list count verified: ${actual_count}    INFO
 
 AIWB secrets filtered by use case "${use_case}" should return "${count}" results
     [Documentation]    Lists AIWB secrets filtered by useCase and verifies the count.
@@ -161,8 +189,26 @@ AIWB secret "${name}" is deleted
     ${full_name}=    Test Name    ${name}
     ${project}=    Get Project Namespace
 
-    ${response}=    Delete AIWB Secret    ${project}    ${full_name}    expected_status=204
+    ${k8s_name}=    Get AIWB Secret K8s Name By Display Name    ${project}    ${full_name}
+    Delete AIWB Secret    ${project}    ${k8s_name}    expected_status=204
     Log    Deleted AIWB secret ${full_name}    INFO
+
+An S3 secret "${name}" without credentials is submitted via AIWB
+    [Documentation]    Attempts to create an S3 secret whose data carries no recognized
+    ...    access/secret key alias, and captures the response for outcome assertions.
+    ...    Sets: TEST_RESPONSE
+    ${full_name}=    Test Name    ${name}
+    ${project}=    Get Project Namespace
+    ${encoded_value}=    Evaluate    base64.b64encode(b"test-value").decode()    modules=base64
+    &{secret_data}=    Create Dictionary    unrelated=${encoded_value}
+    &{body}=    Create Dictionary
+    ...    displayName=${full_name}
+    ...    data=${secret_data}
+    ...    useCase=S3
+
+    ${response}=    Create AIWB Secret    ${project}    ${body}    expected_status=any
+    Set Test Variable    ${TEST_RESPONSE}    ${response}
+    Log    Submitted S3 secret without credentials; captured response for assertions    INFO
 
 Creating duplicate AIWB secret "${name}" should fail
     [Documentation]    Verifies that creating a secret with the same display name fails with 409.
@@ -227,10 +273,11 @@ A secret is created with display name "${display_name}"
 
 The secret list should include display name for "${name}"
     [Documentation]    Verifies a secret with the given (TestPrefix-qualified) display name
-    ...    appears with a non-empty displayName field in the list response.
-    ...    Requires: TEST_RESPONSE (set by "AIWB secrets are listed")
+    ...    appears with a non-empty displayName field. Pages through the full secret list so a
+    ...    secret that lands on a later page is not missed at the API's default page size.
     ${full_name}=    Test Name    ${name}
-    ${secrets_list}=    Set Variable    ${TEST_RESPONSE.json()['data']}
+    ${namespace}=    Get Project Namespace
+    ${secrets_list}=    List All AIWB Secrets    ${namespace}
 
     FOR    ${secret}    IN    @{secrets_list}
         ${dn}=    Get From Dictionary    ${secret}    displayName    default=${None}
@@ -250,13 +297,18 @@ An image pull secret with invalid JSON content is submitted
     ...    the parse-error message — the trigger that exercises the additionalInfo field.
     ...    Sets: TEST_RESPONSE
     ${project}=    Get Project Namespace
+    ${display_name}=    Test Name    invalid-pull-secret-contract-check
     ${bad_b64}=    Evaluate    __import__('base64').b64encode(b'not-valid-json').decode()    modules=base64
     &{secret_data}=    Create Dictionary    .dockerconfigjson=${bad_b64}
     &{body}=    Create Dictionary
-    ...    name=invalid-pull-secret-contract-check
+    ...    displayName=${display_name}
     ...    data=${secret_data}
     ...    useCase=ImagePullSecret
     ${response}=    Create AIWB Secret    ${project}    ${body}    expected_status=any
+    IF    ${response.status_code} == 201
+        ${k8s_name}=    Set Variable    ${response.json()['metadata']['name']}
+        Append To List    ${CREATED_AIWB_SECRET_NAMES}    ${k8s_name}
+    END
     VAR    ${TEST_RESPONSE}    ${response}    scope=TEST
 
 The response should fail with a validation error

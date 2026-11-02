@@ -8,7 +8,8 @@ Tests for the dataset path utilities, without requiring Docker.
 
 import pytest
 
-from app.datasets.utils import clean_s3_path, derive_name_from_path, get_object_key, slugify
+from api_common.slugs import slugify
+from app.datasets.utils import clean_s3_path, derive_name_from_path, get_object_key
 
 
 def test_basic_slugification():

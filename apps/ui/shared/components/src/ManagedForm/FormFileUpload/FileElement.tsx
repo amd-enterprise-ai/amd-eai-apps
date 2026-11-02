@@ -21,16 +21,21 @@ const FileElement = memo(
     onRemove: () => void;
     t: (key: string, options?: Record<string, unknown>) => string;
   }) => (
-    <div className="flex items-center gap-1 rounded p-1 pl-2 bg-default-100">
-      <IconFile size={16} />
-      <span className="text-sm truncate w-full">{file.name}</span>
-      <span className="text-sm text-default-500/50 text-nowrap">
+    <div className="flex w-full min-w-0 items-center overflow-hidden gap-1 rounded p-1 bg-default">
+      <IconFile size={16} className="shrink-0" />
+      <span
+        className="text-sm truncate text-foreground min-w-0 flex-1"
+        title={file.name}
+      >
+        {file.name}
+      </span>
+      <span className="text-sm text-muted shrink-0 text-nowrap">
         {displayBytesInOptimalUnit(file.size)}
       </span>
       <ActionButton
         tertiary
         size="sm"
-        className="rounded"
+        className="rounded shrink-0"
         aria-label={t('remove')}
         onPress={onRemove}
         icon={<IconX size={16} />}

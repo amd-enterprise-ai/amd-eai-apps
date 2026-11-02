@@ -75,7 +75,7 @@ const rows: WorkloadRow[] = [
 const columns: TableColumns<WorkloadColumn> = [
   { key: WorkloadColumn.NAME, sortable: true },
   { key: WorkloadColumn.STATUS, sortable: true },
-  { key: WorkloadColumn.MEMORY, sortable: true },
+  { key: WorkloadColumn.MEMORY, hasDescription: true, sortable: true },
   { key: WorkloadColumn.CREATED_AT, sortable: true },
 ];
 
@@ -86,6 +86,7 @@ const baseTranslation = (key: string): string => {
     'list.headers.name.title': 'Name',
     'list.headers.status.title': 'Status',
     'list.headers.memoryBytes.title': 'Memory',
+    'list.headers.memoryBytes.description': 'Memory in bytes',
     'list.headers.createdAt.title': 'Created At',
     'list.headers.projectName.title': 'Project',
     'list.headers.actions.title': '',
@@ -132,10 +133,10 @@ export default {
 export const RowNavigation: Story = () => {
   return (
     <div className="flex flex-col gap-3 max-w-4xl">
-      <h3 className="text-medium font-semibold">
+      <h3 className="text-base font-semibold">
         Row navigation with onRowPressed
       </h3>
-      <p className="text-small text-default-500">
+      <p className="text-sm text-muted">
         Click any row to trigger an alert with the row ID. In a real app this
         would call router.push. Notice the cursor changes to pointer on hover.
       </p>
@@ -178,10 +179,10 @@ export const RowNavigationWithOverflowMenu: Story = () => {
 
   return (
     <div className="flex flex-col gap-3 max-w-4xl">
-      <h3 className="text-medium font-semibold">
+      <h3 className="text-base font-semibold">
         Row navigation + secondary navigation via overflow menu
       </h3>
-      <p className="text-small text-default-500">
+      <p className="text-sm text-muted">
         Clicking the row alerts the workload ID (primary navigation). Use the
         (...) menu for secondary navigation — e.g. &quot;View project&quot; — no
         links in cells.
@@ -210,8 +211,8 @@ export const RowNavigationWithOverflowMenu: Story = () => {
 export const CustomRenderers: Story = () => {
   return (
     <div className="flex flex-col gap-3 max-w-4xl">
-      <h3 className="text-medium font-semibold">customRenderers only</h3>
-      <p className="text-small text-default-500">
+      <h3 className="text-base font-semibold">customRenderers only</h3>
+      <p className="text-sm text-muted">
         Renderers change <strong>what the user sees</strong> but have no effect
         on sorting. Click the column headers — rows sort by the raw field value,
         not the displayed text. Notice how Status sorts alphabetically (Complete
@@ -249,8 +250,8 @@ export const CustomComparators: Story = () => {
 
   return (
     <div className="flex flex-col gap-3 max-w-4xl">
-      <h3 className="text-medium font-semibold">customComparator only</h3>
-      <p className="text-small text-default-500">
+      <h3 className="text-base font-semibold">customComparator only</h3>
+      <p className="text-sm text-muted">
         Comparators change <strong>how rows are ordered</strong> but have no
         effect on display. The cells show raw values (ISO dates, enum strings),
         but Status now sorts by lifecycle rank and Created At sorts
@@ -284,10 +285,10 @@ export const RenderersAndComparatorsTogether: Story = () => {
 
   return (
     <div className="flex flex-col gap-3 max-w-4xl">
-      <h3 className="text-medium font-semibold">
+      <h3 className="text-base font-semibold">
         customRenderers + customComparator
       </h3>
-      <p className="text-small text-default-500">
+      <p className="text-sm text-muted">
         Recommended pattern: renderers format the display, comparators control
         sorting. Each concern is defined independently. Status displays friendly
         labels and sorts by lifecycle rank; Memory displays GB and sorts

@@ -15,7 +15,7 @@ from api_common.exceptions import NotFoundException
 from api_common.schemas import ListResponse, QueryParam
 
 from ..aims.crds import AIMModelResource
-from ..common_responses import PROJECT_ACCESS_RESPONSES
+from ..common_responses import EXTERNAL_SERVICE_RESPONSES, PROJECT_ACCESS_RESPONSES
 from ..dispatch.kube_client import KubernetesClient, get_kube_client
 from ..minio import MinioClient, get_minio_client
 from ..models.schemas import FinetunableModelResponse, FinetuneJobResponse
@@ -168,6 +168,7 @@ async def get_project_fine_tuned_model(
     """),
     responses={
         **PROJECT_ACCESS_RESPONSES,
+        **EXTERNAL_SERVICE_RESPONSES,
         404: {"description": "Project or namespace not found, or fine-tuned model not found in the project."},
         409: {"description": "Active deployments reference the model; pass force=true to override."},
     },
@@ -195,10 +196,10 @@ async def delete_project_fine_tuned_model(
 
         The `baseModel` field accepts either a HuggingFace canonical name
         (e.g., `meta-llama/Llama-3.1-8B`) or an existing AIMModel UUID to
-        continue training from a previous fine-tune. `datasetId` must
-        reference a dataset already uploaded into the same project — datasets
-        from other projects are not visible. An optional `displayName` query
-        parameter sets the user-facing label on the resulting workload.
+        continue training from a previous fine-tune. Each entry in `datasetIds`
+        must reference a dataset already uploaded into the same project —
+        datasets from other projects are not visible. The deprecated
+        `datasetId` field remains accepted for single-dataset clients.
 
         The job is submitted asynchronously; the response carries the new
         `workloadId`. The job then transitions Pending → Running →

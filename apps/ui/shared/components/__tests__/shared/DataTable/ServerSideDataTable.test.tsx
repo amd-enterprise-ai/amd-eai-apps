@@ -10,6 +10,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 import { TFunction } from 'next-i18next';
 
@@ -195,29 +196,22 @@ describe('ServerSideDataTable', () => {
       );
     });
 
-    await act(() => {
-      const pageFrameSelectWrapper = screen.queryByText(
-        'list.pagination.pageSize.label',
-      )?.nextElementSibling;
-      const selectTrigger = (pageFrameSelectWrapper as Element).querySelector(
-        'button[data-slot="trigger"]',
-      );
+    const user = userEvent.setup();
+    const selectTrigger = document.querySelector(
+      'button[data-slot="select-trigger"]',
+    ) as HTMLElement;
+    await user.click(selectTrigger);
 
-      fireEvent.click(selectTrigger!);
-    });
-
-    await act(() => {
-      const select = screen.queryAllByRole('option');
-      const largePageSize = select.find(
-        (option) => option.textContent === PageFrameSize.LARGE.toString(),
-      );
-      fireEvent.click(largePageSize!);
-    });
+    const options = await screen.findAllByRole('option');
+    const largePageSize = options.find(
+      (option) => option.textContent === PageFrameSize.LARGE.toString(),
+    );
+    await user.click(largePageSize as HTMLElement);
 
     await waitFor(() => {
       expect(mockCallbacks.handleDataRequest).toHaveBeenCalledWith({
         page: 1,
-        pageSize: '100',
+        pageSize: PageFrameSize.LARGE,
         sort: [
           {
             direction: SortDirection.ASC,
@@ -383,7 +377,7 @@ describe('ServerSideDataTable', () => {
     act(() => {
       const aliceRow = screen.getByText('Bob').closest('tr');
       expect(aliceRow).toBeTruthy();
-      const dropDown = within(aliceRow!).getByLabelText('list.actions.label');
+      const dropDown = within(aliceRow!).getByLabelText('Actions');
       fireEvent.click(dropDown);
     });
 

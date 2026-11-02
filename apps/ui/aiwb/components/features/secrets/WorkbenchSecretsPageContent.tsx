@@ -26,7 +26,7 @@ import { useOverlayState } from '@amdenterpriseai/hooks';
 
 type ClientSideDataFilter<T> = {
   field: keyof T;
-  path: string;
+  path?: string;
   values: string[];
 };
 
@@ -72,8 +72,7 @@ export const WorkbenchSecretsPageContent: React.FC = () => {
 
     if (filters?.search?.[0]) {
       newFilters.push({
-        field: 'metadata',
-        path: 'name',
+        field: 'displayName',
         values: filters.search,
       });
     }

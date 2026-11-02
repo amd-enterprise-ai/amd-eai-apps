@@ -2,16 +2,13 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { DataRefresher, Tab, Tabs } from '@amdenterpriseai/components';
+import { ChartTimeSelector } from '@amdenterpriseai/components';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useIsFetching, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'next-i18next';
 
 import { getCurrentTimeRange } from '@amdenterpriseai/utils/app';
-import {
-  DEFAULT_CHART_TIME_PERIODS,
-  TimeRangePeriod,
-} from '@amdenterpriseai/types';
+import { TimeRangePeriod } from '@amdenterpriseai/types';
 import type { TimeRange } from '@amdenterpriseai/types';
 
 import { fetchNodeGpuDevices } from '@/services/app';
@@ -30,15 +27,12 @@ interface Props {
   nodeId: string;
 }
 
-const translationKeySet = ['clusters', 'common'] as const;
-
 export const NodeDeviceMetricsSection: React.FC<Props> = ({
   clusterId,
   nodeId,
 }) => {
-  const { t } = useTranslation(translationKeySet);
+  const { t } = useTranslation('clusters');
 
-  const [timeRangePeriod, setTimeRangePeriod] = useState(TimeRangePeriod['1H']);
   const currentTimePeriod = useRef<TimeRangePeriod>(TimeRangePeriod['1H']);
   const [timeRange, setTimeRange] = useState<TimeRange>(() =>
     getCurrentTimeRange(TimeRangePeriod['1H']),
@@ -89,18 +83,9 @@ export const NodeDeviceMetricsSection: React.FC<Props> = ({
   const handleTimeRangeChange = useCallback(
     (period: TimeRangePeriod, newTimeRange: TimeRange) => {
       currentTimePeriod.current = period;
-      setTimeRangePeriod(period);
       setTimeRange(newTimeRange);
     },
     [],
-  );
-
-  const handleTimeBoundChange = useCallback(
-    (timePeriod: React.Key) => {
-      const newTimeRange = getCurrentTimeRange(timePeriod as TimeRangePeriod);
-      handleTimeRangeChange(timePeriod as TimeRangePeriod, newTimeRange);
-    },
-    [handleTimeRangeChange],
   );
 
   const handleChartsRefresh = useCallback(() => {
@@ -114,35 +99,19 @@ export const NodeDeviceMetricsSection: React.FC<Props> = ({
           {t('clusters:nodes.detail.deviceMetrics.title')}
         </h3>
         <div className="flex items-center gap-3 flex-nowrap">
-          <span className="whitespace-nowrap">
-            <DataRefresher
-              onRefresh={handleChartsRefresh}
-              lastFetchedTimestamp={lastUpdated}
-              isRefreshing={isFetchingMetrics}
-              compact
-            />
-          </span>
           <GpuDeviceSelect
             selectedGpuDevices={selectedGpuDevices}
             gpuDeviceOptions={gpuDeviceOptions}
             gpuColorMap={gpuColorMap}
             onChange={setSelectedGpuDevices}
           />
-          <Tabs
-            aria-label={t('common:timeRange.description') || ''}
-            classNames={{ base: 'justify-end w-full' }}
-            selectedKey={timeRangePeriod}
-            items={DEFAULT_CHART_TIME_PERIODS.map((id) => ({ id }))}
-            placement="top"
-            onSelectionChange={handleTimeBoundChange}
-          >
-            {(item) => (
-              <Tab
-                key={item.id}
-                title={t(`common:timeRange.range.${item.id}`)}
-              />
-            )}
-          </Tabs>
+          <ChartTimeSelector
+            onTimeRangeChange={handleTimeRangeChange}
+            onChartsRefresh={handleChartsRefresh}
+            isFetching={isFetchingMetrics}
+            lastFetchedTimestamp={lastUpdated}
+            initialTimePeriod={TimeRangePeriod['1H']}
+          />
         </div>
       </div>
 

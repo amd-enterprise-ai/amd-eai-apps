@@ -7,6 +7,7 @@
 // Tremor CategoryBar [v0.0.3]
 import { Tooltip } from '../../Tooltip';
 import { cn } from '@heroui/react';
+import { useTranslation } from 'next-i18next';
 import React from 'react';
 
 import {
@@ -134,6 +135,7 @@ const CategoryBar = React.forwardRef<HTMLDivElement, CategoryBarProps>(
     },
     forwardedRef,
   ) => {
+    const { t } = useTranslation('sharedComponents');
     const markerBgColor = React.useMemo(
       () => getMarkerBgColor(marker?.value, values, colors),
       [marker, values, colors],
@@ -157,7 +159,7 @@ const CategoryBar = React.forwardRef<HTMLDivElement, CategoryBarProps>(
       <div
         ref={forwardedRef}
         className={cn(className)}
-        aria-label="Category bar"
+        aria-label={t('statistics.categoryBar')}
         aria-valuenow={marker?.value}
         tremor-id="tremor-raw"
         {...props}

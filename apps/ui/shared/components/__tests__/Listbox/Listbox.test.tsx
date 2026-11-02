@@ -46,4 +46,28 @@ describe('Listbox adapter', () => {
     );
     expect(screen.getByRole('listbox', { name: 'Tokens' })).toBeInTheDocument();
   });
+
+  it('renders item description with text-muted by default', () => {
+    const { container } = render(
+      <Listbox aria-label="Models" selectedKeys={['a']}>
+        <ListboxItem key="a" description="1.0.0 · Throughput">
+          Inference Running
+        </ListboxItem>
+      </Listbox>,
+    );
+    const description = container.querySelector('[data-slot="description"]');
+    expect(description).toHaveTextContent('1.0.0 · Throughput');
+    expect(description).toHaveClass('text-muted');
+  });
+
+  it('applies indicatorClassName to the selection indicator', () => {
+    const { container } = render(
+      <Listbox aria-label="Color" selectedKeys={['red']}>
+        <ListboxItem key="red" indicatorClassName="opacity-30">
+          Red
+        </ListboxItem>
+      </Listbox>,
+    );
+    expect(container.querySelector('.opacity-30')).not.toBeNull();
+  });
 });

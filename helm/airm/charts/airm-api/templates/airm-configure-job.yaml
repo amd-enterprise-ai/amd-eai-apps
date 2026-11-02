@@ -33,6 +33,13 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]
+  # The script restarts the agent after rewriting its RabbitMQ credentials, which
+  # are injected as environment variables and so are only re-read on pod start.
+  # `watch` is required by `kubectl rollout status`, which streams the rollout
+  # rather than polling and is otherwise rejected as forbidden.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -142,6 +149,8 @@ spec:
                 secretKeyRef:
                   key: USER_PASSWORD
                   name: "{{ .Values.airm.keycloak.userCredentialsSecretName }}"
+            - name: AGENT_NAMESPACE
+              value: "{{ .Release.Namespace }}"
           volumeMounts:
             - name: configure-script
               mountPath: /scripts

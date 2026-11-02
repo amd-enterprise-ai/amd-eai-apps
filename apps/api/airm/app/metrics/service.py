@@ -13,7 +13,7 @@ from loguru import logger
 from prometheus_api_client import PrometheusConnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api_common.collections import FilterCondition, PaginationConditions, SortCondition
+from api_common.collections import FilterCondition, PaginationConditions, PaginationMetadata, SortCondition
 
 from ..projects.models import Project
 from ..projects.models import Project as ProjectModel
@@ -598,9 +598,11 @@ async def get_workloads_metrics_by_project(
 
     return WorkloadsWithMetrics(
         data=workload_metrics,
-        total=count,
-        page=pagination_params.page,
-        page_size=pagination_params.page_size,
+        pagination=PaginationMetadata(
+            page=pagination_params.page,
+            page_size=pagination_params.page_size,
+            total=count,
+        ),
     )
 
 
@@ -636,9 +638,11 @@ async def get_workloads_metrics_by_cluster(
 
     return WorkloadsWithMetrics(
         data=workload_metrics,
-        total=count,
-        page=pagination_params.page,
-        page_size=pagination_params.page_size,
+        pagination=PaginationMetadata(
+            page=pagination_params.page,
+            page_size=pagination_params.page_size,
+            total=count,
+        ),
     )
 
 

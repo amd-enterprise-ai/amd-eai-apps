@@ -39,6 +39,17 @@ Admin invites a new user to the platform
     When the user invites a new user with email, role, and project assignment
     Then the invited user appears in the invited users list
 
+Admin invites a team member and assigns a project from the invite flow
+    [Documentation]    Verify that an admin can choose team member role and assign
+    ...                a project when inviting; the invitation succeeds and appears in the list.
+    [Tags]    ui    airm    users    invite
+
+    Given a ready project with user access exists
+    Given an admin user is on the users page
+    And user invitations are enabled
+    When the user invites a new team member and assigns the prepared project
+    Then the invited user appears in the invited users list
+
 Admin updates a user's profile information
     [Documentation]    Verify that an admin can update a user's first and last name
     ...                on the user detail page and the changes are persisted.

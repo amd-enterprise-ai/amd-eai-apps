@@ -22,10 +22,6 @@ ${PROJECT_STATUS_TIMEOUT}       120s
 # Precondition keywords (Given steps)
 # =============================================================================
 
-An admin user is logged in to AIRM
-    [Documentation]    Logs in as an admin user to AIRM.
-    Admin user is logged in
-
 An admin user is on the projects page
     [Documentation]    Logs in as admin and navigates to the projects page.
     Admin user is logged in
@@ -150,6 +146,18 @@ The user navigates to the quota tab
     [Documentation]    Navigates to the quota tab on the project edit page.
     Click quota tab
 
+The user notes the current CPU guaranteed allocation on the quota tab
+    [Documentation]    Records the displayed CPU guaranteed allocation for a later assertion.
+    Note current CPU guaranteed allocation on quota tab
+
+The user increases the CPU guaranteed allocation once without saving
+    [Documentation]    Adjusts the CPU allocation control without submitting the form.
+    Increase CPU guaranteed allocation once without saving
+
+The user discards changes to the project settings form
+    [Documentation]    Reverts unsaved edits on the project edit page.
+    Click discard changes on project settings
+
 The user navigates to the members tab
     [Documentation]    Navigates to the members/users tab on the project edit page.
     Click users tab
@@ -229,6 +237,10 @@ Admin quota controls are visible
     ...                Save/Discard buttons indicate the user has admin edit permissions.
     Save changes button should be visible
     Discard changes button should be visible
+
+The CPU guaranteed allocation matches the noted value
+    [Documentation]    Verifies the CPU allocation display matches the earlier recorded value.
+    CPU guaranteed allocation should match noted value
 
 The user appears in the project members list
     [Documentation]    Verifies that the newly added member appears in the members table.

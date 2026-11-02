@@ -13,7 +13,6 @@
 **/build
 **/htmlcov
 **/tests/
-!testing/
 **/tmp_trainer
 **/venv
 **/.venv

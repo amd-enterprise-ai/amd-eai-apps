@@ -10,6 +10,8 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 
 import { TFunction } from 'next-i18next';
 
@@ -206,28 +208,21 @@ describe('BaseDataTable', () => {
       );
     });
 
-    await act(() => {
-      const pageFrameSelectWrapper = screen.queryByText(
-        'list.pagination.pageSize.label',
-      )?.nextElementSibling;
-      const selectTrigger = (pageFrameSelectWrapper as Element).querySelector(
-        'button[data-slot="trigger"]',
-      );
+    const user = userEvent.setup();
+    const selectTrigger = document.querySelector(
+      'button[data-slot="select-trigger"]',
+    ) as HTMLElement;
+    await user.click(selectTrigger);
 
-      fireEvent.click(selectTrigger!);
-    });
-
-    await act(() => {
-      const select = screen.queryAllByRole('option');
-      const largePageSize = select.find(
-        (option) => option.textContent === PageFrameSize.LARGE.toString(),
-      );
-      fireEvent.click(largePageSize!);
-    });
+    const options = await screen.findAllByRole('option');
+    const largePageSize = options.find(
+      (option) => option.textContent === PageFrameSize.LARGE.toString(),
+    );
+    await user.click(largePageSize as HTMLElement);
 
     await waitFor(() => {
       expect(mockCallbacks.onFrameSizeChange).toHaveBeenCalledWith(
-        PageFrameSize.LARGE.toString(),
+        PageFrameSize.LARGE,
       );
     });
   });
@@ -376,7 +371,7 @@ describe('BaseDataTable', () => {
     act(() => {
       const aliceRow = screen.getByText('Bob').closest('tr');
       expect(aliceRow).toBeTruthy();
-      const dropDown = within(aliceRow!).getByLabelText('list.actions.label');
+      const dropDown = within(aliceRow!).getByLabelText('Actions');
       fireEvent.click(dropDown);
     });
 
@@ -388,6 +383,56 @@ describe('BaseDataTable', () => {
       id: 2,
       name: 'Bob',
       age: 45,
+    });
+  });
+
+  it('re-enables row action trigger when isRowDisabled flips without data reference change', async () => {
+    const rowActions = [
+      {
+        key: 'delete',
+        onPress: vi.fn(),
+        label: 'Delete',
+      },
+    ];
+
+    const TableWithToggle = () => {
+      const [allRowsDisabled, setAllRowsDisabled] = useState(true);
+      return (
+        <div>
+          <button type="button" onClick={() => setAllRowsDisabled(false)}>
+            enable-rows
+          </button>
+          <BaseDataTable
+            data={mockData}
+            columns={mockColumns}
+            rowActions={rowActions}
+            defaultSortByField="name"
+            translation={mockTranslation}
+            idKey="id"
+            total={mockData.length}
+            onSortChange={mockCallbacks.onSortChange}
+            onFrameSizeChange={mockCallbacks.onFrameSizeChange}
+            onPageChange={mockCallbacks.onPageChange}
+            isRowDisabled={() => allRowsDisabled}
+          />
+        </div>
+      );
+    };
+
+    render(<TableWithToggle />);
+
+    const aliceRow = screen.getByText('Alice').closest('tr');
+    expect(aliceRow).toBeTruthy();
+    const dropDownBefore = within(aliceRow!).getByLabelText('Actions');
+    expect(dropDownBefore).toBeDisabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'enable-rows' }));
+
+    await waitFor(() => {
+      const aliceRowAfter = screen.getByText('Alice').closest('tr');
+      expect(aliceRowAfter).toBeTruthy();
+      const dropDownAfter = within(aliceRowAfter!).getByLabelText('Actions');
+      expect(dropDownAfter).not.toBeDisabled();
     });
   });
 
@@ -414,5 +459,82 @@ describe('BaseDataTable', () => {
 
     const emptyStateMessage = screen.getByText('list.headers.age.description');
     expect(emptyStateMessage).toBeInTheDocument();
+  });
+
+  it('should render selection checkboxes when isSelectable is true', () => {
+    act(() => {
+      render(
+        <BaseDataTable
+          data={mockData}
+          columns={mockColumns}
+          defaultSortByField="name"
+          translation={mockTranslation}
+          idKey="id"
+          total={mockData.length}
+          isSelectable
+          selectedKeys={new Set()}
+          onSelectionChange={vi.fn()}
+          onSortChange={mockCallbacks.onSortChange}
+          onFrameSizeChange={mockCallbacks.onFrameSizeChange}
+          onPageChange={mockCallbacks.onPageChange}
+        />,
+      );
+    });
+
+    expect(screen.getByLabelText('Select all')).toBeInTheDocument();
+    expect(screen.getByLabelText('Select row 1')).toBeInTheDocument();
+    expect(screen.getByLabelText('Select row 2')).toBeInTheDocument();
+    expect(screen.getByLabelText('Select row 3')).toBeInTheDocument();
+  });
+
+  it('should not render selection checkboxes when isSelectable is not set', () => {
+    act(() => {
+      render(
+        <BaseDataTable
+          data={mockData}
+          columns={mockColumns}
+          defaultSortByField="name"
+          translation={mockTranslation}
+          idKey="id"
+          total={mockData.length}
+          onSortChange={mockCallbacks.onSortChange}
+          onFrameSizeChange={mockCallbacks.onFrameSizeChange}
+          onPageChange={mockCallbacks.onPageChange}
+        />,
+      );
+    });
+
+    expect(screen.queryByLabelText('Select all')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Select row 1')).not.toBeInTheDocument();
+  });
+
+  it('should call onSelectionChange when a row checkbox is clicked', async () => {
+    const onSelectionChange = vi.fn();
+
+    await act(async () => {
+      render(
+        <BaseDataTable
+          data={mockData}
+          columns={mockColumns}
+          defaultSortByField="name"
+          translation={mockTranslation}
+          idKey="id"
+          total={mockData.length}
+          isSelectable
+          selectedKeys={new Set()}
+          onSelectionChange={onSelectionChange}
+          onSortChange={mockCallbacks.onSortChange}
+          onFrameSizeChange={mockCallbacks.onFrameSizeChange}
+          onPageChange={mockCallbacks.onPageChange}
+        />,
+      );
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText('Select row 1'));
+
+    await waitFor(() => {
+      expect(onSelectionChange).toHaveBeenCalled();
+    });
   });
 });

@@ -2,11 +2,14 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { Chip, Skeleton, Tooltip } from '@amdenterpriseai/components';
-import { cn } from '@heroui/react';
+import { Chip, Skeleton, Tooltip, cn } from '@amdenterpriseai/components';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { JSX, memo, useMemo } from 'react';
-import { ResourceType } from './constants';
+import {
+  ALLOCATION_STATUS_TEXT_CLASS,
+  ResourceType,
+  type AllocationAlertColor,
+} from './constants';
 import { useTranslation } from 'next-i18next';
 
 /**
@@ -61,32 +64,44 @@ export const TableLine = memo(
       }
     }, [type, t, total]);
 
-    const { hasWarning, warningMessage, warningColor } = useMemo(() => {
-      const hasWarning = quota ? total > quota || total < req : false;
+    const { hasWarning, warningMessage, statusColor } = useMemo((): {
+      hasWarning: boolean;
+      warningMessage: string;
+      statusColor: AllocationAlertColor | undefined;
+    } => {
+      const hasWarning = total < req || (quota ? total > quota : false);
       if (!hasWarning) {
-        return { hasWarning: false, warningMessage: '', warningColor: '' };
+        return {
+          hasWarning: false,
+          warningMessage: '',
+          statusColor: undefined,
+        };
       }
 
       if (total < req && quota && total > quota) {
         return {
           hasWarning: true,
           warningMessage: t('belowRequiredExceedsQuotaTooltip'),
-          warningColor: 'text-danger',
+          statusColor: 'danger',
         };
       }
       if (total < req) {
         return {
           hasWarning: true,
           warningMessage: t('belowRequiredTooltip'),
-          warningColor: 'text-danger',
+          statusColor: 'danger',
         };
       }
       return {
         hasWarning: true,
         warningMessage: t('exceedsQuotaTooltip'),
-        warningColor: 'text-warning',
+        statusColor: 'warning',
       };
     }, [total, quota, req, t]);
+
+    const statusTextClass = statusColor
+      ? ALLOCATION_STATUS_TEXT_CLASS[statusColor]
+      : undefined;
 
     if (isLoading) {
       return (
@@ -109,7 +124,7 @@ export const TableLine = memo(
             >
               <IconAlertTriangle
                 size={16}
-                className={cn('cursor-help', warningColor)}
+                className={cn('cursor-help', statusTextClass)}
               />
             </Tooltip>
           )}
@@ -129,7 +144,9 @@ export const TableLine = memo(
             })}
           </span>
         )}
-        <span className="text-nowrap">{valueFormatted}</span>
+        <span className={cn('text-nowrap', statusTextClass)}>
+          {valueFormatted}
+        </span>
       </div>
     );
   },

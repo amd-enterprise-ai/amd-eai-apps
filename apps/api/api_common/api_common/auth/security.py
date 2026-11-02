@@ -3,20 +3,26 @@
 # SPDX-License-Identifier: MIT
 
 """
-Shared Keycloak JWT authentication.
+Shared OIDC JWT authentication.
 
-Common JWT utilities used by both AIRM and AIWB.
+AIWB verifies its tokens here. Any OIDC issuer works: the token is verified
+with the keys of the JWKS endpoint in the configuration. AIRM uses only
+OpenIdAuthorization and keeps its own token validation.
 """
 
+import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OpenIdConnect
-from jwcrypto.jwt import JWTExpired
-from keycloak import KeycloakOpenID
+from jwt import ExpiredSignatureError, PyJWKClient
 from loguru import logger
 
-from .config import DISABLE_JWT_VALIDATION, KEYCLOAK_INTERNAL_URL, KEYCLOAK_REALM, OPENID_CONFIGURATION_URL
+from .config import DISABLE_JWT_VALIDATION, OIDC_AUDIENCE, OIDC_ISSUER, OIDC_JWKS_URL, OPENID_CONFIGURATION_URL
 
-KEYCLOAK_OPENID = KeycloakOpenID(server_url=KEYCLOAK_INTERNAL_URL, client_id=None, realm_name=KEYCLOAK_REALM)
+ALLOWED_ALGORITHMS = ["RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512"]
+
+# The client fetches the keys on first use and caches them. An unknown key id
+# triggers a refresh, so a key rotation on the issuer needs no restart.
+JWK_CLIENT = PyJWKClient(OIDC_JWKS_URL, cache_keys=True)
 
 
 class OpenIdAuthorization(OpenIdConnect):
@@ -39,6 +45,21 @@ class OpenIdAuthorization(OpenIdConnect):
 BearerToken = OpenIdAuthorization(openIdConnectUrl=OPENID_CONFIGURATION_URL, auto_error=True)
 
 
+def decode_token(token: str) -> dict:
+    """Verify the token with the issuer keys and return its claims."""
+    if DISABLE_JWT_VALIDATION:
+        return jwt.decode(token, options={"verify_signature": False})
+    signing_key = JWK_CLIENT.get_signing_key_from_jwt(token)
+    return jwt.decode(
+        token,
+        signing_key.key,
+        algorithms=ALLOWED_ALGORITHMS,
+        issuer=OIDC_ISSUER,
+        audience=OIDC_AUDIENCE,
+        options={"verify_aud": OIDC_AUDIENCE is not None},
+    )
+
+
 def auth_token_claimset(authorization: str = Depends(BearerToken)) -> dict:
     """Parse and verify JWT token from Authorization header."""
     if authorization is None:
@@ -50,12 +71,12 @@ def auth_token_claimset(authorization: str = Depends(BearerToken)) -> dict:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token scheme. Please include Bearer in Authorization header.",
             )
-        decoded = KEYCLOAK_OPENID.decode_token(token, validate=not DISABLE_JWT_VALIDATION)
+        decoded = decode_token(token)
         logger.debug(f"Decoded token claims: email={decoded.get('email')}, groups={decoded.get('groups')}")
         return decoded
     except HTTPException:
         raise
-    except JWTExpired:
+    except ExpiredSignatureError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
     except Exception as exc:
         logger.exception("Exception while reading token")

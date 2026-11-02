@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: MIT
 
 import {
-  IconExternalLink,
   IconEye,
   IconLink,
   IconMessage,
@@ -22,10 +21,10 @@ import {
   AIM_CANONICAL_NAME_ANNOTATION,
   AIM_DISPLAY_NAME_ANNOTATION,
   AIM_MODEL_WORKLOAD_ID_LABEL,
-  AIMModel,
   FINE_TUNED_LABEL,
   NAMESPACE_AIM_MODEL_LABEL,
 } from '@/types/aims';
+import type { components } from '@/types/api';
 import { listAllWorkloads } from '@/lib/app/workloads';
 
 import { getFilteredData } from '@amdenterpriseai/utils/app';
@@ -35,12 +34,10 @@ import { getWorkloadTypeVariants } from '@amdenterpriseai/utils/app';
 import { TableColumns } from '@amdenterpriseai/types';
 import { FilterComponentType } from '@amdenterpriseai/types';
 import { SortDirection } from '@amdenterpriseai/types';
-import { WorkloadType } from '@amdenterpriseai/types';
-import { WorkloadStatus } from '@/types/enums/workloads';
-import { WorkloadsTableFields } from '@/types/enums/workloads-table-fields';
+import type { ResourceStatus } from '@/types/workloads';
 import { ClientSideDataFilter, FilterValueMap } from '@amdenterpriseai/types';
 import { Model } from '@/types/models';
-import { Workload } from '@/types/workloads';
+import type { Workload } from '@/types/workloads';
 
 import {
   ActionsToolbar,
@@ -55,35 +52,89 @@ import {
 import { useProject } from '@/contexts/ProjectContext';
 import {
   aimParser,
-  mapAIMServiceStatusToWorkloadStatus,
+  getMaxSupportedLoraRank,
+  getModelCapability,
   resolveAIMServiceDisplay,
   resolveBaseModelSource,
 } from '@/lib/app/aims';
+import { useDeletedWorkloadsOptIn } from '@/hooks/useDeletedWorkloadsOptIn';
+import { useCustomProfileDeployments } from '@/hooks/useCustomProfileDeployments';
 import { useProfileSpecsForServices } from '@/hooks/useProfileSpecsForServices';
 import {
   deleteInferenceDeployment,
   listAllInferenceDeployments,
 } from '@/lib/app/inference';
 import { useInferenceModelsByName } from '@/hooks/useInferenceModelsByName';
+import { resolveModelDeploymentName } from '@/lib/app/modelDeploymentDisplay';
 import {
   ModelProfileSummary,
   toProfileSummaryFields,
 } from '@/components/shared/ModelProfileSummary';
-import { AIMService } from '@/types/aims';
+import type { AIMService, AIMServiceStatus } from '@/types/aims';
 import { SUBMITTER_ANNOTATION_KEY } from '@/components/features/secrets/constants';
 import AIMConnectModal from './AIMConnectModal';
 
-const defaultStatusSet = [
-  WorkloadStatus.PENDING,
-  WorkloadStatus.STARTING,
-  WorkloadStatus.RUNNING,
-  WorkloadStatus.FAILED,
+const WorkloadsTableFields = {
+  DISPLAY_NAME: 'displayName',
+  MODEL_NAME: 'name',
+  CANONICAL_NAME: 'canonicalName',
+  SHORT_DESCRIPTION: 'description',
+  STATUS: 'status',
+  TYPE: 'type',
+  CREATED_AT: 'createdAt',
+  CREATED_BY: 'createdBy',
+  VRAM: 'vram',
+  GPU: 'gpu',
+} as const;
+
+type WorkloadsTableFields =
+  (typeof WorkloadsTableFields)[keyof typeof WorkloadsTableFields];
+
+const defaultStatusSet: ResourceStatus[] = [
+  'Pending',
+  'Starting',
+  'Running',
+  'Failed',
 ];
+
+type WorkloadStatus = components['schemas']['WorkloadStatus'];
+
+// Exhaustive by type, so a status added backend-side cannot reach the UI without
+// a deliberate visibility decision — listing the visible ones instead would let a
+// new status be silently omitted, hiding those rows from everyone. Key order is
+// load-bearing: it is the order the status filter offers, so these are ordered by
+// lifecycle rather than alphabetically.
+const statusVisibleByDefault: Record<WorkloadStatus, boolean> = {
+  Pending: true,
+  Starting: true,
+  Running: true,
+  Complete: true,
+  Failed: true,
+  Unknown: true,
+  Deleting: true,
+  Deleted: false,
+};
+
+// Every status a user can filter on without the deleted-workloads opt-in. Also
+// the server-side status filter, so opted-out users never receive deleted rows.
+const visibleStatuses = (
+  Object.keys(statusVisibleByDefault) as WorkloadStatus[]
+).filter((status) => statusVisibleByDefault[status]);
+
+// AIM-derived rows can carry Degraded, which is outside the workload wire status.
+type DeployedWorkload = Omit<Workload, 'status'> & {
+  status: ResourceStatus;
+  aimId?: string | null;
+};
+
+const mapAIMServiceStatus = (
+  status: AIMServiceStatus | undefined,
+): ResourceStatus => status ?? 'Unknown';
 
 const convertFilterValueMap = (
   filters: FilterValueMap,
-): ClientSideDataFilter<Workload>[] => {
-  const newFilters: ClientSideDataFilter<Workload>[] = [];
+): ClientSideDataFilter<DeployedWorkload>[] => {
+  const newFilters: ClientSideDataFilter<DeployedWorkload>[] = [];
   if (filters?.search) {
     newFilters.push({
       field: 'displayName',
@@ -111,18 +162,38 @@ const DeployedModels: React.FC = ({}) => {
   const { toast } = useSystemToast();
   const router = useRouter();
   const { activeProject, projectPath, projectUrl } = useProject();
+  const showDeletedWorkloads = useDeletedWorkloadsOptIn();
 
-  const [filters, setFilters] = useState<ClientSideDataFilter<Workload>[]>(
+  // Opting in has to pre-select Deleted too, not just offer it — otherwise the
+  // rows the opt-in fetched stay hidden behind the default status filter.
+  const activeDefaultStatusSet: ResourceStatus[] = useMemo(
+    () =>
+      showDeletedWorkloads
+        ? [...defaultStatusSet, 'Deleted']
+        : defaultStatusSet,
+    [showDeletedWorkloads],
+  );
+
+  const [filters, setFilters] = useState<
+    ClientSideDataFilter<DeployedWorkload>[]
+  >(() =>
     convertFilterValueMap({
-      status: defaultStatusSet,
+      status: activeDefaultStatusSet,
     }),
   );
 
+  // The opt-in can also flip after mount (navigating to `?deleted=…` reuses the
+  // mounted page), so re-seed the active filter and remount the toolbar below
+  // to keep the table and the dropdown's selection in agreement.
+  useEffect(() => {
+    setFilters(convertFilterValueMap({ status: activeDefaultStatusSet }));
+  }, [activeDefaultStatusSet]);
+
   const [workloadBeingSelected, setWorkloadBeingSelected] = useState<
-    Workload | undefined
+    DeployedWorkload | undefined
   >(undefined);
   const [workloadForConnect, setWorkloadForConnect] = useState<
-    Workload | undefined
+    DeployedWorkload | undefined
   >(undefined);
 
   const queryClient = useQueryClient();
@@ -134,13 +205,14 @@ const DeployedModels: React.FC = ({}) => {
     refetch: refetchWorkloads,
     error: workloadsError,
     dataUpdatedAt,
-  } = useQuery<Workload[]>({
-    queryKey: ['project', activeProject, 'workloads'],
+  } = useQuery<components['schemas']['WorkloadResponse'][]>({
+    queryKey: ['project', activeProject, 'workloads', showDeletedWorkloads],
     queryFn: async () => {
       if (!activeProject) return [];
 
       return await listAllWorkloads(activeProject, {
-        type: [WorkloadType.INFERENCE],
+        workloadType: ['INFERENCE'],
+        statusFilter: showDeletedWorkloads ? undefined : visibleStatuses,
       });
     },
     refetchInterval: 30000,
@@ -164,7 +236,7 @@ const DeployedModels: React.FC = ({}) => {
     if (!allWorkloads || !allAimServices) return [];
     // Filter out AIM services with null ids — they cannot be de-duplicated
     // against workloads and would silently collapse into one row under the null key.
-    const aimWorkloads: Workload[] = allAimServices
+    const aimWorkloads: DeployedWorkload[] = allAimServices
       .filter((aim): aim is typeof aim & { id: string } => aim.id !== null)
       .map((aim) => ({
         id: aim.id,
@@ -173,17 +245,21 @@ const DeployedModels: React.FC = ({}) => {
           aim.metadata.annotations?.[AIM_DISPLAY_NAME_ANNOTATION] ??
           aim.metadata.name,
         name: aim.metadata.name,
-        type: WorkloadType.INFERENCE,
-        status: mapAIMServiceStatusToWorkloadStatus(aim.status.status),
-        createdAt: aim.metadata.creationTimestamp,
-        createdBy: aim.metadata.annotations[SUBMITTER_ANNOTATION_KEY],
-        updatedAt: aim.metadata.creationTimestamp,
-        aimId: aim.spec.model?.name,
+        type: 'INFERENCE',
+        status: mapAIMServiceStatus(aim.status?.status),
+        createdAt: aim.metadata.creationTimestamp ?? '',
+        createdBy: aim.metadata.annotations?.[SUBMITTER_ANNOTATION_KEY] ?? '',
+        updatedBy: null,
+        updatedAt: aim.metadata.creationTimestamp ?? '',
+        namespace: '',
+        description: null,
+        endpoints: {},
+        aimId: aim.spec?.model?.name,
       }));
 
     // listWorkloads and AIM services can refer to the same deployment id.
     // Prefer AIM-derived fields for overlaps to avoid duplicate rows/keys.
-    const deploymentsById = new Map<string, Workload>();
+    const deploymentsById = new Map<string, DeployedWorkload>();
     allWorkloads.forEach((workload) => {
       deploymentsById.set(workload.id, workload);
     });
@@ -215,7 +291,7 @@ const DeployedModels: React.FC = ({}) => {
   }, [allDeployments, filters]);
 
   const hasFinetuningWorkloads = useMemo(
-    () => workloads.some((w) => w.type === WorkloadType.FINE_TUNING),
+    () => workloads.some((w) => w.type === 'FINE_TUNING'),
     [workloads],
   );
 
@@ -233,7 +309,7 @@ const DeployedModels: React.FC = ({}) => {
             s.metadata.labels?.[FINE_TUNED_LABEL] !== 'true' &&
             s.metadata.labels?.[NAMESPACE_AIM_MODEL_LABEL] !== 'true',
         )
-        .map((s) => s.spec.model?.name)
+        .map((s) => s.spec?.model?.name)
         .filter((name): name is string => !!name),
     [allAimServices],
   );
@@ -255,7 +331,7 @@ const DeployedModels: React.FC = ({}) => {
     isLoading: isModelsLoading,
     isRefetching: isModelsRefetching,
     refetch: refetchModels,
-  } = useQuery<AIMModel[]>({
+  } = useQuery<components['schemas']['AIMModelResource'][]>({
     queryKey: ['project', activeProject, 'fine-tuned-models'],
     queryFn: () => listAllProjectFineTunedModels(activeProject!),
     enabled: !!activeProject && (hasFinetuningWorkloads || hasAimWorkloads),
@@ -283,19 +359,31 @@ const DeployedModels: React.FC = ({}) => {
         ...Array.from(clusterAimsByName.values()).map((m) => m.status?.aimId),
         ...fineTunedModelCrs.map((m) => m.status?.aimId),
       ].filter((id): id is string => !!id);
+  const resolvedProfiles = useMemo(
+    () => allAimServices.map(({ status }) => status?.resolvedProfile),
+    [allAimServices],
+  );
   const { specByName: profileSpecByName } = useProfileSpecsForServices({
     aimIds,
     project: activeProject,
+    resolvedProfiles,
   });
+  // Custom models are absent from the catalog above, so their axes come from
+  // their own profiles endpoint. The line reads the same either way.
+  const { profileByServiceId: customProfileByServiceId } =
+    useCustomProfileDeployments({
+      services: allAimServices ?? [],
+      project: activeProject,
+    });
 
   // BaseDataTable caches cell renders keyed by row reference (see the
   // comment in `apps/ui/shared/components/src/DataTable/BaseDataTable.tsx`).
-  // The DISPLAY_NAME renderer closes over `profileSpecByName`, so when the
-  // profile fetch resolves we mint new row references to force the table to
-  // re-invoke the renderer with the now-populated map.
+  // The DISPLAY_NAME renderer closes over both profile lookups, so when either
+  // fetch resolves we mint new row references to force the table to re-invoke
+  // the renderer with the now-populated maps.
   const tableRows = useMemo(
     () => workloads.map((w) => ({ ...w })),
-    [workloads, profileSpecByName],
+    [workloads, profileSpecByName, customProfileByServiceId],
   );
 
   useEffect(() => {
@@ -342,13 +430,16 @@ const DeployedModels: React.FC = ({}) => {
     if (!workloadForConnect?.aimId || !allAimServices) return undefined;
     const service = allAimServices.find((s) => s.id === workloadForConnect.id);
     if (!service) return undefined;
-    const modelName = service.status?.resolvedModel?.name;
+    const modelName = service.status?.resolvedModel?.name ?? undefined;
     return {
       serviceId: service.id ?? undefined,
       endpoints: service.endpoints,
       modelName,
+      capability: getModelCapability(
+        resolveAIMServiceDisplay(service, aims).tags,
+      ),
     };
-  }, [workloadForConnect, allAimServices]);
+  }, [workloadForConnect, allAimServices, aims]);
 
   const columns: TableColumns<WorkloadsTableFields | null> = [
     {
@@ -388,16 +479,31 @@ const DeployedModels: React.FC = ({}) => {
   }, [models]);
 
   const customRenderers: Partial<
-    Record<WorkloadsTableFields, (item: Workload) => React.ReactNode | string>
+    Record<
+      WorkloadsTableFields,
+      (item: DeployedWorkload) => React.ReactNode | string
+    >
   > = {
     [WorkloadsTableFields.DISPLAY_NAME]: (item) => {
       const aimService =
         item.aimId && allAimServices
           ? allAimServices.find((service) => service.id === item.id)
           : undefined;
-      const profile = aimService
-        ? toProfileSummaryFields(aimService, profileSpecByName)
-        : undefined;
+      const baseProfile =
+        customProfileByServiceId.get(item.id)?.profile ??
+        (aimService
+          ? toProfileSummaryFields(aimService, profileSpecByName)
+          : undefined);
+      // Custom-profile axes never carry maxLoraRank — it's sourced from the
+      // deployment's own spec, not the profile — so fold it in explicitly
+      // rather than letting a custom profile short-circuit past it.
+      const maxLoraRank =
+        baseProfile?.maxLoraRank ?? getMaxSupportedLoraRank(aimService?.spec);
+      const profile = baseProfile
+        ? { ...baseProfile, maxLoraRank }
+        : maxLoraRank != null
+          ? { maxLoraRank }
+          : undefined;
       const profileSummary = (
         <ModelProfileSummary profile={profile ?? null} t={tModels} />
       );
@@ -405,14 +511,12 @@ const DeployedModels: React.FC = ({}) => {
       if (item.aimId && allAimServices && aims) {
         if (aimService) {
           const displayInfo = resolveAIMServiceDisplay(aimService, aims);
-          const canonicalName =
-            `${displayInfo.canonicalName} ${displayInfo.imageVersion ? `(${displayInfo.imageVersion})` : ''}`.trim();
-          // Prefer the API display name; fall back to canonical + version when
-          // the API only echoes the K8s resource name (displayName === name).
-          const displayName =
-            item.displayName && item.displayName !== item.name
-              ? item.displayName
-              : canonicalName;
+          const displayName = resolveModelDeploymentName({
+            displayName: item.displayName,
+            resourceName: item.name,
+            canonicalName: displayInfo.canonicalName,
+            imageVersion: displayInfo.imageVersion,
+          });
           return (
             <div className="flex flex-col gap-1">
               <span>{displayName}</span>
@@ -446,36 +550,33 @@ const DeployedModels: React.FC = ({}) => {
       const aimService = allAimServices?.find((s) => s.id === item.id);
       const annotationCanonical =
         aimService?.metadata.annotations?.[AIM_CANONICAL_NAME_ANNOTATION];
-      return (
-        annotationCanonical ||
-        item.userInputs?.canonicalName || <NoDataDisplay />
-      );
+      return annotationCanonical || <NoDataDisplay />;
     },
     [WorkloadsTableFields.CREATED_AT]: (item) => (
       <DateDisplay date={item.createdAt} />
     ),
-    [WorkloadsTableFields.TYPE]: (item: Workload) => (
+    [WorkloadsTableFields.TYPE]: (item: DeployedWorkload) => (
       <ChipDisplay
-        type={item[WorkloadsTableFields.TYPE] as WorkloadType}
+        type={item[WorkloadsTableFields.TYPE]}
         variants={getWorkloadTypeVariants(t)}
       />
     ),
-    [WorkloadsTableFields.STATUS]: (item: Workload) => (
+    [WorkloadsTableFields.STATUS]: (item: DeployedWorkload) => (
       <StatusDisplay
-        type={item[WorkloadsTableFields.STATUS] as WorkloadStatus}
+        type={item[WorkloadsTableFields.STATUS] as ResourceStatus}
         variants={getWorkloadStatusVariants(t)}
       />
     ),
   };
 
-  const actions = (item: Workload) => {
+  const actions = (item: DeployedWorkload) => {
     const actionsList = [];
 
     actionsList.push({
       key: 'details',
       label: t('list.actions.details.label'),
       startContent: <IconEye />,
-      onPress: (w: Workload) => {
+      onPress: (w: DeployedWorkload) => {
         if (w.aimId) {
           router.push({
             pathname: projectPath(`/aims/${w.id}`),
@@ -490,52 +591,43 @@ const DeployedModels: React.FC = ({}) => {
       },
     });
 
-    if (
-      item.type === WorkloadType.WORKSPACE &&
-      item.output?.internalHost &&
-      item.status !== WorkloadStatus.DELETED
-    ) {
-      actionsList.push({
-        key: 'openWorkspace',
-        label: t('list.actions.openWorkspace.label'),
-        startContent: <IconExternalLink />,
-        onPress: () => {
-          window.open(item.output?.internalHost, '_blank');
-        },
-      });
-    }
-
-    if (
-      item.type === WorkloadType.INFERENCE &&
-      item.status === WorkloadStatus.RUNNING
-    ) {
-      actionsList.push({
-        key: 'chat',
-        label: t('list.actions.chat.label'),
-        startContent: <IconMessage />,
-        onPress: () => {
-          window.open(projectUrl(`/chat?workload=${item.id}`), '_blank');
-        },
-      });
+    if (item.type === 'INFERENCE' && item.status === 'Running') {
+      const service = item.aimId
+        ? allAimServices?.find((s) => s.id === item.id)
+        : undefined;
+      const capability = service
+        ? getModelCapability(resolveAIMServiceDisplay(service, aims).tags)
+        : 'chat';
+      // Transcription deployments have no chat surface; omit the chat action.
+      if (capability !== 'transcription') {
+        actionsList.push({
+          key: 'chat',
+          label: t('list.actions.chat.label'),
+          startContent: <IconMessage />,
+          onPress: () => {
+            window.open(projectUrl(`/chat?workload=${item.id}`), '_blank');
+          },
+        });
+      }
       if (item.aimId) {
         actionsList.push({
           key: 'connect',
           label: t('aimCatalog.actions.connect.label', { ns: 'models' }),
           startContent: <IconLink />,
-          onPress: (w: Workload) => {
+          onPress: (w: DeployedWorkload) => {
             setWorkloadForConnect(w);
             onConnectModalOpen();
           },
         });
       }
     }
-    if (item.status !== WorkloadStatus.DELETED) {
+    if (item.status !== 'Deleted') {
       actionsList.push({
         key: 'undeploy',
         label: t('customModels.list.actions.undeploy.label', { ns: 'models' }),
         color: 'danger',
         startContent: <IconRocketOff />,
-        onPress: (w: Workload) => {
+        onPress: (w: DeployedWorkload) => {
           setWorkloadBeingSelected(w);
           onDeleteWorkloadModalOpen();
         },
@@ -545,8 +637,11 @@ const DeployedModels: React.FC = ({}) => {
     return actionsList;
   };
 
-  const filterConfig = useMemo(
-    () => ({
+  const filterConfig = useMemo(() => {
+    const statuses: WorkloadStatus[] = showDeletedWorkloads
+      ? [...visibleStatuses, 'Deleted']
+      : visibleStatuses;
+    return {
       search: {
         name: 'search',
         label: t('list.filters.search.placeholder'),
@@ -558,31 +653,23 @@ const DeployedModels: React.FC = ({}) => {
         label: t('list.filters.status.label'),
         placeholder: t('list.filters.status.label'),
         type: FilterComponentType.DROPDOWN,
-        defaultSelectedValues: defaultStatusSet.map(String),
-        fields: [
-          WorkloadStatus.PENDING,
-          WorkloadStatus.STARTING,
-          WorkloadStatus.RUNNING,
-          WorkloadStatus.COMPLETE,
-          WorkloadStatus.FAILED,
-          WorkloadStatus.UNKNOWN,
-          WorkloadStatus.DELETING,
-          WorkloadStatus.DELETED,
-        ].map((status) => ({
+        defaultSelectedValues: activeDefaultStatusSet.map(String),
+        fields: statuses.map((status, index) => ({
           props: {
             description: t(`workloads:status.${status}`),
-            showDivider: status === WorkloadStatus.DELETING,
+            // Sets off the trailing Deleted entry; keyed off the next entry so
+            // dropping it doesn't leave a rule dangling under the last item.
+            showDivider: statuses[index + 1] === 'Deleted',
           },
           key: String(status),
           label: t(`workloads:status.${status}`),
         })),
       },
-    }),
-    [t],
-  );
+    };
+  }, [t, showDeletedWorkloads, activeDefaultStatusSet]);
 
   const handleFilterChange = (filters: FilterValueMap) => {
-    const newFilters: ClientSideDataFilter<Workload>[] =
+    const newFilters: ClientSideDataFilter<DeployedWorkload>[] =
       convertFilterValueMap(filters);
     setFilters(newFilters);
   };
@@ -611,6 +698,7 @@ const DeployedModels: React.FC = ({}) => {
   return (
     <div className="flex flex-col w-full" data-testid="deployed-models">
       <ActionsToolbar
+        key={String(showDeletedWorkloads)}
         filterConfig={filterConfig}
         onFilterChange={handleFilterChange}
         isRefreshing={isFetching}
@@ -660,6 +748,7 @@ const DeployedModels: React.FC = ({}) => {
         serviceId={connectInfo?.serviceId}
         endpoints={connectInfo?.endpoints}
         modelName={connectInfo?.modelName}
+        capability={connectInfo?.capability ?? 'chat'}
         onChatRequested={(serviceId) => {
           window.open(projectUrl(`/chat?workload=${serviceId}`), '_blank');
           onConnectModalClose();

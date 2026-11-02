@@ -8,8 +8,6 @@ SPDX-License-Identifier: MIT
 
 The frontend interface for AMD AI Workbench. This UI connects to the AIWB API and provides AI development features including interactive chat, AI workspaces management, AIMs catalog browsing and deployment, and fine-tuning job configuration.
 
-> **Note:** If you are new to the project or new hired, please read the [LOCAL_SETUP](https://github.com/silogen/dev_helpers/blob/main/LOCAL_SETUP.md) before you continue.
-
 ## Settings
 
 ### Environment variables
@@ -40,8 +38,6 @@ Next.js API routes under `app/api/` fall into two namespaces:
 
 - **`app/api/...`** — backend-mirror routes. Folder structure mirrors backend API paths (e.g., `app/api/namespaces/[namespace]/...`, `app/api/projects/[project]/...`). Most are thin proxies via `@/lib/server/proxy-handler`.
 - **`app/api/ui/...`** — UI-only routes whose logic belongs to the UI, not the backend API. Example: the AIM chat bypass at `app/api/ui/projects/[project]/inference/[id]/chat/` fetches the AIM through the backend then POSTs directly to the AIM's in-cluster URL. Use this namespace when the route needs its own handler logic (auth caching, multi-upstream fan-out, browser-only concerns) rather than being a thin proxy.
-
-See `AGENTS.md` for full route-handler conventions.
 
 ## Running locally
 

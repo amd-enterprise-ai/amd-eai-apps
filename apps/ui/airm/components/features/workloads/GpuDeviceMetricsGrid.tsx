@@ -44,10 +44,10 @@ export const GpuDeviceMetricsGrid: React.FC<GpuDeviceMetricsGridProps> = ({
         return (
           <div key={device.gpuUuid} className="flex flex-col gap-3">
             <div className="flex items-center justify-between gap-2">
-              <h4 className="text-sm font-medium text-default-600 min-w-0 truncate">
+              <h4 className="text-sm font-medium text-foreground min-w-0 truncate">
                 {deviceName}
                 {device.hostname && (
-                  <span className="text-default-400 font-normal">
+                  <span className="text-muted font-normal">
                     {' '}
                     ({device.hostname})
                   </span>
@@ -62,7 +62,7 @@ export const GpuDeviceMetricsGrid: React.FC<GpuDeviceMetricsGridProps> = ({
                       `/clusters/${clusterId}/nodes/${matchedNode.id}`,
                     )
                   }
-                  className="text-primary shrink-0"
+                  className="text-accent shrink-0"
                 >
                   {t('details.fields.viewAllMetrics')}
                 </Button>

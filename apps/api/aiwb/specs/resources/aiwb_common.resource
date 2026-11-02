@@ -8,12 +8,62 @@ Documentation       Shared AIWB keywords used across multiple resource files.
 Resource            resources/common/resource_resolver.resource
 Resource            api/health.resource
 Library             Collections
+Library             KubernetesSecretHelper
+
+
+*** Variables ***
+# HuggingFace token, masked so it never lands in logs. Provide via the HF_TOKEN env var
+# (export locally) or --variable "HF_TOKEN: Secret:...".
+${HF_TOKEN: Secret}         %{HF_TOKEN=}
+# Name of the HuggingFace token secret created in the project namespace.
+${HF_TOKEN_SECRET_NAME}     huggingface-token
+${TEST_HF_TOKEN_SECRET}     ${EMPTY}
 
 
 *** Keywords ***
 AIWB service is running
     [Documentation]    Verifies that AIWB service is running and healthy.
     Verify AIWB health
+
+A HuggingFace token is available for AIM deployment
+    [Documentation]    Opt-in: when the masked ${HF_TOKEN} is provided, creates the HuggingFace
+    ...    secret in the project namespace and publishes its name via ${TEST_HF_TOKEN_SECRET} so
+    ...    the shared `Valid AIM deploy data is prepared` includes hfToken in the deploy payload.
+    ...    When no token is provided (open-model clusters), it is a no-op. Reads the masked
+    ...    ${HF_TOKEN} Secret variable (not the raw env var) so the documented
+    ...    --variable "HF_TOKEN: Secret:..." path is honored. Sets: TEST_HF_TOKEN_SECRET.
+    ${has_token}=    Evaluate    bool($HF_TOKEN.value)
+    IF    not ${has_token}
+        Log    HF_TOKEN not provided — skipping HuggingFace secret; open models work without it    INFO
+        RETURN
+    END
+    HuggingFace token secret exists in namespace
+    VAR    ${TEST_HF_TOKEN_SECRET}    ${HF_TOKEN_SECRET_NAME}    scope=TEST
+
+HuggingFace token secret exists in namespace
+    [Documentation]    Ensures the HuggingFace token secret exists in the project namespace,
+    ...                created from the masked ${HF_TOKEN} secret variable. The value is fed to
+    ...                kubectl via stdin so it never appears in process args or logs. Retries to
+    ...                ride through intermittent OIDC token-exchange (401 "Unauthorized") failures.
+    [Arguments]    ${secret_name}=${HF_TOKEN_SECRET_NAME}    ${namespace}=${None}
+    IF    $namespace == $None
+        ${namespace}=    Get Project Namespace
+    END
+
+    # Read the value via the Secret object so it is never substituted into a log line.
+    ${has_token}=    Evaluate    bool($HF_TOKEN.value)
+    Should Be True    ${has_token}
+    ...    msg=HF_TOKEN is not set. Provide it via the HF_TOKEN env var or --variable "HF_TOKEN: Secret:...".
+
+    Wait Until Keyword Succeeds    1 min    5 sec
+    ...    Create secret from value    ${secret_name}    ${namespace}    ${HF_TOKEN}    --from-file\=token\=/dev/stdin
+
+Create secret from value
+    [Documentation]    Thin wrapper around the Python secret helper: idempotently creates a secret
+    ...    from a masked value sent only over stdin. ${create_args} carries the flags that differ
+    ...    between secret kinds (opaque token vs. dockerconfigjson pull secret).
+    [Arguments]    ${secret_name}    ${namespace}    ${secret_value}    @{create_args}
+    Create Kubernetes Secret From Value    ${secret_name}    ${namespace}    ${secret_value}    @{create_args}
 
 Get Project Namespace
     [Documentation]    Returns the Kubernetes namespace for the current test project.

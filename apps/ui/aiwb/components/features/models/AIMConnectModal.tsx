@@ -10,12 +10,12 @@ import {
   Tab,
   Tabs,
 } from '@amdenterpriseai/components';
-import { IconCopy } from '@tabler/icons-react';
 import { useState } from 'react';
 
 import { useTranslation } from 'next-i18next';
 
 import { useProject } from '@/contexts/ProjectContext';
+import { getInferenceApiPath, type InferenceCapability } from '@/lib/app/aims';
 
 interface Props {
   onOpenChange: (isOpen: boolean) => void;
@@ -24,9 +24,63 @@ interface Props {
   serviceId?: string;
   endpoints?: { internal?: string; external?: string };
   modelName?: string;
+  /**
+   * Capability the deployment exposes; selects the endpoint path and snippet
+   * shape. Required so a transcription deployment can never silently fall back
+   * to the chat snippet at a caller that forgot to pass it.
+   */
+  capability: InferenceCapability;
 }
 
-const getCodeExamples = (
+// Speech-to-text is a multipart file upload that returns a `text` field, so it
+// cannot reuse the JSON chat body/response parsing.
+const getTranscriptionExamples = (
+  url: string,
+  modelName?: string,
+): Record<string, string> => {
+  const model = modelName ?? '';
+  return {
+    curl: `curl -X POST "${url}" \\
+  -H "Authorization: Bearer UPDATE_YOUR_API_KEY_HERE" \\
+  -F "file=@audio.wav" \\
+  -F "model=${model}"`,
+    python: `import requests
+
+url = "${url}"
+headers = {
+    "Authorization": "Bearer UPDATE_YOUR_API_KEY_HERE"
+}
+data = {"model": "${model}"}
+
+# The context manager closes the audio file once the request completes.
+with open("audio.wav", "rb") as audio:
+    files = {"file": audio}
+    response = requests.post(url, headers=headers, files=files, data=data)
+
+result = response.json()
+print(result["text"])`,
+    javascript: `const url = '${url}';
+// Obtain the audio as a File or Blob, e.g. from an <input type="file"> element:
+const audioFile = document.querySelector('input[type="file"]').files[0];
+
+const form = new FormData();
+form.append('file', audioFile);
+form.append('model', '${model}');
+
+fetch(url, {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer UPDATE_YOUR_API_KEY_HERE'
+  },
+  body: form
+})
+  .then(response => response.json())
+  .then(result => console.log(result.text))
+  .catch(error => console.error('Error:', error));`,
+  };
+};
+
+const getChatExamples = (
   url: string,
   modelName?: string,
   backend?: string,
@@ -110,6 +164,7 @@ const AIMConnectModal = ({
   serviceId,
   endpoints,
   modelName,
+  capability,
 }: Props) => {
   const { t } = useTranslation('models', { keyPrefix: 'aimCatalog' });
   const { t: tc } = useTranslation('common');
@@ -117,12 +172,15 @@ const AIMConnectModal = ({
   const [selectedLanguage, setSelectedLanguage] = useState<string>('curl');
   const [useInternalUrl, setUseInternalUrl] = useState<boolean>(false);
 
-  // When the unified Envoy AI Gateway is enabled and configured, inference goes
-  // through a single endpoint (the model is selected via the OpenAI `model`
-  // field), replacing the per-service external URL.
+  const isTranscription = capability === 'transcription';
+  const apiPath = getInferenceApiPath(capability);
+
+  // The unified Envoy AI Gateway routes JSON chat completions through a single
+  // endpoint (256KB-oriented). Speech-to-text is a large multipart upload, so
+  // it targets the per-service workloads URL instead — never the gateway.
   const gatewayUrl =
-    aiGatewayEnabled && aiGatewayUrl
-      ? `${aiGatewayUrl.replace(/\/$/, '')}/v1/chat/completions`
+    !isTranscription && aiGatewayEnabled && aiGatewayUrl
+      ? `${aiGatewayUrl.replace(/\/$/, '')}${apiPath}`
       : '';
   const useGateway = !!gatewayUrl;
 
@@ -142,7 +200,7 @@ const AIMConnectModal = ({
   const externalUrl = useGateway
     ? gatewayUrl
     : endpoints?.external
-      ? `${endpoints.external}/v1/chat/completions`
+      ? `${endpoints.external}${apiPath}`
       : '';
 
   // Label the primary URL as the unified inference endpoint when routing
@@ -152,27 +210,32 @@ const AIMConnectModal = ({
     : t('actions.connect.modal.externalUrl');
 
   const internalUrl = endpoints?.internal
-    ? `${endpoints.internal}/v1/chat/completions`
+    ? `${endpoints.internal}${apiPath}`
     : '';
 
-  const urlToUse = useInternalUrl ? internalUrl : externalUrl || internalUrl;
+  // Fall back to the external URL when the internal toggle is on but there is no
+  // internal endpoint, so the snippet never points at an empty URL.
+  const urlToUse =
+    useInternalUrl && internalUrl ? internalUrl : externalUrl || internalUrl;
   // Only the unified gateway routes by the x-ai-eg-backend / x-ai-eg-model
   // headers; the per-service internal URL targets the deployment directly, so
   // emit the routing headers only when the snippet points at the gateway.
   const routeViaGateway = useGateway && !useInternalUrl;
   // Empty model when unresolved — a display-name fallback silently 404s.
-  const codeExamples = getCodeExamples(
-    urlToUse,
-    modelName,
-    routeViaGateway ? serviceId : undefined,
-  );
+  const codeExamples = isTranscription
+    ? getTranscriptionExamples(urlToUse, modelName)
+    : getChatExamples(
+        urlToUse,
+        modelName,
+        routeViaGateway ? serviceId : undefined,
+      );
   const codeBlock = codeExamples[selectedLanguage] || codeExamples.curl;
 
   return (
     <>
       {isOpen && (
         <Modal
-          size="xl"
+          size="lg"
           title={t('actions.connect.modal.title') as string}
           onClose={handleClose}
           footer={
@@ -180,62 +243,53 @@ const AIMConnectModal = ({
               <ActionButton secondary onPress={handleClose}>
                 {tc('actions.close.title')}
               </ActionButton>
-              <ActionButton
-                primary
-                onPress={handleConfirm}
-                isDisabled={!serviceId}
-              >
-                {t('actions.connect.modal.openChat')}
-              </ActionButton>
+              {/* The chat playground only applies to chat deployments; hide it
+                  for transcription, which has no interactive chat surface. */}
+              {!isTranscription && (
+                <ActionButton
+                  primary
+                  onPress={handleConfirm}
+                  isDisabled={!serviceId}
+                >
+                  {t('actions.connect.modal.openChat')}
+                </ActionButton>
+              )}
             </>
           }
         >
           <div className="space-y-4">
             {externalUrl ? (
               <div>
-                <label className="block text-sm text-foreground-500 mb-2">
+                <label className="block text-sm text-muted mb-2">
                   {externalUrlLabel}
                 </label>
-                <CopySnippet
-                  symbol=""
-                  classNames={{
-                    base: 'w-full relative',
-                    pre: 'whitespace-nowrap font-mono overflow-x-auto mr-6 my-1',
-                    copyButton: 'absolute top-1 right-1',
-                  }}
-                  copyIcon={<IconCopy size={16} />}
-                  aria-label={externalUrlLabel}
-                >
+                <CopySnippet className="w-full" aria-label={externalUrlLabel}>
                   {externalUrl}
                 </CopySnippet>
               </div>
             ) : null}
-            <div>
-              <label className="block text-sm text-foreground-500 mb-2">
-                {t('actions.connect.modal.internalUrl')}
-              </label>
-              <CopySnippet
-                symbol=""
-                classNames={{
-                  base: 'w-full relative',
-                  pre: 'whitespace-nowrap font-mono overflow-x-auto mr-6 my-1',
-                  copyButton: 'absolute top-1 right-1',
-                }}
-                copyIcon={<IconCopy size={16} />}
-                aria-label={t('actions.connect.modal.internalUrl')}
-              >
-                {internalUrl}
-              </CopySnippet>
-            </div>
+            {internalUrl ? (
+              <div>
+                <label className="block text-sm text-muted mb-2">
+                  {t('actions.connect.modal.internalUrl')}
+                </label>
+                <CopySnippet
+                  className="w-full"
+                  aria-label={t('actions.connect.modal.internalUrl')}
+                >
+                  {internalUrl}
+                </CopySnippet>
+              </div>
+            ) : null}
 
             <div>
               <h4 className="uppercase mb-2 mt-4 font-bold">
                 {t('actions.connect.modal.codeTitle')}
               </h4>
-              <label className="block text-sm font-medium text-foreground-500 mb-3">
+              <label className="block text-sm font-medium text-muted mb-3">
                 {t('actions.connect.modal.codeExample')}
               </label>
-              {externalUrl && (
+              {externalUrl && internalUrl && (
                 <div className="flex items-center justify-between mb-3">
                   <Switch
                     isSelected={useInternalUrl}
@@ -266,15 +320,9 @@ const AIMConnectModal = ({
                 />
               </Tabs>
               <CopySnippet
-                classNames={{
-                  base: 'w-full relative',
-                  pre: 'whitespace-pre-wrap font-mono',
-                  copyButton: 'absolute top-1 right-1',
-                }}
-                copyIcon={<IconCopy size={16} />}
-                aria-label={t('actions.connect.modal.codeExample')}
+                className="w-full"
                 data-testid="connect-code-snippet"
-                symbol=""
+                aria-label={t('actions.connect.modal.codeExample')}
               >
                 {codeBlock}
               </CopySnippet>

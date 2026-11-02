@@ -73,10 +73,8 @@ export const AutoscalingFormFields = ({ form, className }: Props) => {
       {/* Replica Range Slider */}
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <span className="text-small text-default-700">
-            {t('replicaRange')}
-          </span>
-          <span className="text-small text-default-500">
+          <span className="text-sm text-foreground">{t('replicaRange')}</span>
+          <span className="text-sm text-muted">
             {minReplicas} - {maxReplicas}
           </span>
         </div>
@@ -90,88 +88,76 @@ export const AutoscalingFormFields = ({ form, className }: Props) => {
           minValue={1}
           maxValue={AIM_MAX_REPLICAS}
           className="max-w-full"
-          size="sm"
         />
       </div>
 
-      <FormSelect
-        data-testid="scaling-metric-select"
-        form={form}
-        name="metricQuery"
-        label={t('scalingMetric.label')}
-        placeholder={t('scalingMetric.placeholder')}
-        description={getScalingMetricDescription()}
-      >
-        {SCALING_METRIC_KEYS.map((metric) => (
-          <SelectItem key={metric.key}>
-            {t(`scalingMetric.options.${metric.translationKey}`)}
-          </SelectItem>
-        ))}
-        {isCustomMetric && (
-          <SelectItem key={metricQuery}>{metricQuery}</SelectItem>
-        )}
-      </FormSelect>
+      <div className="grid grid-cols-2 gap-4">
+        <FormSelect
+          data-testid="scaling-metric-select"
+          form={form}
+          name="metricQuery"
+          label={t('scalingMetric.label')}
+          placeholder={t('scalingMetric.placeholder')}
+          description={getScalingMetricDescription()}
+        >
+          {SCALING_METRIC_KEYS.map((metric) => (
+            <SelectItem key={metric.key}>
+              {t(`scalingMetric.options.${metric.translationKey}`)}
+            </SelectItem>
+          ))}
+          {isCustomMetric && (
+            <SelectItem key={metricQuery}>{metricQuery}</SelectItem>
+          )}
+        </FormSelect>
 
-      <FormSelect
-        data-testid="aggregation-select"
-        form={form}
-        name="operationOverTime"
-        label={t('aggregation.label')}
-        placeholder={t('aggregation.placeholder')}
-        description={isCustomAggregation ? '' : t('aggregation.description')}
-        popoverProps={{ className: 'w-95' }}
-        classNames={{
-          listbox: '[&_*]:whitespace-normal',
-        }}
-      >
-        {AGGREGATION_OPTION_KEYS.map((option) => (
-          <SelectItem
-            key={option.key}
-            description={t(`aggregation.tooltips.${option.translationKey}`)}
-          >
-            {t(`aggregation.options.${option.translationKey}`)}
-          </SelectItem>
-        ))}
-        {isCustomAggregation && (
-          <SelectItem key={operationOverTime}>{operationOverTime}</SelectItem>
-        )}
-      </FormSelect>
+        <FormSelect
+          data-testid="aggregation-select"
+          form={form}
+          name="operationOverTime"
+          label={t('aggregation.label')}
+          placeholder={t('aggregation.placeholder')}
+          description={isCustomAggregation ? '' : t('aggregation.description')}
+        >
+          {AGGREGATION_OPTION_KEYS.map((option) => (
+            <SelectItem
+              key={option.key}
+              description={t(`aggregation.tooltips.${option.translationKey}`)}
+            >
+              {t(`aggregation.options.${option.translationKey}`)}
+            </SelectItem>
+          ))}
+          {isCustomAggregation && (
+            <SelectItem key={operationOverTime}>{operationOverTime}</SelectItem>
+          )}
+        </FormSelect>
 
-      <div className="flex gap-4">
-        <div className="flex-1">
-          <FormSelect
-            data-testid="target-type-select"
-            form={form}
-            name="targetType"
-            label={t('targetType.label')}
-            popoverProps={{ className: 'w-45' }}
-            classNames={{
-              listbox: '[&_*]:whitespace-normal',
-            }}
-          >
-            {TARGET_TYPE_OPTION_KEYS.map((option) => (
-              <SelectItem
-                key={option.key}
-                description={t(`targetType.tooltips.${option.translationKey}`)}
-              >
-                {t(`targetType.options.${option.translationKey}`)}
-              </SelectItem>
-            ))}
-            {isCustomTargetType && (
-              <SelectItem key={targetType}>{targetType}</SelectItem>
-            )}
-          </FormSelect>
-        </div>
-        <div className="flex-1">
-          <FormNumberInput
-            data-testid="target-value-input"
-            form={form}
-            name="targetValue"
-            label={t('targetValue.label')}
-            minValue={1}
-            description={getTargetValueDescription()}
-          />
-        </div>
+        <FormSelect
+          data-testid="target-type-select"
+          form={form}
+          name="targetType"
+          label={t('targetType.label')}
+        >
+          {TARGET_TYPE_OPTION_KEYS.map((option) => (
+            <SelectItem
+              key={option.key}
+              description={t(`targetType.tooltips.${option.translationKey}`)}
+            >
+              {t(`targetType.options.${option.translationKey}`)}
+            </SelectItem>
+          ))}
+          {isCustomTargetType && (
+            <SelectItem key={targetType}>{targetType}</SelectItem>
+          )}
+        </FormSelect>
+
+        <FormNumberInput
+          data-testid="target-value-input"
+          form={form}
+          name="targetValue"
+          label={t('targetValue.label')}
+          minValue={1}
+          description={getTargetValueDescription()}
+        />
       </div>
     </div>
   );

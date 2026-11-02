@@ -2,63 +2,43 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { APIRequestError, getErrorMessage } from '@amdenterpriseai/utils/app';
+import { APIRequestError } from '@amdenterpriseai/utils/app';
 
-import type {
-  AimImageFamily,
-  ClusterAccelerator,
-  ListResponse,
-} from '@/types/cluster';
-
-async function fetchClusterCatalog<T>(
-  path: string,
-  resourceLabel: string,
-): Promise<T> {
-  const response = await fetch(path, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
-    throw new APIRequestError(
-      `Failed to fetch ${resourceLabel}: ${errorMessage}`,
-      response.status,
-    );
-  }
-  return response.json() as Promise<T>;
-}
+import { apiClient, getApiClientErrorMessage } from '@/lib/api-client';
 
 export const getClusterResources = async () => {
-  const response = await fetch(`/api/resources`, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  const { data, error, response } = await apiClient.GET('/api/resources');
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to fetch cluster resources: ${errorMessage}`,
+      `Failed to fetch cluster resources: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-  return response.json();
+  return data;
 };
 
-export const getAimImages = async (): Promise<ListResponse<AimImageFamily>> => {
-  return fetchClusterCatalog<ListResponse<AimImageFamily>>(
+export const getAimImages = async () => {
+  const { data, error, response } = await apiClient.GET(
     '/api/cluster/aim-images',
-    'aim-engine image families',
   );
+  if (error || !data) {
+    throw new APIRequestError(
+      `Failed to fetch aim-engine image families: ${getApiClientErrorMessage(error, response)}`,
+      response.status,
+    );
+  }
+  return data;
 };
 
-export const getClusterAccelerators = async (): Promise<
-  ListResponse<ClusterAccelerator>
-> => {
-  return fetchClusterCatalog<ListResponse<ClusterAccelerator>>(
+export const getClusterAccelerators = async () => {
+  const { data, error, response } = await apiClient.GET(
     '/api/cluster/accelerators',
-    'cluster accelerators',
   );
+  if (error || !data) {
+    throw new APIRequestError(
+      `Failed to fetch cluster accelerators: ${getApiClientErrorMessage(error, response)}`,
+      response.status,
+    );
+  }
+  return data;
 };

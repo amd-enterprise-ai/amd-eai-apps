@@ -122,7 +122,7 @@ The new storage should appear in the storages list
     Log    Storage ${TEST_STORAGE_NAME} is visible in the list    INFO
 
 The storage should show a project assignment
-    [Documentation]    Verifies the Assigned To column shows a project name.
+    [Documentation]    Verifies the Assigned to column shows a project name.
 
     # Wait for the UI to refresh after assignment
     Wait Until Keyword Succeeds    30s    3s
@@ -132,12 +132,12 @@ Verify storage assignment is visible
     [Documentation]    Helper to verify a storage row shows a project assignment.
     [Arguments]    ${storage_name}
 
-    # Column index 3 = Assigned To (0=Type, 1=Status, 2=Scope, 3=Assigned To)
+    # Column index 3 = Assigned to (0=Type, 1=Status, 2=Scope, 3=Assigned to)
     ${assigned}=    Get storage row cell text    ${storage_name}    ${3}
     Should Not Be Equal    ${assigned}    —
     ...    msg=Storage ${storage_name} should have a project assignment but shows —
     Should Not Be Empty    ${assigned}
-    ...    msg=Storage ${storage_name} Assigned To column is empty
+    ...    msg=Storage ${storage_name} Assigned to column is empty
     Log    Storage ${storage_name} is assigned to: ${assigned}    INFO
 
 The storage should not be in the list

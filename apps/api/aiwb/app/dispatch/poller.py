@@ -36,6 +36,7 @@ When writing syncers, follow these guidelines:
 """
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
@@ -52,19 +53,33 @@ ResourceSyncer = Callable[[AsyncSession, KubernetesClient], Awaitable[None]]
 
 
 @dataclass
+class RegisteredSyncer:
+    """A syncer and how often it wants to run."""
+
+    syncer: ResourceSyncer
+    interval_seconds: int | None = None
+    last_run: float | None = None
+
+    def is_due(self, now: float) -> bool:
+        if self.interval_seconds is None:
+            return True
+        return self.last_run is None or now - self.last_run >= self.interval_seconds
+
+
+@dataclass
 class PollerState:
     """Encapsulates poller state."""
 
     running: bool = False
     polling_task: asyncio.Task | None = None
-    syncers: list[ResourceSyncer] = field(default_factory=list)
+    syncers: list[RegisteredSyncer] = field(default_factory=list)
 
 
 # Module-level state instance
 _state = PollerState()
 
 
-def register_syncer(syncer: ResourceSyncer) -> None:
+def register_syncer(syncer: ResourceSyncer, interval_seconds: int | None = None) -> None:
     """Register a resource syncer function.
 
     Syncers are executed concurrently during each polling cycle, each with
@@ -74,10 +89,15 @@ def register_syncer(syncer: ResourceSyncer) -> None:
     Args:
         syncer: Async callable that takes (session, kube_client) and syncs resources.
                 Must be safe for concurrent execution with other registered syncers.
+        interval_seconds: Minimum seconds between runs of this syncer. Omit for the poller's own
+                cadence, which is what a syncer tracking live cluster state wants. Set it for work
+                too heavy to belong at that cadence, so such a syncer can share the one polling
+                loop rather than bringing a second scheduler with it.
     """
-    if syncer not in _state.syncers:
-        _state.syncers.append(syncer)
-        logger.debug(f"Registered syncer: {syncer.__name__}")
+    if any(registered.syncer is syncer for registered in _state.syncers):
+        return
+    _state.syncers.append(RegisteredSyncer(syncer=syncer, interval_seconds=interval_seconds))
+    logger.debug(f"Registered syncer: {syncer.__name__}")
 
 
 async def start_poller() -> None:
@@ -123,7 +143,17 @@ async def _poll_resources() -> None:
     if not database.session_maker:
         return
 
+    now = time.monotonic()
+    due = [registered for registered in _state.syncers if registered.is_due(now)]
+    if not due:
+        return
+
     kube_client = get_kube_client()
+
+    # Stamped before running rather than after, so a syncer that takes longer than its own interval
+    # paces from when it started and does not begin again the moment it finishes.
+    for registered in due:
+        registered.last_run = now
 
     # Run all syncers concurrently, each with its own database session
     # This prevents session sharing issues when syncers run in parallel
@@ -134,7 +164,7 @@ async def _poll_resources() -> None:
             except Exception as e:
                 logger.error(f"Error in syncer {syncer.__name__}: {e}")
 
-    await asyncio.gather(*[run_syncer_with_session(syncer) for syncer in _state.syncers])
+    await asyncio.gather(*[run_syncer_with_session(registered.syncer) for registered in due])
 
 
 async def stop_poller() -> None:

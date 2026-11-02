@@ -17,7 +17,7 @@ class FineTuningJobRequest(FinetuneCreate):
 
     Extends FinetuneCreate by hoisting the base model identifier into the request
     body — the legacy endpoint passed it as a URL path parameter, but the project-
-    scoped URL convention (EAI-5651) keeps job identity in the body.
+    scoped URL convention keeps job identity in the body.
     """
 
     base_model: UUID | str = Field(

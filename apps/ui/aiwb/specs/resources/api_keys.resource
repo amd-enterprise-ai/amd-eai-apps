@@ -65,7 +65,7 @@ Open fill and submit API key form
 
     Click create API key button
     Fill API key name    ${key_name}
-    Submit create API key form
+    Submit API key form
     Wait For Elements State    ${KEY_CREATED_TITLE}    visible    timeout=15s
 
 User closes key created drawer
@@ -92,6 +92,21 @@ User clicks copy API key button
     [Documentation]    Clicks the copy button on the key created drawer.
 
     Click copy API key button
+
+User deselects model deployment "${deployment_name}" in edit drawer
+    [Documentation]    Opens the model deployments select in the edit drawer and deselects
+    ...                the deployment with the given name.
+
+    Open model deployments select    ${MODEL_DEPLOYMENTS_EDIT_TRIGGER}
+    Click model deployments option "${deployment_name}"
+
+User saves API key edit
+    [Documentation]    Submits the edit API key form and waits for the update to complete.
+    ...                The drawer closes automatically on success.
+
+    Submit API key form
+    API key updated successfully toast should appear
+    Wait for edit drawer to close
 
 # =============================================================================
 # Then keywords (verification)
@@ -133,7 +148,57 @@ API key deleted successfully toast should appear
 
     Wait For Elements State    text="API key deleted successfully"    visible    timeout=10s
 
+API key updated successfully toast should appear
+    [Documentation]    Verifies the success toast notification appears after an edit.
+
+    Wait for API key updated toast
+
 Edit drawer should show linked deployment "${deployment_name}"
     [Documentation]    Verifies the linked deployments section lists the given deployment.
 
     Linked deployments section should contain text "${deployment_name}"
+
+Edit drawer should show no linked deployments
+    [Documentation]    Verifies the edit drawer's linked deployments section shows the
+    ...                empty-state message.
+
+    Linked deployments section should contain text "No deployments linked to this API key"
+
+Edit drawer should not show linked deployment "${deployment_name}"
+    [Documentation]    Verifies the linked deployments section does not list the given deployment.
+
+    Linked deployments section should not contain text "${deployment_name}"
+
+Linked deployments section should contain text "${text}"
+    [Documentation]    Verifies the linked deployments section contains the given text.
+
+    Wait for linked deployments section to show text "${text}"
+
+Linked deployments section should not contain text "${text}"
+    [Documentation]    Verifies the linked deployments section does not contain the given text.
+    ...                Checks the match count directly — a selector matching zero elements
+    ...                is trivially "hidden" in Playwright, so asserting hidden on the
+    ...                combined selector alone would pass even if the section never
+    ...                rendered at all.
+
+    ${count}=    Get linked deployments match count for text "${text}"
+    Should Be Equal As Integers    ${count}    0
+
+The API key deployment picker should offer the deployment labeled "${label}"
+    [Documentation]    Opens the create drawer's model deployments picker and verifies a
+    ...                deployment is offered under the given profile label, so the person scoping
+    ...                a key can tell which profile it grants access to rather than seeing a
+    ...                generic "Default".
+
+    Click create API key button
+    Open model deployments select
+    Wait Until Keyword Succeeds    15s    2s    Deployment picker should offer an option labeled    ${label}
+
+Deployment picker should offer an option labeled
+    [Documentation]    Single-poll helper: asserts the open deployments picker offers at least
+    ...                one option whose text includes the given label.
+    [Arguments]    ${label}
+
+    ${count}=    Get model deployments option count for text "${label}"
+    Should Be True    ${count} > 0
+    ...    msg=Deployment picker offered no option labeled "${label}"

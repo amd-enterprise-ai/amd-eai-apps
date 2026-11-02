@@ -121,4 +121,37 @@ describe('StatsWithLineChart', () => {
     expect(screen.getByText(new RegExp(lastTimeStr))).toBeInTheDocument();
     expect(screen.getByText(new RegExp(lastDateStr))).toBeInTheDocument();
   });
+
+  it('renders last available data point correctly with undefined and omitted values', () => {
+    act(() => {
+      render(
+        <StatsWithLineChart
+          title={'Card title'}
+          tooltip={'test tooltip content'}
+          data={[
+            { timestamp: '2024-01-01T00:00:00Z', value: 10 },
+            { timestamp: '2024-01-02T00:00:00Z', value: 20 },
+            { timestamp: '2024-01-03T00:00:00Z', value: 30 },
+            { timestamp: '2024-01-04T00:00:00Z', value: undefined },
+            { timestamp: '2024-01-05T00:00:00Z' },
+          ]}
+          upperLimitData={[
+            { timestamp: '2024-01-01T00:00:00Z', value: 11 },
+            { timestamp: '2024-01-02T00:00:00Z', value: 22 },
+            { timestamp: '2024-01-03T00:00:00Z', value: 33 },
+            { timestamp: '2024-01-04T00:00:00Z', value: undefined },
+            { timestamp: '2024-01-05T00:00:00Z' },
+          ]}
+          upperLimitFormatter={(val) =>
+            `/ ${Number(val).toFixed(2)} some test units`
+          }
+        />,
+      );
+    });
+    const lastValidDate = new Date('2024-01-03T00:00:00Z');
+    const lastTimeStr = lastValidDate.toLocaleTimeString();
+    const lastDateStr = lastValidDate.toLocaleDateString();
+    expect(screen.getByText(new RegExp(lastTimeStr))).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(lastDateStr))).toBeInTheDocument();
+  });
 });

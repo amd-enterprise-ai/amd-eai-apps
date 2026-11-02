@@ -47,6 +47,8 @@ vi.mock('next-i18next', () => ({
         'aimCatalog.card.hasDeployments': 'Has deployments',
         'aimCatalog.card.hasDeploymentsTooltip':
           'This model has active deployments',
+        'aimCatalog.card.showMore': 'Show more',
+        'aimCatalog.card.showLess': 'Show less',
         'aimCatalog.status.deploying': 'Deploying',
         'models:status.pending': 'Pending',
         'models:status.starting': 'Starting',
@@ -91,6 +93,24 @@ vi.mock('@/components/shared/ModelIcons', () => ({
 
 vi.mock('@amdenterpriseai/components', async (importOriginal) => ({
   ...(await importOriginal()),
+  Button: ({
+    children,
+    onPress,
+    endContent,
+    'aria-expanded': ariaExpanded,
+    'aria-controls': ariaControls,
+    className,
+  }: any) => (
+    <button
+      onClick={() => onPress?.()}
+      aria-expanded={ariaExpanded}
+      aria-controls={ariaControls}
+      className={className}
+    >
+      {children}
+      {endContent}
+    </button>
+  ),
   ActionButton: ({
     children,
     onPress,
@@ -110,7 +130,7 @@ vi.mock('@amdenterpriseai/components', async (importOriginal) => ({
       {icon}
     </button>
   ),
-  NestedDropdown: ({ children, actions }: any) => (
+  ActionsDropdown: ({ children, actions }: any) => (
     <div data-testid="nested-dropdown">
       {children}
       <div data-testid="dropdown-content">
@@ -493,7 +513,7 @@ describe('AIMCard', () => {
         />,
       );
 
-      const deployButton = screen.getByRole('button', { name: /deploy/i });
+      const deployButton = screen.getByRole('button', { name: /^deploy$/i });
       await user.click(deployButton);
 
       expect(onDeploy).toHaveBeenCalledTimes(1);
@@ -514,7 +534,7 @@ describe('AIMCard', () => {
         />,
       );
 
-      const deployButton = screen.getByRole('button', { name: /deploy/i });
+      const deployButton = screen.getByRole('button', { name: /^deploy$/i });
       await user.click(deployButton);
 
       expect(onDeploy).toHaveBeenCalledTimes(1);
@@ -570,6 +590,59 @@ describe('AIMCard', () => {
       await waitFor(() => {
         expect(screen.getByText('Connect to model')).toBeInTheDocument();
       });
+    });
+
+    it('offers the Chat action for a chat deployment', async () => {
+      const user = userEvent.setup();
+      const aggregatedAim = mockAggregatedAims[0];
+
+      render(
+        <AIMCard
+          aggregatedAim={aggregatedAim}
+          onDeploy={onDeploy}
+          onOpenDetails={onOpenDetails}
+          onChatWithModel={onChatWithModel}
+          onConnectToModel={onConnectToModel}
+          onUndeploy={onUndeploy}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /actions menu/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Chat with model')).toBeInTheDocument();
+      });
+    });
+
+    it('omits the Chat action for a transcription deployment', async () => {
+      const user = userEvent.setup();
+      const base = mockAggregatedAims[0];
+      const transcriptionAim: AggregatedAIM = {
+        ...base,
+        parsedAIMs: base.parsedAIMs.map((aim) => ({
+          ...aim,
+          tags: ['transcription'],
+        })),
+      };
+
+      render(
+        <AIMCard
+          aggregatedAim={transcriptionAim}
+          onDeploy={onDeploy}
+          onOpenDetails={onOpenDetails}
+          onChatWithModel={onChatWithModel}
+          onConnectToModel={onConnectToModel}
+          onUndeploy={onUndeploy}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /actions menu/i }));
+
+      // Connect stays available; the chat-playground action is suppressed.
+      await waitFor(() => {
+        expect(screen.getByText('Connect to model')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Chat with model')).not.toBeInTheDocument();
     });
 
     it('shows multiple deployments correctly', async () => {
@@ -778,12 +851,10 @@ describe('AIMCard', () => {
   });
 
   describe('Description expand/collapse', () => {
-    it('renders description text', async () => {
-      const aggregatedAim = mockAggregatedAims[0];
-
+    const renderCard = (aim = mockAggregatedAims[0]) =>
       render(
         <AIMCard
-          aggregatedAim={aggregatedAim}
+          aggregatedAim={aim}
           onDeploy={onDeploy}
           onOpenDetails={onOpenDetails}
           onChatWithModel={onChatWithModel}
@@ -792,29 +863,169 @@ describe('AIMCard', () => {
         />,
       );
 
-      // Description should be present in the card
+    it('renders description text', () => {
+      const aggregatedAim = mockAggregatedAims[0];
+      renderCard(aggregatedAim);
       expect(
         screen.getByText(aggregatedAim.aggregated.description.short),
       ).toBeInTheDocument();
     });
 
-    it('applies line clamp class to descriptions', async () => {
-      const aggregatedAim = mockAggregatedAims[0];
+    it('applies line-clamp-3 class to description paragraph initially', () => {
+      const { container } = renderCard();
+      expect(container.querySelector('p.line-clamp-3')).toBeInTheDocument();
+    });
 
-      const { container } = render(
-        <AIMCard
-          aggregatedAim={aggregatedAim}
-          onDeploy={onDeploy}
-          onOpenDetails={onOpenDetails}
-          onChatWithModel={onChatWithModel}
-          onConnectToModel={onConnectToModel}
-          onUndeploy={onUndeploy}
-        />,
+    it('description paragraph is not interactive — has no role=button', () => {
+      const { container } = renderCard();
+      const p = container.querySelector('p');
+      expect(p).not.toHaveAttribute('role', 'button');
+      expect(p).not.toHaveAttribute('tabindex');
+    });
+
+    describe('when description overflows 3 lines', () => {
+      const originalScrollHeight = Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        'scrollHeight',
       );
 
-      // The description paragraph should have line-clamp class
-      const descriptionParagraph = container.querySelector('p.line-clamp-3');
-      expect(descriptionParagraph).toBeInTheDocument();
+      beforeEach(() => {
+        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+          configurable: true,
+          get: () => 200,
+        });
+      });
+
+      afterEach(() => {
+        if (originalScrollHeight) {
+          Object.defineProperty(
+            HTMLElement.prototype,
+            'scrollHeight',
+            originalScrollHeight,
+          );
+        } else {
+          delete (HTMLElement.prototype as { scrollHeight?: number })
+            .scrollHeight;
+        }
+      });
+
+      it('shows "Show more" button', async () => {
+        renderCard();
+        await waitFor(() => {
+          expect(
+            screen.getByRole('button', { name: /show more/i }),
+          ).toBeInTheDocument();
+        });
+      });
+
+      it('"Show more" button starts with aria-expanded=false', async () => {
+        renderCard();
+        const button = await screen.findByRole('button', {
+          name: /show more/i,
+        });
+        expect(button).toHaveAttribute('aria-expanded', 'false');
+      });
+
+      it('"Show more" button has aria-controls pointing to the description element', async () => {
+        renderCard();
+        const button = await screen.findByRole('button', {
+          name: /show more/i,
+        });
+        const controlledId = button.getAttribute('aria-controls');
+        expect(controlledId).toBeTruthy();
+        expect(document.getElementById(controlledId!)).toBeInTheDocument();
+      });
+
+      it('clicking "Show more" changes button label to "Show less"', async () => {
+        const user = userEvent.setup();
+        renderCard();
+        const showMore = await screen.findByRole('button', {
+          name: /show more/i,
+        });
+        await user.click(showMore);
+        expect(
+          screen.getByRole('button', { name: /show less/i }),
+        ).toBeInTheDocument();
+        expect(
+          screen.queryByRole('button', { name: /show more/i }),
+        ).not.toBeInTheDocument();
+      });
+
+      it('clicking "Show more" sets aria-expanded=true', async () => {
+        const user = userEvent.setup();
+        renderCard();
+        const showMore = await screen.findByRole('button', {
+          name: /show more/i,
+        });
+        await user.click(showMore);
+        expect(
+          screen.getByRole('button', { name: /show less/i }),
+        ).toHaveAttribute('aria-expanded', 'true');
+      });
+
+      it('clicking "Show more" removes line-clamp-3 from the description', async () => {
+        const user = userEvent.setup();
+        const { container } = renderCard();
+        const showMore = await screen.findByRole('button', {
+          name: /show more/i,
+        });
+        await user.click(showMore);
+        expect(
+          container.querySelector('p.line-clamp-3'),
+        ).not.toBeInTheDocument();
+      });
+
+      it('does not mutate the description element while measuring expanded overflow', async () => {
+        const user = userEvent.setup();
+        const addSpy = vi.spyOn(DOMTokenList.prototype, 'add');
+        const removeSpy = vi.spyOn(DOMTokenList.prototype, 'remove');
+        renderCard();
+        const showMore = await screen.findByRole('button', {
+          name: /show more/i,
+        });
+        addSpy.mockClear();
+        removeSpy.mockClear();
+
+        await user.click(showMore);
+        await waitFor(() => {
+          expect(
+            screen.getByRole('button', { name: /show less/i }),
+          ).toBeInTheDocument();
+        });
+
+        expect(addSpy).not.toHaveBeenCalledWith('line-clamp-3');
+        expect(removeSpy).not.toHaveBeenCalledWith('line-clamp-3');
+
+        addSpy.mockRestore();
+        removeSpy.mockRestore();
+      });
+
+      it('clicking "Show less" collapses back and restores "Show more" label', async () => {
+        const user = userEvent.setup();
+        renderCard();
+        const showMore = await screen.findByRole('button', {
+          name: /show more/i,
+        });
+        await user.click(showMore);
+        const showLess = screen.getByRole('button', { name: /show less/i });
+        await user.click(showLess);
+        await waitFor(() => {
+          expect(
+            screen.getByRole('button', { name: /show more/i }),
+          ).toHaveAttribute('aria-expanded', 'false');
+        });
+      });
+    });
+
+    describe('when description fits within 3 lines', () => {
+      it('does not show "Show more" button', async () => {
+        renderCard();
+        // scrollHeight === clientHeight === 0 in jsdom — no overflow
+        await new Promise((r) => setTimeout(r, 10));
+        expect(
+          screen.queryByRole('button', { name: /show more/i }),
+        ).not.toBeInTheDocument();
+      });
     });
   });
 
@@ -896,7 +1107,7 @@ describe('AIMCard', () => {
       ).not.toBeInTheDocument();
     });
 
-    it('hides deploy button for unsupported models', () => {
+    it('does not show deploy button for unsupported models', () => {
       render(
         <AIMCard
           aggregatedAim={mockUnsupportedAggregatedAim}
@@ -911,6 +1122,7 @@ describe('AIMCard', () => {
       expect(
         screen.queryByRole('button', { name: /deploy/i }),
       ).not.toBeInTheDocument();
+      expect(screen.getByTestId('unsupported-banner')).toBeInTheDocument();
     });
 
     it('applies muted opacity to card content when unsupported', () => {

@@ -4,49 +4,39 @@
 
 import {
   AIM_DISPLAY_NAME_ANNOTATION,
-  AIMServiceStatus,
   FINE_TUNED_LABEL,
   NAMESPACE_AIM_MODEL_LABEL,
   ParsedAIM,
 } from '@/types/aims';
-import { WorkloadType } from '@amdenterpriseai/types';
-import { WorkloadStatus } from '@/types/enums/workloads';
-import { Workload } from '@/types/workloads';
+import type { Workload } from '@/types/workloads';
 import { APIRequestError, getErrorMessage } from '@amdenterpriseai/utils/app';
 import {
   aimParser,
   getAimClusterProfilesByAimIds,
   getProjectAimProfilesByAimIds,
+  mapAIMServiceStatusToWorkloadWireStatus,
   resolveAIMServiceDisplay,
 } from './aims';
+import {
+  customModelNamesFromServices,
+  resolveCustomProfileDeployments,
+} from './custom-profiles';
 import { getInferenceModel, listAllInferenceDeployments } from './inference';
 import { listAllProjectFineTunedModels } from './models';
 import { toProfileSummaryFields } from '@/components/shared/ModelProfileSummary';
 import type { AIMProfileSpec } from '@/types/aims';
-
-const convertAIMServiceStatus = (aimServiceStatus: AIMServiceStatus) => {
-  if (aimServiceStatus === AIMServiceStatus.RUNNING) {
-    return WorkloadStatus.RUNNING;
-  } else if (
-    aimServiceStatus === AIMServiceStatus.PENDING ||
-    aimServiceStatus === AIMServiceStatus.STARTING
-  ) {
-    return WorkloadStatus.PENDING;
-  } else if (aimServiceStatus === AIMServiceStatus.DEGRADED) {
-    return WorkloadStatus.DEGRADED;
-  } else if (aimServiceStatus === AIMServiceStatus.FAILED) {
-    return WorkloadStatus.FAILED;
-  }
-  return WorkloadStatus.UNKNOWN;
-};
+import { resolveModelDeploymentName } from './modelDeploymentDisplay';
 
 export type WorkloadDisplayInfo = {
   imageVersion: string;
   metric: string;
+  tags: string[];
   gpu?: string | null;
   templateGpuCount?: number | null;
   acceleratorType?: string | null;
   precision?: string | null;
+  /** Authored profile label, set only for custom-model deployments. */
+  profileDisplayName?: string | null;
 };
 
 export type ChattableWorkloadsResult = {
@@ -62,7 +52,7 @@ export const listChattableWorkloads = async (
   }
 
   // The legacy /chattable endpoint that combined chattable AIM services + fine-tuning
-  // workloads was removed when EAI-6354 split inference into its own capability.
+  // workloads was removed when inference was split into its own capability.
   // The new equivalent is GET /v1/projects/{project}/inference?capability=chat,
   // which returns chat-ready AIM services only. Pre-deployment fine-tuning workloads
   // are no longer surfaced here — once finished and deployed they appear via inference.
@@ -84,7 +74,7 @@ export const listChattableWorkloads = async (
             s.metadata.labels?.[FINE_TUNED_LABEL] !== 'true' &&
             s.metadata.labels?.[NAMESPACE_AIM_MODEL_LABEL] !== 'true',
         )
-        .map((s) => s.spec.model?.name)
+        .map((s) => s.spec?.model?.name)
         .filter((name): name is string => !!name),
     ),
   );
@@ -104,7 +94,7 @@ export const listChattableWorkloads = async (
   const workloadDisplayInfo: Record<string, WorkloadDisplayInfo> = {};
   const chattableWorkloads: Workload[] = aimServices.map((s) => {
     const displayInfo = resolveAIMServiceDisplay(s, parsedAIMs);
-    const modelRef = s.status.resolvedModel?.name;
+    const modelRef = s.status?.resolvedModel?.name;
     const isFineTuned = s.metadata.labels?.[FINE_TUNED_LABEL] === 'true';
     const isNamespaceModel =
       s.metadata.labels?.[NAMESPACE_AIM_MODEL_LABEL] === 'true';
@@ -123,34 +113,36 @@ export const listChattableWorkloads = async (
     } else if (isNamespaceModel && deployDisplayName) {
       displayName = deployDisplayName;
     } else {
-      displayName =
-        displayInfo.canonicalName || displayInfo.title || baseFallback;
+      displayName = resolveModelDeploymentName({
+        displayName: deployDisplayName ?? s.metadata.name,
+        resourceName: s.metadata.name,
+        canonicalName: displayInfo.canonicalName,
+      });
     }
     workloadDisplayInfo[s.id as string] = {
       imageVersion: displayInfo.imageVersion,
       metric: displayInfo.metric,
+      tags: displayInfo.tags ?? [],
     };
     return {
       id: s.id as string,
-      aimId: modelRef,
-      type: WorkloadType.INFERENCE,
-      tags: displayInfo.tags,
+      type: 'INFERENCE',
       name: modelRef || s.metadata.name,
       displayName,
       createdBy: '',
-      createdAt: s.metadata.creationTimestamp,
-      updatedAt: s.metadata.creationTimestamp,
-      status: convertAIMServiceStatus(s.status.status),
-      output: {
-        internalHost: s.endpoints.internal,
-        externalHost: s.endpoints.external,
-      },
+      updatedBy: null,
+      namespace: '',
+      description: null,
+      endpoints: {},
+      createdAt: s.metadata.creationTimestamp ?? '',
+      updatedAt: s.metadata.creationTimestamp ?? '',
+      status: mapAIMServiceStatusToWorkloadWireStatus(s.status?.status),
     };
   });
 
   // Join profile specs from the cluster + project AIMProfile catalogs by
-  // status.resolvedProfile.name (the engine writes only the name per ADR 006b
-  // §3; AIWB no longer enriches the service response with the spec). aimIds
+  // status.resolvedProfile.name (the engine writes only the name;
+  // AIWB no longer enriches the service response with the spec). aimIds
   // come straight off the v1alpha2 `status.aimId` of the per-name cluster
   // models and fine-tuned AIMModel CRs.
   const profileSpecByName = new Map<string, AIMProfileSpec>();
@@ -167,19 +159,38 @@ export const listChattableWorkloads = async (
       getProjectAimProfilesByAimIds(projectId, namespaceAimIds),
     ]);
     for (const p of clusterProfiles) {
-      if (p.metadata.name) profileSpecByName.set(p.metadata.name, p.spec);
+      if (p.metadata.name && p.spec)
+        profileSpecByName.set(p.metadata.name, p.spec);
     }
     for (const p of projectProfiles) {
-      if (p.metadata.name) profileSpecByName.set(p.metadata.name, p.spec);
+      if (p.metadata.name && p.spec)
+        profileSpecByName.set(p.metadata.name, p.spec);
     }
   } catch (error) {
     console.warn('Failed to fetch profile catalogs for chat display:', error);
   }
 
+  // The dropdown names a custom model's profile rather than describing its
+  // hardware, because that label is what distinguishes two deployments of the
+  // same model. It comes from the per-model profiles endpoint, which the catalog
+  // join above cannot supply.
+  const customProfileByServiceId = await resolveCustomProfileDeployments(
+    projectId,
+    customModelNamesFromServices(aimServices),
+  );
+
   for (const s of aimServices) {
     const id = s.id as string;
     const existing = workloadDisplayInfo[id];
     if (!existing) continue;
+    const customProfile = customProfileByServiceId.get(id);
+    if (customProfile) {
+      workloadDisplayInfo[id] = {
+        ...existing,
+        profileDisplayName: customProfile.displayName,
+      };
+      continue;
+    }
     const profile = toProfileSummaryFields(s, profileSpecByName);
     if (!profile) continue;
     workloadDisplayInfo[id] = {
@@ -205,8 +216,7 @@ export const listChattableWorkloads = async (
   // The chattable API can include AIM services still starting or legacy workloads
   // that are not ready to chat; keep only what ChatView can use.
   const readyToChatWorkloads = chattableWorkloads.filter(
-    (w) =>
-      w.status === WorkloadStatus.RUNNING && w.type === WorkloadType.INFERENCE,
+    (w) => w.status === 'Running' && w.type === 'INFERENCE' && !!w.id,
   );
 
   return {
@@ -304,9 +314,9 @@ export const sendChatRequest = async (
 ) => {
   const body = JSON.stringify(chatBody);
 
-  // Workload chat was removed with the workloads router cleanup (EAI-6313);
-  // AIM service chat moved off the AIWB backend onto the UI-side bypass
-  // (EAI-6323), so every chat now goes through /api/ui/projects/.../chat.
+  // Workload chat was removed with the workloads router cleanup;
+  // AIM service chat moved off the AIWB backend onto the UI-side bypass,
+  // so every chat now goes through /api/ui/projects/.../chat.
   // The bypass calls GET /v1/projects/{project}/inference/{id} to resolve
   // the AIM internal URL, so this id must be an AIM service id — a raw
   // workload-table id would 404 there.

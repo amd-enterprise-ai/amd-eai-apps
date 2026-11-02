@@ -23,3 +23,14 @@ export const Invalid: Story = () => (
 export const Disabled: Story = () => (
   <Input label="Disabled" placeholder="Cannot edit" isDisabled />
 );
+export const Variants: Story = () => (
+  <div className="flex w-full max-w-md flex-col gap-4 p-4">
+    <Input label="Primary" placeholder="Page background" variant="primary" />
+    <Input label="Secondary (default)" placeholder="Modal / drawer" />
+    <Input
+      label="Secondary (explicit)"
+      placeholder="Modal / drawer"
+      variant="secondary"
+    />
+  </div>
+);

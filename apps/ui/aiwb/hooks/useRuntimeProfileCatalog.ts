@@ -6,8 +6,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { getAimImages, getClusterAccelerators } from '@/lib/app/cluster';
 import { getRuntimeProfileOptions } from '@/lib/app/custom-models';
+import type { components } from '@/types/api';
 import type { AimImageFamily, ClusterAccelerator } from '@/types/cluster';
-import type { RuntimeProfileOptions } from '@/types/custom-models';
+
+type RuntimeProfileOptions = components['schemas']['RuntimeProfileOptions'];
 
 export const RUNTIME_PROFILE_AIM_IMAGES_QUERY_KEY = [
   'cluster',
@@ -25,13 +27,14 @@ export const RUNTIME_PROFILE_OPTIONS_QUERY_KEY = [
 ] as const;
 
 export type RuntimeProfileCatalogState = {
+  project?: string;
   imageFamilies: AimImageFamily[];
   accelerators: ClusterAccelerator[];
   /**
    * Base-template runtime matrix for the project (accelerator models,
-   * precisions, counts, optimization classes) a custom model inherits. Null
-   * until loaded or when no project is supplied; consumers fall back to static
-   * defaults when its arrays are empty.
+   * precisions, counts, metrics, optimization classes) a custom model inherits.
+   * Null until loaded or when no project is supplied; consumers fall back to
+   * static defaults when its arrays are empty.
    */
   runtimeOptions: RuntimeProfileOptions | null;
   isLoading: boolean;
@@ -78,6 +81,7 @@ export function useRuntimeProfileCatalog(
     });
   };
   return {
+    project,
     imageFamilies: aimImagesQuery.data?.data ?? [],
     accelerators: acceleratorsQuery.data?.data ?? [],
     runtimeOptions: runtimeOptionsQuery.data ?? null,

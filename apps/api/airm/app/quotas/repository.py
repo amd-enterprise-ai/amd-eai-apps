@@ -64,9 +64,11 @@ async def update_quota_status(
     updater: str,
     updated_at: datetime | None = None,
 ) -> Quota:
+    # status_reason is authoritative: None clears it. A quota that recovers must stop
+    # reporting the failure it recovered from, since project status text is built from
+    # whatever reason is stored regardless of the status it accompanies.
     quota.status = status
-    if status_reason is not None:
-        quota.status_reason = status_reason
+    quota.status_reason = status_reason
     set_updated_fields(quota, updater, updated_at)
     await session.flush()
     return quota

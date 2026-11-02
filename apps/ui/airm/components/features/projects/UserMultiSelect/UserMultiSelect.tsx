@@ -36,7 +36,7 @@ interface UserMultiSelectProps {
 }
 
 const UserIcon = () => (
-  <div className="border border-default-300 text-default-500 rounded-full min-w-8 h-8 flex justify-center items-center">
+  <div className="border border-default text-muted rounded-full min-w-8 h-8 flex justify-center items-center">
     <IconUser stroke="1.5" size={16} />
   </div>
 );
@@ -144,9 +144,9 @@ export const UserMultiSelect: React.FC<UserMultiSelectProps> = ({
       />
 
       {/* Available users list */}
-      <div className="max-h-64 overflow-y-auto border border-default-200 rounded-lg">
+      <div className="max-h-64 overflow-y-auto border border-default rounded-lg">
         {filteredUsers.length === 0 ? (
-          <div className="p-4 text-center text-default-500 text-sm">
+          <div className="p-4 text-center text-muted text-sm">
             {noUsersFoundLabel}
           </div>
         ) : (
@@ -155,7 +155,7 @@ export const UserMultiSelect: React.FC<UserMultiSelectProps> = ({
             return (
               <div
                 key={user.id}
-                className="flex items-center gap-3 px-3 py-2 hover:bg-default-100 cursor-pointer"
+                className="flex items-center gap-3 px-3 py-2 hover:bg-default cursor-pointer"
                 onClick={() => handleToggleUser(user.id, !isSelected)}
               >
                 <Checkbox
@@ -170,7 +170,7 @@ export const UserMultiSelect: React.FC<UserMultiSelectProps> = ({
                   <div className="text-sm font-medium truncate">
                     {getUserDisplayName(user)}
                   </div>
-                  <div className="text-xs text-default-500 truncate">
+                  <div className="text-xs text-muted truncate">
                     {getUserSubtitle(user)}
                   </div>
                 </div>
@@ -184,7 +184,7 @@ export const UserMultiSelect: React.FC<UserMultiSelectProps> = ({
       {selectedUsers.length > 0 && (
         <>
           <Divider className="my-2" />
-          <div className="text-xs font-semibold text-default-600 uppercase tracking-wide">
+          <div className="text-xs font-semibold text-foreground uppercase tracking-wide">
             {selectedUsersLabel}
           </div>
           <div className="max-h-72 overflow-y-auto">

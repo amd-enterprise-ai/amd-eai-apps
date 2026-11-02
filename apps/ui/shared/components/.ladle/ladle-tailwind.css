@@ -4,8 +4,11 @@ Copyright © Advanced Micro Devices, Inc., or its affiliates.
 SPDX-License-Identifier: MIT
 */
 
-/* Import the shared Tailwind base styles */
+/* Import the shared Tailwind base styles first (@import must precede @plugin). */
 @import "../../tailwind-config/shared-styles.css";
+
+/* Ladle-only: `prose` / `prose-*` appear in __stories__, not in app bundles. */
+@plugin "@tailwindcss/typography";
 
 /*
  * Tell Tailwind v4 to scan workspace packages for class name usage.
@@ -16,4 +19,3 @@ SPDX-License-Identifier: MIT
 @source "../../utils/src";
 @source "../src";
 @source "../__stories__";
-@source "../../../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}";

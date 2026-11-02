@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 import { render, screen } from '@testing-library/react';
+import { vi } from 'vitest';
 
 import { ProjectSelectPrompt } from '@/components/shared/ProjectSelect/ProjectSelectPrompt';
 
@@ -33,12 +34,8 @@ vi.mock('@amdenterpriseai/components', () => ({
 
 // Mock ProjectSelect component
 vi.mock('@/components/shared/ProjectSelect/ProjectSelect', () => ({
-  ProjectSelect: ({ size, showTooltip }: any) => (
-    <div
-      data-testid="project-select"
-      data-size={size}
-      data-show-tooltip={showTooltip}
-    >
+  ProjectSelect: ({ showTooltip }: any) => (
+    <div data-testid="project-select" data-show-tooltip={showTooltip}>
       Project Select
     </div>
   ),
@@ -80,7 +77,6 @@ describe('ProjectSelectPrompt', () => {
 
     const projectSelect = screen.getByTestId('project-select');
     expect(projectSelect).toBeInTheDocument();
-    expect(projectSelect).toHaveAttribute('data-size', 'md');
     expect(projectSelect).toHaveAttribute('data-show-tooltip', 'false');
   });
 

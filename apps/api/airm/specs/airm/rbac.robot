@@ -34,10 +34,10 @@ Initialize RBAC Test Suite
     ...    1. A project the team member IS assigned to (for access tests)
     ...    2. A project the team member is NOT assigned to (for isolation tests)
     ...
-    ...    Skips the entire suite when the team-member account is not provisioned
+    ...    Fails the entire suite when the team-member account is not provisioned
     ...    in the target environment's Keycloak, since every test needs that user.
 
-    Skip the suite if team member is not provisioned
+    Require the team member account
     Set up admin and team member API sessions
     Create RBAC test projects
 

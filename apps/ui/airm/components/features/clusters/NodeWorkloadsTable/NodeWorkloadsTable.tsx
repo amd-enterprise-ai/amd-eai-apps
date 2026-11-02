@@ -115,7 +115,7 @@ export const NodeWorkloadsTable: React.FC<Props> = ({
     ),
     [NodeWorkloadsTableField.TYPE]: (item) => (
       <ChipDisplay
-        type={item.type ?? t('common.error.misc.unknownEntity')}
+        type={item.type ?? t('common:error.misc.unknownEntity')}
         variants={getWorkloadTypeVariants(workloadsT)}
       />
     ),

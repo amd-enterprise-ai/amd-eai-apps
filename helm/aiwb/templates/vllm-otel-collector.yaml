@@ -49,13 +49,20 @@ metadata:
 spec:
   mode: daemonset
   image: {{ .Values.otelCollector.image }}
-  # Run only on nodes with an AIM inference accelerator — GPU or a supported EPYC — so the
-  # collector isn't scheduled on generic/CPU-only or control-plane nodes. aim-accelerator.CPU
-  # is written on *every* node by the CPU detector (a generic per-node label — GPU nodes carry
-  # it too), so it can't be used here. GPU nodes carry a generic aim-accelerator.GPU, but there
-  # is no generic aim-accelerator.EPYC yet, so EPYC generations/SKUs are enumerated below.
-  # TODO: collapse this list to a generic aim-accelerator.EPYC label once the detector emits one.
-  # nodeSelectorTerms are OR-ed.
+  # Expose the node this collector pod runs on, so the scrape config can keep only
+  # node-local pods (see the node_name relabel below).
+  env:
+    - name: NODE_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
+  # Run only on nodes with an AIM inference accelerator — GPU or a supported EPYC — so
+  # the collector isn't scheduled on generic/CPU-only or control-plane nodes.
+  # NOTE: aim-accelerator.CPU is written on *every* node by the CPU detector (a generic
+  # per-node label — e.g. GPU nodes carry it too), so it can't be used here. GPU nodes
+  # carry a generic aim-accelerator.GPU, but there is no generic aim-accelerator.EPYC
+  # yet, so EPYC generations/SKUs are enumerated below. A generic EPYC label should
+  # replace this list. nodeSelectorTerms are OR-ed.
   affinity:
     nodeAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
@@ -95,6 +102,11 @@ spec:
               kubernetes_sd_configs:
                 - role: pod
               relabel_configs:
+                # DaemonSet: only scrape pods on this collector's own node, so each pod is
+                # scraped exactly once (no N-way duplication across the fleet of collectors).
+                - source_labels: [__meta_kubernetes_pod_node_name]
+                  action: keep
+                  regex: ${env:NODE_NAME}
                 # Only scrape pods with the workload-id label
                 - source_labels:
                     [__meta_kubernetes_pod_label_{{ $labelPrefixUnderscore }}_workload_id]

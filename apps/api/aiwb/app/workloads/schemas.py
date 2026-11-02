@@ -15,7 +15,7 @@ from api_common.schemas import BaseEntityPublic, BaseModel
 from ..aims.constants import AIM_SERVICE_RESOURCE
 from ..logs.schemas import LogLevel, LogType
 from ..workspaces.enums import WORKSPACE_URL_SUFFIX_MAPPING
-from .constants import DEPLOYMENT_RESOURCE, JOB_RESOURCE
+from .constants import DEPLOYMENT_RESOURCE, DESCRIPTION_ANNOTATION, JOB_RESOURCE
 from .enums import WorkloadStatus, WorkloadType
 from .utils import get_workload_host_from_HTTPRoute_manifest, get_workload_internal_url
 
@@ -49,16 +49,37 @@ class WorkloadStreamQuery(BaseModel):
     )
 
 
+class WorkloadDatasetResponse(BaseModel):
+    id: UUID
+    name: str
+    available: bool
+
+
 class WorkloadResponse(BaseEntityPublic):
     """Base workload schema."""
 
     name: str = Field(..., examples=["llama-3-8b-prod"])
     display_name: str = Field(..., examples=["Llama 3 Production"])
     type: WorkloadType
+    annotations: dict[str, str] = Field(
+        default_factory=dict,
+        description="Annotations from the workload's Kubernetes resource.",
+    )
     status: WorkloadStatus
     namespace: str = Field(..., examples=["acme-summarizer"])
     chart_id: UUID | None = None
-    dataset_id: UUID | None = None
+    dataset_id: UUID | None = Field(
+        default=None,
+        deprecated="Use datasets instead; a fine-tuning job can use multiple datasets.",
+        description=(
+            "First dataset used by the job, or null if that dataset was deleted. "
+            "Use datasets for the deletion-proof record."
+        ),
+    )
+    datasets: list[WorkloadDatasetResponse] = Field(
+        default_factory=list,
+        description="Datasets used by the job, including snapshots of datasets that were later deleted.",
+    )
     manifest: str = Field(default="", exclude=True)
     chart_name: str | None = Field(default=None, exclude=True)
 
@@ -68,6 +89,11 @@ class WorkloadResponse(BaseEntityPublic):
         if hasattr(data, "chart") and data.chart:
             data.__dict__["chart_name"] = data.chart.name
         return data
+
+    @computed_field
+    def description(self) -> str | None:
+        """Human-readable description supplied at creation, sourced from the workload's annotation."""
+        return self.annotations.get(DESCRIPTION_ANNOTATION) or None
 
     @computed_field
     def endpoints(self) -> dict[str, str]:

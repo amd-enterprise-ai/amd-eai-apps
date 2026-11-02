@@ -1,0 +1,3 @@
+{
+  "get configmap cilium-config -n kube-system -o json": [0, "{\"data\":{}}", ""]
+}

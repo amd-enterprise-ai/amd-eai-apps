@@ -2,29 +2,11 @@
 //
 // SPDX-License-Identifier: MIT
 
-export type ClusterResources = {
-  availableResources: {
-    gpuCount: number;
-    cpuMilliCores: number;
-    memoryBytes: number;
-    ephemeralStorageBytes: number;
-  };
-  totalNodeCount: number;
-};
+import type { components } from '@/types/api';
 
-export type AimImageFamily = {
-  familyId: string;
-  displayName: string;
-  repository: string | null;
-  tags: string[];
-};
+// Re-export the generated schema types as the single source of truth. The
+// backend marks repository/tags/acceleratorModel optional, so consumers must
+// tolerate `undefined` (see runtimeProfileCatalog helpers).
+export type AimImageFamily = components['schemas']['AimImageFamily'];
 
-export type ClusterAccelerator = {
-  deviceId: string;
-  productName: string;
-  allocatableCount: number;
-};
-
-export type ListResponse<T> = {
-  data: T[];
-};
+export type ClusterAccelerator = components['schemas']['ClusterAccelerator'];

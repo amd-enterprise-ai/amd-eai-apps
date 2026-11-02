@@ -38,4 +38,44 @@ describe('Switch adapter', () => {
     );
     expect(screen.getByRole('switch')).toBeDisabled();
   });
+  it('renders description below the label', () => {
+    render(
+      <Switch data-testid="switch" description="Help text">
+        Label
+      </Switch>,
+    );
+    expect(screen.getByText('Help text')).toBeInTheDocument();
+    expect(screen.getByTestId('switch')).toHaveClass('grid');
+  });
+  it('applies text-muted to description via HeroUI default styles', () => {
+    render(<Switch description="Help text">Label</Switch>);
+    const description = screen.getByText('Help text');
+    expect(description).toHaveClass('text-muted');
+    expect(description).toHaveClass('col-start-2');
+  });
+  it('does not apply grid layout when description is absent', () => {
+    render(<Switch data-testid="switch">Label</Switch>);
+    expect(screen.getByTestId('switch')).not.toHaveClass('grid');
+  });
+  it('keeps label inside clickable switch content when description is set', () => {
+    render(<Switch description="Help text">Label</Switch>);
+    const labelText = screen.getByText('Label');
+    expect(
+      labelText.closest('[data-slot="switch-content"]'),
+    ).toBeInTheDocument();
+  });
+  it('does not toggle when the description is clicked', () => {
+    const onValueChange = vi.fn();
+    render(
+      <Switch
+        isSelected={false}
+        onValueChange={onValueChange}
+        description="Help text"
+      >
+        Label
+      </Switch>,
+    );
+    fireEvent.click(screen.getByText('Help text'));
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
 });

@@ -53,7 +53,7 @@ const ConnectClusterModal: React.FC<Props> = ({ onOpenChange, isOpen }) => {
       }
     },
     onError: (error) => {
-      toast.error(t('addCluster.notification.error'), error as APIRequestError);
+      toast.error(t('form.add.notification.error'), error as APIRequestError);
       console.error('Error creating cluster:', error);
     },
   });
@@ -81,10 +81,9 @@ const ConnectClusterModal: React.FC<Props> = ({ onOpenChange, isOpen }) => {
 
   return (
     <StepModal
-      size="2xl"
+      size="lg"
       isActioning={isCreatingCluster}
       ref={stepModalRef}
-      className="min-h-[500px]"
       allowPrevious={false}
       initialStep={0}
       title={t('connectCluster.title')}
@@ -93,7 +92,7 @@ const ConnectClusterModal: React.FC<Props> = ({ onOpenChange, isOpen }) => {
           label: t('connectCluster.start.title'),
           content: (
             <Alert
-              color="warning"
+              status="warning"
               description={
                 <span>
                   {t('connectCluster.start.content.description')}{' '}
@@ -101,7 +100,7 @@ const ConnectClusterModal: React.FC<Props> = ({ onOpenChange, isOpen }) => {
                     href={CLUSTER_ONBOARDING_DOC_URL}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="underline text-primary"
+                    className="underline text-accent"
                   >
                     {t('connectCluster.start.content.docLinkText')}
                   </a>{' '}
@@ -135,30 +134,22 @@ const ConnectClusterModal: React.FC<Props> = ({ onOpenChange, isOpen }) => {
           content: (
             <div>
               <p>{t('connectCluster.script.content.description')} </p>
-              <CopySnippet
-                hideSymbol={true}
-                classNames={{
-                  base: 'mt-8 w-full',
-                  pre: 'whitespace-pre-wrap',
-                }}
-              >
-                <span>{installationCMD}</span>
-              </CopySnippet>
+              <CopySnippet className="mt-8 w-full" value={installationCMD} />
 
               <Alert
                 className="mt-4"
-                color="warning"
+                status="warning"
                 title={t('connectCluster.script.content.note')}
               />
-              <p className="mt-8">
-                <Checkbox
-                  aria-label={t('connectCluster.script.content.confirmation')}
-                  onValueChange={(value) => {
-                    setScriptExecuted(value);
-                  }}
-                />
+
+              <Checkbox
+                aria-label={t('connectCluster.script.content.confirmation')}
+                onValueChange={(value) => {
+                  setScriptExecuted(value);
+                }}
+              >
                 {t('connectCluster.script.content.confirmation')}
-              </p>
+              </Checkbox>
             </div>
           ),
           customActions: (

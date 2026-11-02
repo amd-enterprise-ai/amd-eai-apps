@@ -25,13 +25,9 @@ export const RelevantDocsCard = ({
       rel="noopener noreferrer"
       className="group h-full block"
     >
-      <Card
-        className="dark:bg-default-100/50 p-2 h-full flex flex-col group-hover:bg-default-200/30 group-hover:dark:bg-default-100/70 transition-colors"
-        shadow="sm"
-        radius="md"
-      >
+      <Card className="h-full flex flex-col">
         <CardBody className=" flex flex-col gap-2 flex-1 min-h-0">
-          <h3 className="text-sm font-semibold text-inherit group-hover:text-primary">
+          <h3 className="text-sm font-semibold text-inherit group-hover:text-accent">
             {title}
           </h3>
           <p className="text-xs opacity-80">{description}</p>

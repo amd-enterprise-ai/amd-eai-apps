@@ -17,12 +17,11 @@ export const ModelIcon: React.FC<ModelIconProps> = ({
   width = 48,
   height = 48,
 }) => {
-  const iconKey = Object.keys(ModelIcons).find((key) =>
+  const iconKey = (Object.keys(ModelIcons) as ModelIconType[]).find((key) =>
     iconName?.toLowerCase().includes(key.toLowerCase()),
-  ) as ModelIconType;
+  );
 
-  const IconComponent = (ModelIcons[iconKey] ||
-    ModelIcons.default) as unknown as React.FC<React.SVGProps<SVGSVGElement>>;
+  const IconComponent = iconKey ? ModelIcons[iconKey] : ModelIcons.default;
 
   const firstLetters =
     (iconName?.charAt(0) ?? '').toUpperCase() +

@@ -20,7 +20,7 @@ data:
   KEYCLOAK_PUBLIC_URL: "{{ include "eai-e2e.keycloakPublicUrl" . }}"
   KEYCLOAK_REALM: "{{ .Values.keycloak.realm }}"
   KEYCLOAK_CLIENT_ID: "k8s"
-  E2E_USERNAME: "devuser@{{ .Values.appDomain }}"
+  E2E_USERNAME: "{{ include "eai-e2e.username" . }}"
 ---
 # External secret to sync devuser password for e2e tests
 apiVersion: external-secrets.io/v1beta1
@@ -61,3 +61,6 @@ spec:
   target:
     creationPolicy: Owner
     name: e2e-keycloak-client-secret
+# The e2e-aim-test-author ClusterRole + ClusterRoleBinding moved to aim-test-rbac.yaml
+# so a test-only e2e-tests.yml run can reconcile just that RBAC onto a standing release
+# without re-applying these namespace/config/ExternalSecret resources.

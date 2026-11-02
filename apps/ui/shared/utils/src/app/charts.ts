@@ -92,7 +92,7 @@ export const transformTimeSeriesDataToChartData = (
             typeof meta === 'object' && meta !== null && 'name' in meta
               ? (meta as { name: string }).name
               : String(meta);
-          acc[categoryName] = matchingData ? matchingData.value : 0;
+          acc[categoryName] = matchingData ? (matchingData.value ?? null) : 0;
           return acc;
         },
         { date: timestamp },

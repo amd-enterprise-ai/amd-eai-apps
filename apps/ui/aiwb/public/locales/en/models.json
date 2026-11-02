@@ -27,6 +27,175 @@
     "video": "Video",
     "fine-tune": "Fine-tune"
   },
+  "finetuneWizard": {
+    "title": "Create fine-tuned model",
+    "subtitle": "Configure the model, training data, and output before starting training.",
+    "actions": {
+      "submit": "Start training"
+    },
+    "steps": {
+      "model": {
+        "label": "Model",
+        "subtitle": "Select the base model and provide access credentials when required."
+      },
+      "training": {
+        "label": "Training",
+        "subtitle": "Choose a fine-tuning type and select up to 10 datasets."
+      },
+      "target": {
+        "label": "Target",
+        "subtitle": "Name the fine-tuned model and provide an optional description.",
+        "loraSubtitle": "Name the LoRA adapter and provide an optional description."
+      },
+      "hyperparameters": {
+        "label": "Hyperparameters",
+        "subtitle": "Adjust settings for a more accurate result that gets the most out of your data."
+      }
+    },
+    "fields": {
+      "baseModel": {
+        "label": "Base model",
+        "placeholder": "Select base model",
+        "noCompatibleRecipes": "No fine-tuning recipes available for your cluster hardware"
+      },
+      "huggingFaceToken": {
+        "title": "Hugging Face authentication",
+        "description": "This model requires a Hugging Face token for fine-tuning. Please provide a valid token to proceed."
+      },
+      "fineTuningType": {
+        "label": "Fine-tuning type",
+        "merged": {
+          "label": "Merged",
+          "description": "Trains with LoRA, then merges the adapter into a complete model ready to deploy."
+        },
+        "full": {
+          "label": "Full",
+          "description": "Updates every weight in the model for maximum accuracy on specialized tasks."
+        },
+        "lora": {
+          "label": "LoRA",
+          "description": "Creates a lightweight adapter you can attach to existing deployments to save resources.",
+          "unavailableDescription": "Unavailable: no runtime profile for this model can serve LoRA adapters, so an adapter trained from it could not be deployed anywhere. Choose Merged to get a deployable fine-tuned model instead."
+        }
+      },
+      "modelName": {
+        "label": "Model name",
+        "placeholder": "Provide a name for the model"
+      },
+      "loraName": {
+        "label": "LoRA name",
+        "placeholder": "Provide a name for the LoRA adapter"
+      },
+      "description": {
+        "label": "Model description",
+        "placeholder": "Provide a description for the model"
+      },
+      "loraDescription": {
+        "label": "LoRA description",
+        "placeholder": "Provide a description for the LoRA adapter"
+      },
+      "hyperparameters": {
+        "customize": "Customize hyperparameters",
+        "loraSectionTitle": "LoRA specific parameters"
+      },
+      "batchSize": {
+        "label": "Batch size",
+        "description": "Sets how many examples are processed simultaneously before a learning update. Higher values speed up training but require more VRAM.",
+        "placeholder": "Auto"
+      },
+      "learningRate": {
+        "label": "Learning rate multiplier",
+        "description": "Adjusts the \"step size\" for learning. Higher values speed up training but can cause instability if set too high.",
+        "placeholder": "Auto"
+      },
+      "epochs": {
+        "label": "Number of epochs",
+        "description": "Sets how many times the model cycles through your entire dataset. More epochs improve learning but risk overfitting.",
+        "placeholder": "Auto"
+      },
+      "loraRank": {
+        "label": "Rank",
+        "description": "Sets the adapter's learning capacity. Higher values capture more complex patterns but use more memory and create larger adapter files.",
+        "placeholder": "Auto"
+      },
+      "loraAlpha": {
+        "label": "Alpha",
+        "description": "Controls the adaptation strength. Higher values make the model rely more heavily on your new training rather than its base knowledge.",
+        "placeholder": "Auto"
+      },
+      "loraDropout": {
+        "label": "Dropout",
+        "description": "Prevents overfitting by randomly dropping connections during training, forcing the model to generalize to unseen prompts instead of memorizing data.",
+        "placeholder": "Auto"
+      }
+    },
+    "validation": {
+      "baseModelRequired": "Select a base model",
+      "datasetRequired": "Select a training dataset",
+      "datasetsMaxReached": "You can select up to {{max}} datasets",
+      "modelNameRequired": "Name can't be empty",
+      "modelNameTooLong": "Name must be 255 characters or fewer",
+      "descriptionTooLong": "Description must be 2,048 characters or fewer",
+      "modelNameUnique": "A model with this name already exists.",
+      "loraNameUnique": "A LoRA adapter with this name already exists."
+    },
+    "summary": {
+      "baseModel": "Base model",
+      "hfToken": "Hugging Face token",
+      "fineTuningType": "Fine-tuning type",
+      "datasets": "Training datasets",
+      "datasetsMoreCount": "+{{count}}",
+      "modelName": "Model name",
+      "loraName": "LoRA name",
+      "description": "Description",
+      "loraDescription": "LoRA description",
+      "hyperparameters": "Hyperparameters",
+      "automatic": "Automatic",
+      "customized": "Customized"
+    },
+    "datasetSelector": {
+      "filters": {
+        "search": {
+          "placeholder": "Search datasets"
+        }
+      },
+      "list": {
+        "headers": {
+          "name": {
+            "title": "Name"
+          },
+          "sizeBytes": {
+            "title": "Size"
+          },
+          "createdBy": {
+            "title": "Created by"
+          },
+          "createdAt": {
+            "title": "Created at"
+          }
+        },
+        "empty": {
+          "description": "No datasets found."
+        },
+        "table": {
+          "ariaLabel": "Training datasets"
+        },
+        "pagination": {
+          "showing": "Showing {{from}} to {{to}} of {{total}} datasets",
+          "pageSize": {
+            "label": "Show",
+            "entities": "datasets"
+          }
+        }
+      }
+    },
+    "notifications": {
+      "success": "Fine-tuning started",
+      "error": "Error fine-tuning model",
+      "viewLoras": "View LoRAs",
+      "viewModels": "View models"
+    }
+  },
   "notifications": {
     "refresh": {
       "error": "Failed to fetch custom models. {{error, default='Please try again'}}."
@@ -38,7 +207,7 @@
       "description": "Bring your own models from Hugging Face or your own model registry, powered by AMD Inference Microservices engine.",
       "headers": {
         "name": {
-          "title": "Model name"
+          "title": "Name"
         },
         "canonicalName": {
           "title": "Canonical name"
@@ -58,6 +227,9 @@
         "status": {
           "title": "Status"
         },
+        "output": {
+          "title": "Fine-tuning type"
+        },
         "workloads": {
           "title": "Workloads"
         },
@@ -74,8 +246,13 @@
           "placeholder": "All statuses"
         },
         "search": {
-          "placeholder": "Search by name..."
+          "placeholder": "Search"
         }
+      },
+      "fineTuningTypes": {
+        "full": "Full",
+        "lora": "LoRA",
+        "merged": "Merged"
       },
       "pagination": {
         "showing": "Showing {{from}} to {{to}} of {{total}} models",
@@ -144,8 +321,9 @@
             "modelNotFound": "Model is not found",
             "fields": {
               "name": "Name",
-              "baseModel": "Base Model",
-              "resourceName": "Resource Name",
+              "baseModel": "Base model",
+              "description": "Description",
+              "resourceName": "Resource name",
               "status": "Status",
               "conditions": "Conditions"
             }
@@ -153,56 +331,7 @@
         },
         "finetune": {
           "title": "Fine-tune model",
-          "label": "Fine-tune",
-          "modal": {
-            "title": "Create fine-tuned model",
-            "body": "Configure your model below",
-            "cancel": "Cancel",
-            "confirm": "Start training",
-            "baseModel": {
-              "label": "Base model",
-              "placeholder": "Select base model",
-              "noCompatibleRecipes": "No fine-tuning recipes available for your cluster hardware"
-            },
-            "dataset": {
-              "label": "Training dataset",
-              "placeholder": "Select the training dataset"
-            },
-            "modelName": {
-              "label": "Model name",
-              "placeholder": "Provide a name for the model",
-              "description": "The name must be unique and can only contain letters, numbers, underscores, periods, and dashes.",
-              "emptyNameError": "Model name can't be empty",
-              "nonUniqueNameError": "Another model with the same name already exists",
-              "invalidCharactersError": "Model name can only contain letters, numbers, underscores, periods, and dashes"
-            },
-            "modelDescription": {
-              "label": "Model description",
-              "placeholder": "Provide a description for the model"
-            },
-            "advancedSettingsAccordion": {
-              "title": "Advanced settings"
-            },
-            "batchSize": {
-              "label": "Batch size",
-              "description": "Range of 1-128 is recommended",
-              "placeholder": "Auto"
-            },
-            "learningRateMultiplier": {
-              "label": "Learning rate multiplier",
-              "description": "Range of 0.1-10 is recommended",
-              "placeholder": "Auto"
-            },
-            "epochs": {
-              "label": "Number of epochs",
-              "description": "Range of 1-10 is recommended",
-              "placeholder": "Auto"
-            }
-          },
-          "notification": {
-            "success": "Adapter fine-tuning started",
-            "error": "Error fine-tuning model"
-          }
+          "label": "Fine-tune"
         },
         "importModel": {
           "title": "Onboard model"
@@ -212,7 +341,7 @@
     "import": {
       "loading": "Loading model…",
       "title": "Add new model",
-      "description": "Onboard a model from Hugging Face into this project. Step through the source, model information, and runtime profile to start onboarding.",
+      "description": "Onboard a model from Hugging Face or an S3 bucket into this project. Step through the source, model information, and runtime profile to start onboarding.",
       "editTitle": "Edit model",
       "editDescription": "Update this model's display information and runtime profile. The model source cannot be changed.",
       "stepper": {
@@ -247,22 +376,42 @@
         "modelPrecisionRequired": "Select a model precision.",
         "acceleratorCountRequired": "Enter a valid accelerator count.",
         "invalidEngineArgsYaml": "Engine arguments must be valid YAML key-value pairs.",
-        "invalidEnvVarsYaml": "Environment variables must be valid YAML key-value pairs."
+        "invalidEnvVarsYaml": "Environment variables must be valid YAML key-value pairs.",
+        "invalidS3Uri": "Enter an S3 URI in the form s3://bucket/path.",
+        "s3StorageRequired": "Select an S3 configuration for this bucket."
       },
       "steps": {
         "source": {
           "title": "Model source",
-          "description": "Point the wizard at a Hugging Face repository. Private and gated repos require a token.",
+          "description": "Choose where the model's weights come from. Hugging Face repositories may need a token; S3 buckets always need an S3 configuration.",
           "readOnlyDescription": "The import source for this model. It cannot be changed after onboarding.",
           "fields": {
+            "sourceType": {
+              "label": "Source type"
+            },
             "source": {
               "label": "Model source",
               "placeholder": "meta-llama/Llama-3 or https://huggingface.co/...",
-              "description": "Use a repository ID (for example meta-llama/Llama-3) or a full Hugging Face URL. A revision can be embedded in the URL (e.g. /tree/<rev>)."
+              "description": "Use a repository ID (for example meta-llama/Llama-3) or a full Hugging Face URL. A revision can be embedded in the URL (e.g. /tree/<rev>).",
+              "s3Placeholder": "s3://my-bucket/path/to/model",
+              "s3Description": "Use an S3 URI that points at the folder holding the model files, for example s3://my-bucket/path/to/model.",
+              "immutableHint": "The source cannot be changed after onboarding."
             },
             "huggingFace": {
               "title": "Hugging Face authentication",
               "description": "Optional. Select an existing token secret or add a new one for private or gated repositories."
+            },
+            "s3": {
+              "title": "S3 configuration",
+              "description": "Required. Select an S3 configuration for this bucket, or create a new one."
+            }
+          },
+          "sourceTypes": {
+            "huggingFace": {
+              "label": "Hugging Face"
+            },
+            "s3": {
+              "label": "S3 bucket"
             }
           }
         },
@@ -291,8 +440,12 @@
             "tags": {
               "label": "Tags",
               "placeholder": "Populated from model source",
-              "description": "Add tags separated by comma."
+              "description": "Add tags separated by comma.",
+              "tooltip": "Tags help organize and find this model in the catalog, and some also act as capability signals that affect how the model is served — for example: text-generation, chat, instruction, reasoning, and vision. Set capability tags accurately to match the model; remaining tags are free-form and used for discovery only. Tags are optional and can be added or edited even when none are detected automatically."
             }
+          },
+          "previewWarnings": {
+            "title": "Check the model source"
           }
         },
         "runtime": {
@@ -302,7 +455,42 @@
             "loading": "Loading runtime profile options…",
             "error": "Failed to load runtime profile options.",
             "retry": "Retry",
-            "emptyAccelerators": "No accelerators were detected on this cluster."
+            "baseImageOptionsWarning": "Could not load image-specific runtime options. Using project defaults.",
+            "noValidCombinations": "This base image supports no runtime combination that can be saved. Pick a different image.",
+            "emptyAccelerators": "No accelerators were detected on this cluster.",
+            "modelAccelerators": {
+              "EPYC_9175F": "AMD EPYC 9175F",
+              "EPYC_9575F": "AMD EPYC 9575F",
+              "EPYC_9655": "AMD EPYC 9655",
+              "EPYC_9755": "AMD EPYC 9755",
+              "EPYC_9965": "AMD EPYC 9965",
+              "EPYC_ZEN4": "AMD EPYC Zen 4",
+              "EPYC_ZEN5": "AMD EPYC Zen 5",
+              "MI100": "AMD Instinct MI100",
+              "MI210": "AMD Instinct MI210",
+              "MI250X": "AMD Instinct MI250X",
+              "MI300A": "AMD Instinct MI300A",
+              "MI300X": "AMD Instinct MI300X",
+              "MI308X": "AMD Instinct MI308X",
+              "MI325X": "AMD Instinct MI325X",
+              "MI350X": "AMD Instinct MI350X",
+              "MI350P": "AMD Instinct MI350P",
+              "MI355X": "AMD Instinct MI355X",
+              "R9700": "AMD Radeon PRO R9700",
+              "V620": "AMD Radeon PRO V620",
+              "V710": "AMD Radeon PRO V710",
+              "W6800": "AMD Radeon PRO W6800",
+              "W6800X": "AMD Radeon PRO W6800X",
+              "W6900X": "AMD Radeon PRO W6900X",
+              "W7800": "AMD Radeon PRO W7800",
+              "W7900": "AMD Radeon PRO W7900",
+              "RadeonW7900": "AMD Radeon PRO W7900",
+              "RX6800": "AMD Radeon RX 6800",
+              "RX6900": "AMD Radeon RX 6900",
+              "RX7900": "AMD Radeon RX 7900",
+              "RX9070": "AMD Radeon RX 9070"
+            },
+            "modelAccelerator": "Accelerator {{model}}"
           },
           "profileParameters": {
             "title": "Profile parameters",
@@ -357,7 +545,7 @@
       }
     },
     "card": {
-      "actionsMenu": "Open actions menu",
+      "actionsMenu": "Actions",
       "status": {
         "importing": "Importing",
         "onboarding": "Onboarding",
@@ -377,18 +565,226 @@
             "noProject": "Select a project and try again"
           }
         },
+        "profiles": {
+          "label": "Profiles"
+        },
         "delete": {
           "label": "Delete"
         },
         "comingSoon": "{{action}} is coming soon."
       },
-      "tagsMoreCount": "+{{count}}"
+      "tagsMoreCount": "+{{count}}",
+      "profileCount_one": "{{count}} profile",
+      "profileCount_other": "{{count}} profiles"
+    },
+    "profiles": {
+      "title": "Custom profiles",
+      "titleForModel": "for {{modelName}}",
+      "loading": "Loading profiles…",
+      "default": {
+        "label": "Default"
+      },
+      "notifications": {
+        "loadError": "Failed to load profiles: {{error}}"
+      },
+      "filters": {
+        "search": {
+          "placeholder": "Search profiles"
+        }
+      },
+      "list": {
+        "headers": {
+          "displayName": {
+            "title": "Name"
+          },
+          "accelerator": {
+            "title": "Accelerator"
+          },
+          "metric": {
+            "title": "Performance metric"
+          },
+          "precision": {
+            "title": "Precision"
+          },
+          "createdBy": {
+            "title": "Created by"
+          },
+          "createdAt": {
+            "title": "Created at"
+          },
+          "actions": {
+            "title": ""
+          }
+        },
+        "empty": {
+          "description": "No profiles found for this model."
+        },
+        "table": {
+          "ariaLabel": "Custom profiles"
+        },
+        "pagination": {
+          "showing": "Showing {{from}} to {{to}} of {{total}} profiles",
+          "pageSize": {
+            "label": "Show",
+            "entities": "profiles"
+          }
+        }
+      },
+      "actions": {
+        "newProfile": {
+          "label": "New profile"
+        },
+        "edit": {
+          "label": "Edit"
+        },
+        "deploy": {
+          "label": "Deploy with this profile"
+        },
+        "delete": {
+          "label": "Delete",
+          "confirmation": {
+            "title": "Confirm deletion",
+            "description": "Are you sure you want to delete the <strong>{{name}}</strong> profile? This action is irreversible."
+          },
+          "notification": {
+            "success": "Profile successfully deleted.",
+            "error": "Failed to delete profile. Please try again.",
+            "conflictWithServices": "Cannot delete this profile while these deployments are still using it: {{services}}. Undeploy them first, then try again.",
+            "conflictGeneric": "This profile cannot be deleted yet because deployments are still using it. Undeploy those deployments first, then try again.",
+            "notFound": "That profile is no longer available. The list has been refreshed."
+          }
+        }
+      },
+      "drawer": {
+        "title": {
+          "create": "Add new profile",
+          "edit": "Edit profile"
+        },
+        "heading": {
+          "create": "New profile for {{modelName}}",
+          "edit": "Editing a profile for {{modelName}}"
+        },
+        "fields": {
+          "displayName": {
+            "label": "Profile name",
+            "placeholder": "Input a descriptive name"
+          },
+          "containerImage": {
+            "label": "Container image",
+            "placeholder": "Select a container image"
+          },
+          "containerVersion": {
+            "label": "Container version",
+            "placeholder": "Select a version"
+          },
+          "acceleratorType": {
+            "label": "Accelerator type",
+            "placeholder": "Select an accelerator type"
+          },
+          "accelerator": {
+            "label": "Accelerator",
+            "placeholder": "Select an accelerator"
+          },
+          "acceleratorCount": {
+            "label": "Accelerator count"
+          },
+          "modelPrecision": {
+            "label": "Model precision",
+            "placeholder": "Select a precision"
+          },
+          "metric": {
+            "label": "Performance metric",
+            "placeholder": "Select a metric"
+          },
+          "engineArgs": {
+            "label": "Engine arguments",
+            "placeholder": "max-model-len: 32768\ntensor-parallel-size: 8",
+            "description": "One argument per line, as YAML. Leave empty to use the engine defaults."
+          },
+          "envVars": {
+            "label": "Environment variables",
+            "placeholder": "VLLM_LOGGING_LEVEL: DEBUG",
+            "description": "One variable per line, as YAML. Leave empty to use the engine defaults."
+          }
+        },
+        "catalog": {
+          "loading": "Loading available runtime options…",
+          "error": "Failed to load the runtime options for this project.",
+          "retry": "Try again",
+          "baseImageOptionsWarning": "Could not load image-specific runtime options. Using project defaults.",
+          "noValidCombinations": "This base image supports no runtime combination that can be saved. Pick a different image.",
+          "emptyAccelerators": "This project has no accelerators available, so a profile cannot be configured yet.",
+          "modelAccelerators": {
+            "EPYC_9175F": "AMD EPYC 9175F",
+            "EPYC_9575F": "AMD EPYC 9575F",
+            "EPYC_9655": "AMD EPYC 9655",
+            "EPYC_9755": "AMD EPYC 9755",
+            "EPYC_9965": "AMD EPYC 9965",
+            "EPYC_ZEN4": "AMD EPYC Zen 4",
+            "EPYC_ZEN5": "AMD EPYC Zen 5",
+            "MI100": "AMD Instinct MI100",
+            "MI210": "AMD Instinct MI210",
+            "MI250X": "AMD Instinct MI250X",
+            "MI300A": "AMD Instinct MI300A",
+            "MI300X": "AMD Instinct MI300X",
+            "MI308X": "AMD Instinct MI308X",
+            "MI325X": "AMD Instinct MI325X",
+            "MI350X": "AMD Instinct MI350X",
+            "MI350P": "AMD Instinct MI350P",
+            "MI355X": "AMD Instinct MI355X",
+            "R9700": "AMD Radeon PRO R9700",
+            "V620": "AMD Radeon PRO V620",
+            "V710": "AMD Radeon PRO V710",
+            "W6800": "AMD Radeon PRO W6800",
+            "W6800X": "AMD Radeon PRO W6800X",
+            "W6900X": "AMD Radeon PRO W6900X",
+            "W7800": "AMD Radeon PRO W7800",
+            "W7900": "AMD Radeon PRO W7900",
+            "RadeonW7900": "AMD Radeon PRO W7900",
+            "RX6800": "AMD Radeon RX 6800",
+            "RX6900": "AMD Radeon RX 6900",
+            "RX7900": "AMD Radeon RX 7900",
+            "RX9070": "AMD Radeon RX 9070"
+          },
+          "modelAccelerator": "Accelerator {{model}}"
+        },
+        "inUse": {
+          "title": "This profile cannot be changed while it is in use",
+          "description": "In use by {{services}}. Undeploy first, then edit this profile."
+        },
+        "actions": {
+          "save": "Save",
+          "saveAndDeploy": "Save and deploy",
+          "cancel": "Cancel"
+        },
+        "errors": {
+          "nameRequired": "Enter a profile name.",
+          "nameReserved": "\"Default\" is reserved for the model's onboarding profile. Choose another name.",
+          "nameTaken": "Another profile on this model already uses this name.",
+          "containerImageRequired": "Select a container image.",
+          "containerVersionRequired": "Select a container version.",
+          "acceleratorTypeRequired": "Select an accelerator type.",
+          "acceleratorRequired": "Select an accelerator.",
+          "acceleratorCountRequired": "Select how many accelerators to use.",
+          "modelPrecisionRequired": "Select a model precision.",
+          "metricRequired": "Select a performance metric.",
+          "invalidEngineArgsYaml": "Engine arguments must be valid YAML, one key and value per line.",
+          "invalidEnvVarsYaml": "Environment variables must be valid YAML, one key and value per line."
+        },
+        "notifications": {
+          "created": "Profile successfully created.",
+          "updated": "Profile successfully updated.",
+          "conflictName": "Another profile on this model already uses that name. Choose a different name, then try again.",
+          "conflictInUse": "This profile cannot be changed while these deployments are using it: {{services}}. Undeploy them first, then try again.",
+          "error": "Failed to save the profile. Please try again."
+        }
+      }
     }
   },
   "huggingFaceTokenSelector": {
     "selectLabel": "Hugging Face token",
     "selectPlaceholder": "Select a token",
-    "addNew": "Add new Hugging Face token",
+    "addNew": "Add new token",
     "dialog": {
       "title": "Add Hugging Face token",
       "nameLabel": "Name",
@@ -396,11 +792,18 @@
       "tokenLabel": "Token",
       "tokenPlaceholder": "hf_...",
       "cancel": "Cancel",
-      "submit": "Add token"
+      "submit": "Add"
     },
     "errors": {
       "invalidSecretResponse": "The server did not return a secret name.",
       "missingNamespace": "Select a project before adding a token."
+    },
+    "validation": {
+      "nameRequired": "Name is required when entering a new token",
+      "invalidSecretName": "The secret name must be lowercase alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character",
+      "tokenRequired": "Token is required when entering a new token",
+      "invalidTokenFormat": "Please enter a valid Hugging Face token (starts with 'hf_')",
+      "duplicateName": "A secret with this name already exists."
     }
   },
   "aimCatalog": {
@@ -410,7 +813,7 @@
       "description": "Ready-to-deploy open source models created by the worldwide AI community. You can easily deploy these models as inference services.",
       "filter": {
         "search": {
-          "placeholder": "Search models..."
+          "placeholder": "Search"
         },
         "deploymentStatus": {
           "placeholder": "Deployment status",
@@ -459,10 +862,12 @@
       "deploymentsCount_other": "Deployments ({{count}})",
       "hasDeployments": "Has deployments",
       "hasDeploymentsTooltip": "This model has active deployments",
-      "actionsMenu": "Actions menu",
+      "actionsMenu": "Actions",
       "menuTrigger": "Menu",
       "tagsMoreCount": "+{{count}} more",
-      "descriptionDisclaimer": "This description is an AI-generated summary sourced from Hugging Face and may contain inaccuracies."
+      "descriptionDisclaimer": "This description is an AI-generated summary sourced from Hugging Face and may contain inaccuracies.",
+      "showMore": "Show more",
+      "showLess": "Show less"
     },
     "actions": {
       "deploy": {
@@ -532,52 +937,70 @@
     }
   },
   "huggingFaceTokenDrawer": {
-    "title": "Hugging Face Authentication",
     "actions": {
       "cancel": "Cancel",
       "apply": "Apply"
     },
-    "fields": {
-      "selectMode": "Token selection mode",
-      "selectExisting": "Select existing token",
-      "addNew": "Add new token",
-      "selectToken": {
-        "label": "Select a token",
-        "placeholder": "Choose an existing token"
-      },
-      "name": {
-        "label": "Name",
-        "placeholder": "Enter a display name for the token"
-      },
-      "token": {
-        "label": "Token",
-        "placeholder": "Enter your Hugging Face token"
-      }
-    },
-    "validation": {
-      "selectTokenOrProvideNameAndToken": "Please select an existing token or provide both name and token",
-      "nameRequired": "Name is required when entering a new token",
-      "invalidSecretName": "The secret name must be lowercase alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character",
-      "tokenRequired": "Token is required when entering a new token",
-      "invalidTokenFormat": "Please enter a valid Hugging Face token (starts with 'hf_')",
-      "nameTooLong": "Name cannot exceed 253 characters (Kubernetes limit)"
-    },
     "notifications": {
-      "secretCreated": "Hugging Face token secret '{{name}}' created successfully",
-      "secretCreateError": "Failed to create Hugging Face token secret: {{error}}",
       "downloadStarted": "Model download started with Hugging Face token",
-      "invalidSecretResponse": "Failed to create secret: Invalid response from server",
       "noTokenSelected": "No Hugging Face token selected or created"
     }
   },
-  "deployAIMDrawer": {
-    "title": "Deploy AIM",
-    "actions": {
-      "cancel": "Cancel",
-      "deploy": "Deploy"
+  "deployAIM": {
+    "title": "Model Deployment",
+    "subtitle": "Deploy a model in your project namespace",
+    "steps": {
+      "model": {
+        "label": "Model",
+        "subtitle": "Select model and container version"
+      },
+      "personalization": {
+        "label": "Personalization",
+        "subtitle": "Optionally enable and attach LoRA adapters."
+      },
+      "performance": {
+        "label": "Deployment",
+        "subtitle": "Select deployment name and profile"
+      },
+      "scaling": {
+        "label": "Scaling",
+        "subtitle": "Automatically adjust the number of replicas based on demand to optimize resource usage and performance"
+      }
+    },
+    "summary": {
+      "model": "Model",
+      "containerVersion": "Container version",
+      "displayName": "Deployment name",
+      "hfToken": "Hugging Face token",
+      "imagePullSecrets": "Image pull secrets",
+      "metric": "Performance metrics",
+      "precision": "Precision",
+      "accelerator": "Accelerator",
+      "optimizationClass": "Optimization class",
+      "autoscaling": "Autoscaling",
+      "disabled": "Disabled"
+    },
+    "personalization": {
+      "enable": "Enable dynamic LoRA adapters",
+      "maxRank": {
+        "label": "Max LoRA rank",
+        "hint": "When choosing the maximum value, consider what ranks of LoRA adapters you plan to use."
+      },
+      "summary": {
+        "label": "Dynamic LoRA adapters",
+        "enabled": "Enabled, {{rank}} max supported rank",
+        "adapters": "Adapters",
+        "noneSelected": "None selected"
+      },
+      "validation": {
+        "profile": "Select a deployment profile that supports dynamic LoRA adapters.",
+        "adapters": "These LoRA adapters cannot be served by the profiles your performance choices allow: {{names}}. Deselect them or widen the performance selection.",
+        "notReadyAdapters": "These LoRA adapters do not have usable weights yet: {{names}}. Deselect them, or deploy again once their weights are confirmed."
+      },
+      "unservableAdapters": "Your performance choices no longer allow a profile that can serve these selected LoRA adapters: {{names}}. They are still selected; deselect them or widen the performance selection before deploying.",
+      "notReadyAdapters": "These selected LoRA adapters do not have usable weights yet: {{names}}. They are still selected; deselect them, or deploy again once their weights are confirmed."
     },
     "fields": {
-      "title": "Deployment settings",
       "displayName": {
         "title": "Name",
         "placeholder": "My deployment name (optional)"
@@ -591,14 +1014,12 @@
       },
       "huggingFaceToken": {
         "title": "Hugging Face authentication",
-        "description": "This model requires a Hugging Face token for deployment. Please provide a valid token to proceed with the deployment.",
-        "label": "Hugging Face token",
-        "placeholder": "Select Hugging Face token"
+        "description": "This model requires a Hugging Face token for deployment. Please provide a valid token to proceed with the deployment."
       },
       "imagePullSecrets": {
-        "title": "Image Pull Secrets",
+        "title": "Image pull secrets",
         "description": "Select one or more image pull secrets, if your cluster requires authentication to pull container images.",
-        "label": "Image Pull Secrets",
+        "label": "Image pull secrets",
         "placeholder": "Select image pull secrets"
       },
       "metric": {
@@ -606,12 +1027,24 @@
         "label": "Performance metric",
         "placeholder": "Default",
         "description": "Metric selects the optimization goal.\n- latency: prioritize low end-to-end latency\n- throughput: prioritize sustained requests/second\n\nIf not specified AIM will default to the most appropriate metric based on the model and hardware.",
-        "notOptimized": "This model has no optimized profiles on your selected hardware. You might experience worse throughput or latency compared to hardware-optimized models.",
-        "unoptimizedLabel": "Unoptimized profile"
+        "notOptimized": "This model has no optimized profiles on your selected hardware. This may result in lower performance for latency/throughput compared to hardware-optimized models.",
+        "unoptimizedLabel": "Unoptimized profile",
+        "unoptimizedSelectedLabel": "The selected profile is unoptimized",
+        "unoptimizedSelectedDescription": "This may result in lower performance for latency/throughput.",
+        "options": {
+          "latency": {
+            "description": "Prioritize low time-to-first token"
+          },
+          "throughput": {
+            "description": "Prioritize sustained requests per second"
+          },
+          "advanced": {
+            "label": "Advanced profile selection",
+            "description": "Select suitable profile manually"
+          }
+        }
       },
       "advancedProfileParams": {
-        "show": "Show advanced profile parameters",
-        "hide": "Hide advanced profile parameters",
         "optimizationClass": "Optimization class",
         "gpu": "Accelerator",
         "precision": "Precision",
@@ -622,10 +1055,11 @@
         "automaticSelectionFromProfiles": "Automatic selection from {{count}} profiles",
         "noMatchingProfiles": "No available profiles",
         "placeholder": "Select option",
-        "resetParameters": "Reset parameters"
+        "metric": "Metric",
+        "class": "Class",
+        "select": "Select"
       },
       "autoscaling": {
-        "title": "Autoscaling",
         "enable": "Enable autoscaling"
       }
     },
@@ -635,11 +1069,14 @@
       "noProfilesDescription": "The model cannot be deployed because no deployment profiles are available for your hardware configuration."
     }
   },
+  "profileSummary": {
+    "maxRank": "max rank {{rank}}"
+  },
   "tabs": {
     "aimCatalog": "AIM Catalog",
-    "customModels": "Custom Models",
+    "customModels": "Custom models",
     "fineTuneModels": "Fine-tune models",
-    "deployedModels": "Deployed Models"
+    "deployedModels": "Deployed models"
   },
   "deployCustomAIMDrawer": {
     "title": "Custom model deployment",
@@ -657,6 +1094,29 @@
         "placeholder": "Input a descriptive name",
         "helper": "The display name is filled with the Kubernetes resource name if you leave the field empty."
       },
+      "profile": {
+        "label": "Profile",
+        "placeholder": "Select a profile",
+        "description": "The profile this deployment runs with.",
+        "loading": "Loading profiles…",
+        "empty": "No profiles for this model",
+        "unavailable": "Not ready",
+        "addNew": "Add new profile",
+        "loadError": "Could not load this model's profiles",
+        "errors": {
+          "required": "Select a profile to deploy",
+          "notReady": "This profile is not ready to deploy yet"
+        },
+        "details": {
+          "title": "Profile information",
+          "metric": "Metric",
+          "precision": "Precision",
+          "accelerator": "Accelerator",
+          "acceleratorCount": "Accelerator count",
+          "engineArgs": "Engine arguments",
+          "engineEnv": "Environment variables"
+        }
+      },
       "autoscaling": {
         "title": "Autoscaling",
         "enable": "Enable autoscaling"
@@ -665,6 +1125,41 @@
     "notifications": {
       "success": "Model deployment started",
       "error": "Error deploying model, reason: {{message}}"
+    }
+  },
+  "s3StorageSelector": {
+    "label": "S3 configuration",
+    "placeholder": "Select an S3 configuration",
+    "description": "S3 configurations available in this project.",
+    "loading": "Loading S3 configurations…",
+    "empty": "No S3 configurations in this project",
+    "addNew": "Add new S3 configuration",
+    "dialog": {
+      "title": "Add S3 configuration",
+      "nameLabel": "Name",
+      "namePlaceholder": "my-s3-configuration",
+      "secretLabel": "S3 credentials",
+      "secretPlaceholder": "Select a secret",
+      "bucketUrlLabel": "S3 endpoint URL (optional)",
+      "bucketUrlPlaceholder": "Leave blank to use the platform default",
+      "bucketUrlDescription": "The S3 endpoint host. Leave blank to use the platform's built-in object storage.",
+      "regionLabel": "Region (optional)",
+      "regionPlaceholder": "us-east-1",
+      "cancel": "Cancel",
+      "submit": "Add"
+    },
+    "notifications": {
+      "createSuccess": "S3 configuration \"{{name}}\" created.",
+      "createError": "Failed to create S3 configuration."
+    },
+    "errors": {
+      "invalidStorageResponse": "The server did not return a storage name.",
+      "missingNamespace": "Select a project before adding an S3 configuration."
+    },
+    "validation": {
+      "nameRequired": "Name is required when entering a new S3 configuration",
+      "duplicateName": "An S3 configuration with this name already exists.",
+      "secretRequired": "Select the S3 credentials for this configuration."
     }
   }
 }

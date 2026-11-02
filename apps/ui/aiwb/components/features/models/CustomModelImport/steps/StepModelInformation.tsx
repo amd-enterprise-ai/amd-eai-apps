@@ -7,8 +7,9 @@ import {
   FormInput,
   FormTextarea,
   Input,
+  Tooltip,
 } from '@amdenterpriseai/components';
-import { IconAlertTriangle } from '@tabler/icons-react';
+import { IconAlertTriangle, IconInfoCircle } from '@tabler/icons-react';
 import { useTranslation } from 'next-i18next';
 import type { UseFormReturn } from 'react-hook-form';
 
@@ -45,6 +46,7 @@ export const StepModelInformation = ({
   const isDuplicateName = existingDisplayNames.has(
     normalizeCustomModelDisplayName(displayName),
   );
+  const previewWarnings = preview?.warnings ?? [];
 
   return (
     <div className="flex flex-col gap-6">
@@ -52,10 +54,24 @@ export const StepModelInformation = ({
         <h2 className="text-xl font-semibold">{t('title')}</h2>
       </header>
 
+      {previewWarnings.length > 0 && (
+        <Alert
+          status="warning"
+          icon={<IconAlertTriangle />}
+          title={t('previewWarnings.title')}
+          description={
+            <ul className="list-disc pl-4">
+              {previewWarnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          }
+          data-testid="custom-model-import-preview-warnings"
+        />
+      )}
+
       <Input
         label={t('fields.canonicalName.label')}
-        labelPlacement="outside"
-        variant="faded"
         value={canonicalName}
         isReadOnly
         data-testid="custom-model-import-canonical-name"
@@ -66,7 +82,7 @@ export const StepModelInformation = ({
           <h3 className="text-base font-semibold">
             {t('displayProperties.title')}
           </h3>
-          <p className="text-sm text-default-500">
+          <p className="text-sm text-muted">
             {t('displayProperties.subtitle')}
           </p>
         </header>
@@ -82,8 +98,7 @@ export const StepModelInformation = ({
 
         {isDuplicateName && (
           <Alert
-            color="warning"
-            variant="flat"
+            status="warning"
             icon={<IconAlertTriangle />}
             title={t('fields.displayName.duplicateWarning.title')}
             description={t('fields.displayName.duplicateWarning.description')}
@@ -101,7 +116,22 @@ export const StepModelInformation = ({
         <FormInput<CustomModelImportFormValues>
           form={form}
           name="tagsInput"
-          label={t('fields.tags.label')}
+          label={
+            <span className="flex items-center gap-1">
+              {t('fields.tags.label')}
+              <Tooltip
+                content={t('fields.tags.tooltip')}
+                classNames={{ content: 'max-w-xs' }}
+              >
+                <IconInfoCircle
+                  size={16}
+                  className="text-muted cursor-pointer"
+                  aria-label={t('fields.tags.tooltip')}
+                  data-testid="custom-model-import-tags-tooltip"
+                />
+              </Tooltip>
+            </span>
+          }
           placeholder={t('fields.tags.placeholder')}
           description={t('fields.tags.description')}
         />

@@ -2,4 +2,4 @@
 //
 // SPDX-License-Identifier: MIT
 
-export { HuggingFaceTokenSelector } from './HuggingFaceTokenSelector';
+export { ProjectHuggingFaceTokenSelector } from './ProjectHuggingFaceTokenSelector';

@@ -9,37 +9,34 @@ import Image from 'next/image';
 import { useRouter } from 'next/router';
 
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import { useOverlayState, useSystemToast } from '@amdenterpriseai/hooks';
+import { getPageTranslations } from '@/lib/server/i18n';
 
 import { getFilteredData } from '@amdenterpriseai/utils/app';
 import { APIRequestError } from '@amdenterpriseai/utils/app';
 
-import { CatalogItem } from '@/types/catalog';
-import { CatalogUsageScope } from '@/types/enums/catalog';
+import { WorkspaceCatalogTableItem } from '@/types/workspaces';
+import type { components } from '@/types/api';
 import { FilterComponentType } from '@amdenterpriseai/types';
-import { WorkloadType } from '@amdenterpriseai/types';
-import { WorkloadStatus } from '@/types/enums/workloads';
 import { ClientSideDataFilter, FilterValueMap } from '@amdenterpriseai/types';
 
 import { CatalogItemCard } from '@/components/features/catalog/CatalogItemCard';
-import { DeployWorkspaceDrawer } from '@/components/features/catalog/DeployWorkspaceDrawer';
+import { DeployWorkspaceWizard } from '@/components/features/catalog/DeployWorkspaceWizard/DeployWorkspaceWizard';
+import UndeployWorkspaceModal, {
+  type WorkspaceToUndeploy,
+} from '@/components/features/catalog/UndeployWorkspaceModal';
 import { RequestSoftware } from '@/components/shared/RequestSoftware/RequestSoftware';
 import {
   ActionsToolbar,
   AiwbDocsPage,
   aiwbDocumentationMapping,
-  ConfirmationModal,
   RelevantDocs,
 } from '@amdenterpriseai/components';
 
 import { useProject } from '@/contexts/ProjectContext';
-import {
-  deleteWorkspace,
-  listAllWorkloads,
-  getCatalogItems,
-} from '@/lib/app/workloads';
+import { deleteWorkspace, listAllWorkloads } from '@/lib/app/workloads';
+import { listCharts } from '@/lib/app/charts';
 import {
   DOCS_WORKBENCH_BASE,
   WithDocumentationLink,
@@ -51,9 +48,9 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
   const { t } = useTranslation('catalog');
   const { activeProject, projectPath } = useProject();
   const queryClient = useQueryClient();
-  const [filters, setFilters] = useState<ClientSideDataFilter<CatalogItem>[]>(
-    [],
-  );
+  const [filters, setFilters] = useState<
+    ClientSideDataFilter<WorkspaceCatalogTableItem>[]
+  >([]);
 
   const { data: session } = useSession();
 
@@ -64,7 +61,7 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
     dataUpdatedAt: catalogUpdatedAt,
   } = useQuery({
     queryKey: ['project', activeProject, 'catalog', 'workspace'],
-    queryFn: () => getCatalogItems(WorkloadType.WORKSPACE),
+    queryFn: () => listCharts('WORKSPACE'),
     enabled: !!activeProject,
     select: (c) =>
       c.map((item) => ({
@@ -83,12 +80,8 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
       if (!activeProject) return [];
 
       return await listAllWorkloads(activeProject, {
-        type: [WorkloadType.WORKSPACE],
-        status: [
-          WorkloadStatus.RUNNING,
-          WorkloadStatus.PENDING,
-          WorkloadStatus.FAILED,
-        ],
+        workloadType: ['WORKSPACE'],
+        statusFilter: ['Running', 'Pending', 'Failed'],
       });
     },
     refetchInterval: 10000, // Refetch every 10 seconds
@@ -104,7 +97,6 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
         });
         toast.success(t('list.notifications.undeploySuccess'));
         onUndeployClose();
-        setSelectedWorkload('');
       },
       onError: (error) => {
         toast.error(t('list.errors.undeployError'), error as APIRequestError);
@@ -123,38 +115,41 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
     { name: t('categories.genai'), id: 'generative_ai' },
   ];
 
-  const [selectedItem, setSelectedItem] = useState<CatalogItem>();
+  const [selectedItem, setSelectedItem] = useState<WorkspaceCatalogTableItem>();
   const {
     isOpen: isDrawerOpen,
     onOpen: onDrawerOpen,
     onClose: onDrawerClose,
   } = useOverlayState();
-  const handleItemClick = (item: CatalogItem) => {
+  const handleItemClick = (item: WorkspaceCatalogTableItem) => {
     setSelectedItem(item);
     onDrawerOpen();
   };
 
-  const [selectedWorkload, setSelectedWorkload] = useState<string>('');
+  const [workspaceToUndeploy, setWorkspaceToUndeploy] = useState<
+    WorkspaceToUndeploy | undefined
+  >();
 
-  const isDeployed = (item: CatalogItem) => {
-    return item.workloads?.some((w) => w.status === WorkloadStatus.RUNNING);
+  const isDeployed = (item: WorkspaceCatalogTableItem) => {
+    return item.workloads?.some((w) => w.status === 'Running');
   };
 
-  const isPending = (item: CatalogItem) => {
+  const isPending = (item: WorkspaceCatalogTableItem) => {
     return (
       isCatalogLoading ||
       isWorkloadsLoading ||
-      item.workloads?.some((w) => w.status === WorkloadStatus.PENDING)
+      item.workloads?.some((w) => w.status === 'Pending')
     );
   };
 
-  const isFailed = (item: CatalogItem) =>
-    item.workloads?.some((w) => w.status === WorkloadStatus.FAILED) ?? false;
+  const isFailed = (item: WorkspaceCatalogTableItem) =>
+    item.workloads?.some((w) => w.status === 'Failed') ?? false;
 
   const {
     isOpen: isUndeployOpen,
     onOpen: onUndeployOpen,
     onClose: onUndeployClose,
+    onOpenChange: onUndeployOpenChange,
   } = useOverlayState();
 
   const refreshCatalog = () => {
@@ -163,15 +158,17 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
   };
 
   const filteredCatalogItems = useMemo(() => {
-    let filteredResults = catalogData ? [...catalogData] : [];
+    let filteredResults: WorkspaceCatalogTableItem[] = catalogData
+      ? [...catalogData]
+      : [];
 
     // Check if workloadsData is available and add the workload status and resources
     // TODO/FIXME: It would probably be better to aggregate these in the backend
     if (workloadsData) {
-      const statusFilter = [
-        WorkloadStatus.RUNNING,
-        WorkloadStatus.PENDING,
-        WorkloadStatus.FAILED,
+      const statusFilter: components['schemas']['WorkloadStatus'][] = [
+        'Running',
+        'Pending',
+        'Failed',
       ];
       filteredResults = filteredResults.map((item) => {
         // Workloads for this catalog item: running, pending, or failed, for current user or project scope
@@ -180,7 +177,7 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
             workload.name.includes(item.name) &&
             statusFilter.includes(workload.status) &&
             (workload.createdBy === session?.user?.email ||
-              item.usageScope !== CatalogUsageScope.USER),
+              item.usageScope !== 'user'),
         );
 
         return {
@@ -188,8 +185,7 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
           workloadsCount: workloads.length,
           workloads,
           status: workloads[0]?.status,
-          createdAt: workloads[0]?.createdAt,
-          allocatedResources: workloads[0]?.allocatedResources,
+          createdAt: workloads[0]?.createdAt ?? item.createdAt,
         };
       });
     }
@@ -199,10 +195,8 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
     return filteredResults;
   }, [catalogData, workloadsData, filters, session?.user?.email]);
 
-  const launchWorkload = (item: CatalogItem) => {
-    const workload = item.workloads?.find(
-      (w) => w.status === WorkloadStatus.RUNNING,
-    );
+  const launchWorkload = (item: WorkspaceCatalogTableItem) => {
+    const workload = item.workloads?.find((w) => w.status === 'Running');
 
     if (!workload) {
       toast.error(t('list.errors.noRunningWorkload'));
@@ -236,7 +230,7 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
   };
 
   const handleFilterChange = useCallback((filters: FilterValueMap) => {
-    const newFilters: ClientSideDataFilter<CatalogItem>[] = [];
+    const newFilters: ClientSideDataFilter<WorkspaceCatalogTableItem>[] = [];
 
     if (filters?.search) {
       newFilters.push({
@@ -268,7 +262,7 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
           />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-6 pl-2 pr-2 mb-6 w-full">
-            {filteredCatalogItems.map((item: CatalogItem) => (
+            {filteredCatalogItems.map((item: WorkspaceCatalogTableItem) => (
               <CatalogItemCard
                 item={item}
                 onOpenWorkloadDetails={(id) =>
@@ -286,7 +280,14 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
                         key: 'undeploy',
                         label: t('list.actions.undeploy'),
                         onPress: () => {
-                          setSelectedWorkload(item.workloads?.[0]?.id ?? '');
+                          const running = item.workloads?.find(
+                            (w) => w.status === 'Running',
+                          );
+                          if (!running?.id) return;
+                          setWorkspaceToUndeploy({
+                            workloadId: running.id,
+                            displayName: item.displayName ?? item.name,
+                          });
                           onUndeployOpen();
                         },
                       }
@@ -296,20 +297,23 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
                           label: t('list.actions.deleteFailedWorkload'),
                           onPress: () => {
                             const failed = item.workloads?.find(
-                              (w) => w.status === WorkloadStatus.FAILED,
+                              (w) => w.status === 'Failed',
                             );
-                            setSelectedWorkload(failed?.id ?? '');
+                            if (!failed?.id) return;
+                            setWorkspaceToUndeploy({
+                              workloadId: failed.id,
+                              displayName: item.displayName ?? item.name,
+                            });
                             onUndeployOpen();
                           },
                         }
                       : undefined
                 }
                 key={item.id}
-                pendingLabel={t('list.actions.pending')}
                 readyAction={{
                   key: 'launch',
                   label: t('list.actions.launch'),
-                  onPress: (item: CatalogItem) => {
+                  onPress: (item: WorkspaceCatalogTableItem) => {
                     launchWorkload(item);
                   },
                 }}
@@ -343,9 +347,8 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
         />
       </div>
 
-      {selectedItem && (
-        <DeployWorkspaceDrawer
-          isOpen={isDrawerOpen}
+      {isDrawerOpen && selectedItem ? (
+        <DeployWorkspaceWizard
           onClose={onDrawerClose}
           catalogItem={selectedItem}
           onDeploying={() =>
@@ -353,22 +356,15 @@ const WorkspacesPage: React.FC & WithDocumentationLink = () => {
               queryKey: ['project', activeProject, 'workloads'],
             })
           }
-          onDeployed={() => {
-            queryClient.invalidateQueries({
-              queryKey: ['project', activeProject, 'workloads'],
-            });
-          }}
         />
-      )}
+      ) : null}
 
-      <ConfirmationModal
-        confirmationButtonColor="danger"
-        title={t('undeployModal.title')}
-        description={t('undeployModal.description')}
+      <UndeployWorkspaceModal
         isOpen={isUndeployOpen}
+        onOpenChange={onUndeployOpenChange}
+        onConfirmAction={deleteWorkspaceMutation}
+        workspaceToUndeploy={workspaceToUndeploy}
         loading={isDeletePending}
-        onConfirm={() => deleteWorkspaceMutation(selectedWorkload)}
-        onClose={onUndeployClose}
       />
     </>
   );
@@ -379,11 +375,7 @@ export async function getServerSideProps(context: any) {
 
   return {
     props: {
-      ...(await serverSideTranslations(locale, [
-        'common',
-        'catalog',
-        'sharedComponents',
-      ])),
+      ...(await getPageTranslations(locale, ['catalog'])),
     },
   };
 }

@@ -319,6 +319,91 @@ async def test_create_project_namespace_collision_with_managed(db_session: Async
 
 
 @pytest.mark.asyncio
+async def test_create_project_refuses_a_name_sharing_storage_with_a_legacy_namespace(
+    db_session: AsyncSession,
+) -> None:
+    """A namespace that predates the naming rule still holds the prefix a compliant name resolves to.
+
+    'data--science' could not be created today, but rows created before the rule existed are not
+    retroactively renamed, and its object-storage prefix is 'data-science/'. A new project named
+    'data-science' passes name validation and is uniquely named, yet would write into and read
+    from that same prefix — so uniqueness has to be judged on the prefix, not on the name.
+    """
+    env = await factory.create_basic_test_environment(db_session)
+    cluster = env.cluster
+    cluster.last_heartbeat_at = datetime.now(tz=UTC)
+    await db_session.flush()
+
+    await factory.create_namespace(
+        db_session,
+        cluster=cluster,
+        project_id=None,
+        name="data--science",
+        status=NamespaceStatus.ACTIVE,
+        creator="system",
+    )
+
+    project_data = ProjectCreate(
+        name="data-science",
+        description="A test project",
+        cluster_id=cluster.id,
+        quota=QuotaBase(cpu_milli_cores=0, memory_bytes=0, ephemeral_storage_bytes=0, gpu_count=0),
+    )
+
+    mock_message_sender = AsyncMock(spec=MessageSender)
+    with pytest.raises(ConflictException) as e:
+        await create_project(
+            AsyncMock(spec=KeycloakAdmin), db_session, mock_message_sender, cluster, project_data, "test_creator"
+        )
+
+    assert "would share object storage with 'data-science'" in str(e.value)
+    assert "'data--science'" in str(e.value)
+    mock_message_sender.enqueue.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_project_allows_a_name_that_resolves_to_its_own_storage_prefix(db_session: AsyncSession) -> None:
+    """The prefix check must only refuse real sharing — a distinct prefix is not a collision.
+
+    'data--science' folds to 'data-science/', so 'data-analytics' has to remain creatable
+    alongside it; a check that compared names loosely rather than by resolved prefix would
+    block unrelated projects.
+    """
+    env = await factory.create_basic_test_environment(db_session)
+    cluster = env.cluster
+    cluster.last_heartbeat_at = datetime.now(tz=UTC)
+    await db_session.flush()
+
+    await factory.create_namespace(
+        db_session,
+        cluster=cluster,
+        project_id=None,
+        name="data--science",
+        status=NamespaceStatus.ACTIVE,
+        creator="system",
+    )
+
+    project_data = ProjectCreate(
+        name="data-analytics",
+        description="A test project",
+        cluster_id=cluster.id,
+        quota=QuotaBase(cpu_milli_cores=0, memory_bytes=0, ephemeral_storage_bytes=0, gpu_count=0),
+    )
+
+    with patch("app.projects.service.create_group", return_value="1fa3c3b8-31af-1413-3143-1234567890ab"):
+        created = await create_project(
+            AsyncMock(spec=KeycloakAdmin),
+            db_session,
+            AsyncMock(spec=MessageSender),
+            cluster,
+            project_data,
+            "test_creator",
+        )
+
+    assert created.name == "data-analytics"
+
+
+@pytest.mark.asyncio
 async def test_update_project(db_session: AsyncSession) -> None:
     env = await factory.create_basic_test_environment(db_session, create_project_quota=True)
     await factory.create_cluster_node(
@@ -350,6 +435,80 @@ async def test_update_project(db_session: AsyncSession) -> None:
     assert project.quota.gpu_count == 10
 
     mock_message_sender.enqueue.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_project_clears_project_level_failure_from_a_re_requested_quota(
+    db_session: AsyncSession,
+) -> None:
+    """Re-requesting a failed quota must also clear the failure the project itself reports."""
+    env = await factory.create_basic_test_environment(db_session, create_project_quota=True)
+    await factory.create_cluster_node(
+        db_session,
+        env.cluster,
+        cpu_milli_cores=16000,
+        memory_bytes=64 * 1024**3,
+        ephemeral_storage_bytes=200 * 1024**3,
+        gpu_count=10,
+    )
+    await factory.create_namespace(db_session, env.cluster, env.project, status=NamespaceStatus.ACTIVE)
+
+    env.project.quota.status = QuotaStatus.FAILED
+    env.project.quota.status_reason = "Quota was removed from the cluster."
+    env.project.status = ProjectStatus.FAILED
+    env.project.status_reason = "Failed components: quota. quota: Quota was removed from the cluster."
+    await db_session.flush()
+
+    project_data = ProjectEdit(
+        description="Retry the quota",
+        quota=QuotaBase(
+            cpu_milli_cores=2000, memory_bytes=8 * 1024**3, ephemeral_storage_bytes=10 * 1024**3, gpu_count=1
+        ),
+        gpu_preemption=GpuPreemptionConfig(),
+    )
+
+    project = await update_project(db_session, AsyncMock(spec=MessageSender), env.project, project_data, "test")
+
+    assert project.quota.status == QuotaStatus.PENDING
+    assert project.quota.status_reason is None
+    assert project.status != ProjectStatus.FAILED, "a re-requested quota must not leave the project Failed"
+    assert "Quota was removed from the cluster." not in project.status_reason
+    assert project.updated_by == "test", "recomputing a derived status must not overwrite who made the edit"
+
+
+@pytest.mark.asyncio
+async def test_update_project_leaves_status_alone_when_the_project_has_no_namespace(
+    db_session: AsyncSession,
+) -> None:
+    """An edit must not be the thing that condemns a project whose namespace is not recorded yet."""
+    env = await factory.create_basic_test_environment(db_session, create_project_quota=True)
+    await factory.create_cluster_node(
+        db_session,
+        env.cluster,
+        cpu_milli_cores=16000,
+        memory_bytes=64 * 1024**3,
+        ephemeral_storage_bytes=200 * 1024**3,
+        gpu_count=10,
+    )
+
+    # READY is a status the recompute could not produce here - the edit leaves the quota PENDING -
+    # so seeing it survive proves the no-namespace branch returned rather than reaching a verdict.
+    env.project.status = ProjectStatus.READY
+    env.project.status_reason = "left exactly as it was"
+    await db_session.flush()
+
+    project_data = ProjectEdit(
+        description="Edited while the namespace is unknown",
+        quota=QuotaBase(
+            cpu_milli_cores=2000, memory_bytes=8 * 1024**3, ephemeral_storage_bytes=10 * 1024**3, gpu_count=1
+        ),
+        gpu_preemption=GpuPreemptionConfig(),
+    )
+
+    project = await update_project(db_session, AsyncMock(spec=MessageSender), env.project, project_data, "test")
+
+    assert project.status == ProjectStatus.READY, "no namespace means no verdict, not a failure"
+    assert project.status_reason == "left exactly as it was"
 
 
 @pytest.mark.asyncio

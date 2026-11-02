@@ -103,18 +103,24 @@ const fillFormAndSubmit = async ({
 
   if (typeof secretName !== 'undefined') {
     await fireEvent.click(
-      screen.getByText('form.add.field.secretId.placeholder'),
+      screen.getByRole('button', {
+        name: /form.add.field.secretId.label/i,
+      }),
     );
-    const options = await screen.findAllByText(secretName);
-    await fireEvent.click(options[1]);
+    await fireEvent.click(
+      await screen.findByRole('option', { name: secretName }),
+    );
   }
 
   if (typeof projectName !== 'undefined') {
     await fireEvent.click(
-      screen.getByText('form.add.field.projectIds.placeholder'),
+      screen.getByRole('button', {
+        name: /form.add.field.projectIds.label/i,
+      }),
     );
-    const options = await screen.findAllByText(projectName);
-    await fireEvent.click(options[1]);
+    await fireEvent.click(
+      await screen.findByRole('option', { name: projectName }),
+    );
   }
 
   await fireEvent.click(screen.getByText('form.add.actions.add.label'));
@@ -764,7 +770,9 @@ describe('AddS3Storage', () => {
 
     // Open the secret dropdown
     await fireEvent.click(
-      screen.getAllByLabelText('form.add.field.secretId.label')[1],
+      screen.getByRole('button', {
+        name: /form.add.field.secretId.label/i,
+      }),
     );
 
     // Verify S3 secret IS visible

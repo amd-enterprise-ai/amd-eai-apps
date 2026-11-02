@@ -2,167 +2,317 @@
 //
 // SPDX-License-Identifier: MIT
 
+import { IconPlus } from '@tabler/icons-react';
 import {
-  SelectItem,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from 'react';
+import { type UseFormReturn } from 'react-hook-form';
+
+import {
+  ActionButton,
   FormInput,
-  FormSelect,
-  Tab,
-  Tabs,
+  FormPasswordInput,
+  ManagedForm,
+  Popover,
+  Select,
+  SelectItem,
+  type Selection,
 } from '@amdenterpriseai/components';
-import { useCallback, useMemo, useState } from 'react';
-import { UseFormReturn } from 'react-hook-form';
-import { useTranslation } from 'next-i18next';
 
-enum TokenSelectorMode {
-  EXISTING = 'existing',
-  NEW = 'new',
+import {
+  createCreateTokenSchema,
+  type CreateTokenForm,
+  type HuggingFaceTokenValidationLabels,
+} from './validation';
+
+export interface HuggingFaceTokenOption {
+  /** Kubernetes secret name sent to the API as `hfTokenSecretName`. */
+  name: string;
+  /** Human-friendly label shown in the dropdown. */
+  displayName: string;
 }
 
-interface HuggingFaceTokenSelectorProps {
-  form: UseFormReturn<any>;
-  existingTokens: { displayName: string }[];
-  fieldNames?: {
-    selectedToken?: string;
-    name?: string;
-    token?: string;
-  };
+export interface HuggingFaceTokenSelectorLabels {
+  selectLabel: string;
+  selectPlaceholder: string;
+  addNewItemLabel: string;
+
+  dialogTitle: string;
+  dialogNameLabel: string;
+  dialogNamePlaceholder: string;
+  dialogTokenLabel: string;
+  dialogTokenPlaceholder: string;
+  dialogCancelLabel: string;
+  dialogSubmitLabel: string;
+
+  validation: HuggingFaceTokenValidationLabels;
 }
 
-export const HuggingFaceTokenSelector = ({
+export interface HuggingFaceTokenSelectorProps {
+  /** Currently selected token name (controlled). */
+  value: string | null | undefined;
+  /** Emits the name of the newly selected token. */
+  onChange: (name: string) => void;
+  /** Existing tokens available to the project/namespace. */
+  existingTokens: HuggingFaceTokenOption[];
+  /**
+   * Creates a new HF token on the backend. Implementations should
+   * persist the token secret and return its server-assigned
+   * `secretName`; the selector will auto-select that token after
+   * creation. `displayName` is the user-entered label, distinct from
+   * the returned `secretName` (the Kubernetes secret name used
+   * elsewhere as `HuggingFaceTokenOption.name`).
+   */
+  onCreateToken: (input: {
+    displayName: string;
+    token: string;
+  }) => Promise<{ secretName: string }>;
+  /** Display label and placeholders. Required so consumers own their i18n. */
+  labels: HuggingFaceTokenSelectorLabels;
+  /** Helper text rendered beneath the select when there is no error. */
+  description?: ReactNode;
+
+  isRequired?: boolean;
+  isDisabled?: boolean;
+  isInvalid?: boolean;
+  errorMessage?: string;
+  className?: string;
+  /** Test handle for the root select control. */
+  'data-testid'?: string;
+}
+
+/** Focus the first field after react-aria's popover/dialog focus containment runs. */
+const FocusFirstField = ({
   form,
+}: {
+  form: UseFormReturn<CreateTokenForm>;
+}) => {
+  useEffect(() => {
+    const id = requestAnimationFrame(() => form.setFocus('name'));
+    return () => cancelAnimationFrame(id);
+  }, [form]);
+  return null;
+};
+
+/**
+ * Dropdown selector for an existing Hugging Face access token,
+ * with a bottom "Add new" affordance that opens a create-token popover.
+ *
+ * Presentational: data loading and persistence are owned by the consumer
+ * via `existingTokens` / `onCreateToken`. The selector keeps no internal
+ * state about the selected token — pass `value`/`onChange` to control it.
+ */
+export const HuggingFaceTokenSelector = ({
+  value,
+  onChange,
   existingTokens,
-  fieldNames = {
-    selectedToken: 'selectedToken',
-    name: 'name',
-    token: 'token',
-  },
+  onCreateToken,
+  labels,
+  description,
+  isRequired,
+  isDisabled,
+  isInvalid,
+  errorMessage,
+  className,
+  'data-testid': dataTestId,
 }: HuggingFaceTokenSelectorProps) => {
-  const { t } = useTranslation('models' as any);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [isSelectOpen, setIsSelectOpen] = useState(false);
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const selectedTokenField = fieldNames.selectedToken || 'selectedToken';
-  const nameField = fieldNames.name || 'name';
-  const tokenField = fieldNames.token || 'token';
-
-  const watchSelectedToken = form.watch(selectedTokenField);
-  const watchName = form.watch(nameField);
-  const watchToken = form.watch(tokenField);
-
-  // Track user's explicit tab selection when fields are empty
-  const [manualModeSelection, setManualModeSelection] =
-    useState<TokenSelectorMode | null>(null);
-
-  const currentMode = useMemo(() => {
-    const hasSelectedToken = Boolean(watchSelectedToken?.trim());
-    const hasManualInput = Boolean(watchName?.trim() || watchToken?.trim());
-
-    // When user has data, mode is derived from the data
-    if (hasSelectedToken) return TokenSelectorMode.EXISTING;
-    if (hasManualInput) return TokenSelectorMode.NEW;
-
-    // When fields are empty, use manual selection if available
-    if (manualModeSelection) return manualModeSelection;
-
-    // Default behavior when no data and no manual selection
-    return existingTokens.length > 0
-      ? TokenSelectorMode.EXISTING
-      : TokenSelectorMode.NEW;
-  }, [
-    watchSelectedToken,
-    watchName,
-    watchToken,
-    manualModeSelection,
-    existingTokens.length,
-  ]);
-
-  const handleModeChange = useCallback(
-    (mode: string) => {
-      const selectedMode = mode as TokenSelectorMode;
-      setManualModeSelection(selectedMode);
-      if (selectedMode === TokenSelectorMode.EXISTING) {
-        form.setValue(nameField, '');
-        form.setValue(tokenField, '');
-        form.clearErrors([nameField, tokenField]);
-      } else {
-        form.setValue(selectedTokenField, '');
-        form.setValue(nameField, '');
-        form.setValue(tokenField, '');
-        form.clearErrors([selectedTokenField, nameField, tokenField]);
-      }
-    },
-    [form, selectedTokenField, nameField, tokenField],
+  const selectedKeys = useMemo<Set<string>>(
+    () => (value ? new Set([value]) : new Set()),
+    [value],
   );
 
-  const isNameRequired = currentMode === TokenSelectorMode.NEW;
-  const isTokenRequired = currentMode === TokenSelectorMode.NEW;
+  const handleSelectionChange = useCallback(
+    (keys: Selection) => {
+      if (keys === 'all') return;
+      const next = Array.from(keys)[0];
+      if (typeof next === 'string') {
+        onChange(next);
+      }
+    },
+    [onChange],
+  );
+
+  const resetPopover = useCallback(() => {
+    setSubmitError(null);
+    setIsSubmitting(false);
+  }, []);
+
+  const handlePopoverClose = useCallback(() => {
+    if (isSubmitting) return;
+    setIsPopoverOpen(false);
+    resetPopover();
+    setIsSelectOpen(true);
+  }, [isSubmitting, resetPopover]);
+
+  const handlePopoverOpenChange = useCallback(
+    (open: boolean) => {
+      if (open) {
+        setIsPopoverOpen(true);
+        return;
+      }
+      handlePopoverClose();
+    },
+    [handlePopoverClose],
+  );
+
+  const handleAddNewClick = useCallback(
+    (event: MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setIsSelectOpen(false);
+      setIsPopoverOpen(true);
+    },
+    [],
+  );
+
+  const handleFormSuccess = useCallback(
+    async (data: CreateTokenForm) => {
+      setIsSubmitting(true);
+      setSubmitError(null);
+      try {
+        const created = await onCreateToken({
+          displayName: data.name.trim(),
+          token: data.token.trim(),
+        });
+        onChange(created.secretName);
+        setIsPopoverOpen(false);
+        resetPopover();
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : String(err));
+        setIsSubmitting(false);
+      }
+    },
+    [onChange, onCreateToken, resetPopover],
+  );
+
+  const defaultFormValues = useMemo(() => ({ name: '', token: '' }), []);
+
+  const createTokenSchema = useMemo(
+    () => createCreateTokenSchema(labels.validation, existingTokens),
+    [labels.validation, existingTokens],
+  );
 
   return (
-    <div className="flex flex-col gap-4">
-      <Tabs
-        selectedKey={currentMode}
-        onSelectionChange={(key) => handleModeChange(key as string)}
-        aria-label={t('huggingFaceTokenDrawer.fields.selectMode')}
-        classNames={{
-          tabList: 'w-full',
-          tab: 'flex-1',
-        }}
+    <div ref={anchorRef} className={className}>
+      <Select
+        label={labels.selectLabel}
+        placeholder={labels.selectPlaceholder}
+        description={description}
+        variant="secondary"
+        selectedKeys={selectedKeys}
+        onSelectionChange={handleSelectionChange}
+        isOpen={isSelectOpen}
+        onOpenChange={setIsSelectOpen}
+        isRequired={isRequired}
+        isDisabled={isDisabled}
+        isInvalid={isInvalid}
+        errorMessage={errorMessage}
+        data-testid={dataTestId}
+        bottomContent={
+          <button
+            type="button"
+            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-accent hover:bg-default-100"
+            data-testid="hf-token-selector-add-new"
+            onClick={handleAddNewClick}
+          >
+            <IconPlus size={16} aria-hidden />
+            {labels.addNewItemLabel}
+          </button>
+        }
       >
-        <Tab
-          key={TokenSelectorMode.EXISTING}
-          title={t('huggingFaceTokenDrawer.fields.selectExisting')}
-          isDisabled={existingTokens.length === 0}
-        />
-        <Tab
-          key={TokenSelectorMode.NEW}
-          title={t('huggingFaceTokenDrawer.fields.addNew')}
-        />
-      </Tabs>
+        {existingTokens.map((token) => (
+          <SelectItem key={token.name} textValue={token.displayName}>
+            {token.displayName}
+          </SelectItem>
+        ))}
+      </Select>
 
-      {currentMode === TokenSelectorMode.EXISTING && (
-        <FormSelect
-          form={form}
-          name={selectedTokenField}
-          label={t('huggingFaceTokenDrawer.fields.selectToken.label')}
-          placeholder={t(
-            'huggingFaceTokenDrawer.fields.selectToken.placeholder',
-          )}
-          onSelectionChange={(keys: Iterable<unknown> | ArrayLike<unknown>) => {
-            const selectedKey = Array.from(keys)[0] as string;
-            form.setValue(selectedTokenField, selectedKey);
-            form.clearErrors([selectedTokenField]);
-          }}
+      <Popover isOpen={isPopoverOpen} onOpenChange={handlePopoverOpenChange}>
+        <Popover.Content
+          triggerRef={anchorRef}
+          placement="bottom"
+          className="w-80 overflow-visible border border-border"
         >
-          {existingTokens.map((token, index) => (
-            <SelectItem key={index}>{token.displayName}</SelectItem>
-          ))}
-        </FormSelect>
-      )}
-
-      {currentMode === TokenSelectorMode.NEW && (
-        <>
-          <FormInput
-            form={form}
-            name={nameField}
-            label={t('huggingFaceTokenDrawer.fields.name.label')}
-            placeholder={t('huggingFaceTokenDrawer.fields.name.placeholder')}
-            isRequired={isNameRequired}
-            autoComplete="off"
-            data-form-type="other"
-          />
-
-          <FormInput
-            form={form}
-            name={tokenField}
-            label={t('huggingFaceTokenDrawer.fields.token.label')}
-            type="password"
-            placeholder={t('huggingFaceTokenDrawer.fields.token.placeholder')}
-            isRequired={isTokenRequired}
-            autoComplete="new-password"
-            data-form-type="other"
-          />
-        </>
-      )}
+          <Popover.Arrow />
+          <Popover.Dialog>
+            <ManagedForm<CreateTokenForm>
+              validationSchema={createTokenSchema}
+              defaultValues={defaultFormValues}
+              isActioning={isSubmitting}
+              onFormSuccess={handleFormSuccess}
+              renderFields={(form) => (
+                <div className="flex flex-col gap-4 p-1">
+                  <FocusFirstField form={form} />
+                  <Popover.Heading className="text-base font-semibold">
+                    {labels.dialogTitle}
+                  </Popover.Heading>
+                  <FormInput
+                    form={form}
+                    name="name"
+                    label={labels.dialogNameLabel}
+                    placeholder={labels.dialogNamePlaceholder}
+                    isDisabled={isSubmitting}
+                    isRequired
+                    autoComplete="off"
+                    data-testid="hf-token-selector-dialog-name"
+                  />
+                  <FormPasswordInput
+                    form={form}
+                    name="token"
+                    label={labels.dialogTokenLabel}
+                    placeholder={labels.dialogTokenPlaceholder}
+                    isDisabled={isSubmitting}
+                    isRequired
+                    autoComplete="off"
+                    preventPasswordManagerPrompt
+                    data-1p-ignore
+                    data-lpignore="true"
+                    data-bwignore
+                    data-testid="hf-token-selector-dialog-token"
+                  />
+                  {submitError ? (
+                    <p className="text-danger text-sm" role="alert">
+                      {submitError}
+                    </p>
+                  ) : null}
+                  <div className="flex w-full justify-between pt-1">
+                    <ActionButton
+                      tertiary
+                      aria-label={labels.dialogCancelLabel}
+                      onPress={handlePopoverClose}
+                      isDisabled={isSubmitting}
+                    >
+                      {labels.dialogCancelLabel}
+                    </ActionButton>
+                    <ActionButton
+                      primary
+                      type="submit"
+                      aria-label={labels.dialogSubmitLabel}
+                      isLoading={isSubmitting}
+                      isDisabled={!form.formState.isValid || isSubmitting}
+                      data-testid="hf-token-selector-dialog-submit"
+                    >
+                      {labels.dialogSubmitLabel}
+                    </ActionButton>
+                  </div>
+                </div>
+              )}
+            />
+          </Popover.Dialog>
+        </Popover.Content>
+      </Popover>
     </div>
   );
 };
-
-export default HuggingFaceTokenSelector;

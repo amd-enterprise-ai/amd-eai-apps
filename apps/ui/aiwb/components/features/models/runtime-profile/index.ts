@@ -4,7 +4,10 @@
 
 export { RuntimeProfileAcceleratorFields } from './RuntimeProfileAcceleratorFields';
 export { RuntimeProfileCatalogStatus } from './RuntimeProfileCatalogStatus';
-export { RuntimeProfileFields } from './RuntimeProfileFields';
+export {
+  RuntimeProfileFields,
+  type RuntimeProfileSelectionState,
+} from './RuntimeProfileFields';
 export { RuntimeProfileImageFields } from './RuntimeProfileImageFields';
 export { RuntimeProfileKeyValueEditor } from './RuntimeProfileKeyValueEditor';
 export { RuntimeProfilePrecisionField } from './RuntimeProfilePrecisionField';

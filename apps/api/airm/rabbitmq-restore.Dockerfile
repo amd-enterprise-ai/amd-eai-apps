@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-FROM alpine:3.21
+FROM alpine:3.24
 
 # Install dependencies: curl, MinIO client, and jq for JSON handling
 RUN apk add --no-cache curl jq && \

@@ -259,6 +259,12 @@ webhooks:
     matchExpressions:
     - key: airm.silogen.ai/project-id
       operator: Exists
+  # Skip AIWB-managed API-key Secrets (API-key contract label): they are materialized by ESO
+  # for the gateway, not user project secrets, and must not be adopted/auto-discovered.
+  objectSelector:
+    matchExpressions:
+    - key: eai.amd.com/api-key
+      operator: DoesNotExist
   rules:
   - operations: ["CREATE", "UPDATE"]
     apiGroups: [""]
@@ -282,6 +288,12 @@ webhooks:
     matchExpressions:
     - key: airm.silogen.ai/project-id
       operator: Exists
+  # Skip AIWB-managed API-key ExternalSecrets (API-key contract label): AIWB owns these to bind
+  # keys to backends; they must not be adopted/auto-discovered as user project secrets.
+  objectSelector:
+    matchExpressions:
+    - key: eai.amd.com/api-key
+      operator: DoesNotExist
   rules:
   - operations: ["CREATE", "UPDATE"]
     apiGroups: ["external-secrets.io"]

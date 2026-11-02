@@ -12,7 +12,8 @@
     "./postcss": "./postcss.config.js"
   },
   "peerDependencies": {
-    "@heroui/react": "*",
+    "@heroui/react": "3.2.0",
+    "@heroui/styles": "3.2.0",
     "next": "*",
     "next-auth": "*",
     "next-i18next": "*",
@@ -22,7 +23,6 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "*",
-    "@tailwindcss/typography": "*",
     "@types/react": "*",
     "postcss": "^8.5.13",
     "tailwindcss": "*"

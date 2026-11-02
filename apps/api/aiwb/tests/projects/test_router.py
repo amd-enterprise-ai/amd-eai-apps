@@ -30,17 +30,17 @@ def test_list_projects(mock_get_namespaces: AsyncMock) -> None:
     mock_namespace1.name = "namespace-1"
     mock_namespace2 = MagicMock(spec=Namespace)
     mock_namespace2.name = "namespace-2"
-    mock_get_namespaces.return_value = [mock_namespace1, mock_namespace2]
+    mock_get_namespaces.return_value = [mock_namespace2, mock_namespace1]
 
     with TestClient(app) as client:
         response = client.get("/v1/projects")
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert "data" in data
-    assert len(data["data"]) == 2
-    assert "namespace-1" in data["data"]
-    assert "namespace-2" in data["data"]
+    assert data["data"] == [
+        {"id": "namespace-1", "name": "namespace-1"},
+        {"id": "namespace-2", "name": "namespace-2"},
+    ]
     mock_get_namespaces.assert_called_once()
 
 

@@ -26,8 +26,8 @@ export const QuotaUtilizationCard: React.FC<Props> = ({
     const { sumNumerator, sumDenominator } = denominator.reduce(
       (acc, denom, i) => {
         if (denom.value == null) return acc;
-        const num = numerator[i].value;
-        const bothValuesDefined = num !== null && denom.value !== null;
+        const num = numerator[i]?.value;
+        const bothValuesDefined = num != null;
         return {
           sumNumerator: acc.sumNumerator + (bothValuesDefined ? num : 0),
           sumDenominator:

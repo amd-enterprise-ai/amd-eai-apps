@@ -27,10 +27,10 @@ import {
 } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'next-i18next';
-import { AIMServiceSpec, AIMServiceRuntime } from '@/types/aims';
+import { AutoscalingPolicyConfig } from '@/types/aims';
 import { SCALING_METRIC_KEYS } from '@/lib/app/aims';
 import type { AutoscalingFieldValues } from '@/lib/app/aims';
-import type { InferenceReplica } from '@/types/aims';
+import type { components } from '@/types/api';
 import {
   Intent,
   StatusBadgeVariant,
@@ -38,12 +38,15 @@ import {
 } from '@amdenterpriseai/types';
 import { DeploymentSettingsDrawer } from './DeploymentSettingsDrawer';
 
-// Flat display type for the replicas table, derived from the nested InferenceReplica
+type AIMServiceSpec = components['schemas']['AIMServiceSpec'];
+type AIMServiceRuntime = components['schemas']['AIMServiceRuntime'];
+
+// Flat display type for the replicas table, derived from the nested replica response
 type ReplicaRow = {
   name: string;
   gpuCount?: string;
-  createdAt?: string;
-  status?: string;
+  createdAt?: string | null;
+  status?: string | null;
 };
 
 type ReplicaColumnKey = 'name' | 'gpuCount' | 'createdAt' | 'status';
@@ -73,14 +76,16 @@ const getPodPhaseVariants = (
   },
 });
 
-function toReplicaRow(replica: InferenceReplica): ReplicaRow {
+function toReplicaRow(
+  replica: components['schemas']['InferenceReplicaResponse'],
+): ReplicaRow {
   const gpuRaw =
     replica.spec?.containers?.[0]?.resources?.limits?.['amd.com/gpu'];
   return {
     name: replica.metadata.name,
     gpuCount: gpuRaw,
-    createdAt: replica.metadata.creationTimestamp,
-    status: replica.status?.phase,
+    createdAt: replica.metadata.creationTimestamp ?? undefined,
+    status: replica.status?.phase ?? undefined,
   };
 }
 
@@ -96,7 +101,7 @@ interface Props {
   /** Called after autoscaling settings are saved successfully with all saved form values */
   onSettingsSaved?: (savedValues: AutoscalingFieldValues) => void;
   /** Pod-level replica info for the running service */
-  replicas?: InferenceReplica[];
+  replicas?: components['schemas']['InferenceReplicaResponse'][];
 }
 
 export const ScalingStatusCard = ({
@@ -136,7 +141,9 @@ export const ScalingStatusCard = ({
   const [drawerKey, setDrawerKey] = useState(0);
 
   // Extract scaling info from spec
-  const firstMetric = spec.autoScaling?.metrics?.[0]?.podmetric;
+  // Backend models `autoScaling` as a loose map; read it via the FE-known shape.
+  const autoScaling = spec.autoScaling as AutoscalingPolicyConfig | undefined;
+  const firstMetric = autoScaling?.metrics?.[0]?.podmetric;
   const metricQuery = firstMetric?.metric?.query || '';
 
   // Get translated label for metric query
@@ -165,13 +172,13 @@ export const ScalingStatusCard = ({
     <>
       <Card
         data-testid="scaling-status-card"
-        className="break-inside-avoid mb-6 border-1 border-default-200 shadow-sm"
+        className="break-inside-avoid mb-6"
       >
-        <CardHeader className="py-4 px-6 flex items-center justify-between">
-          <h3 className="text-base font-semibold flex items-center space-x-2">
-            <IconArrowsMaximize size={16} className="text-default-500" />
-            <span>{t('title')}</span>
-          </h3>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <h4 className="flex items-center gap-2 font-semibold">
+            <IconArrowsMaximize size={16} className="text-muted" />
+            {t('title')}
+          </h4>
           <Button
             data-testid="scaling-settings-button"
             size="sm"
@@ -186,7 +193,7 @@ export const ScalingStatusCard = ({
           </Button>
         </CardHeader>
 
-        <CardBody className="px-6 pb-6 pt-0 space-y-3">
+        <CardBody className="space-y-3">
           {/* Current Replicas Display: current / desired Replicas (min) */}
           {runtime?.currentReplicas != null && (
             <>
@@ -194,12 +201,12 @@ export const ScalingStatusCard = ({
                 <span className="text-2xl font-bold text-foreground">
                   {runtime.currentReplicas}
                 </span>
-                <span className="text-base text-default-500">
+                <span className="text-base text-muted">
                   / {runtime.maxReplicas ?? '–'}
                 </span>
               </div>
               <div className="flex items-baseline gap-1">
-                <span className="text-base text-default-500 ml-0">
+                <span className="text-base text-muted ml-0">
                   {t('replicasMinimum', { count: spec.minReplicas ?? 1 })}
                 </span>
               </div>
@@ -210,7 +217,7 @@ export const ScalingStatusCard = ({
           <div className="flex items-center justify-between">
             <div className="flex gap-6 max-w-[30%]">
               <div>
-                <div className="text-sm text-default-500">
+                <div className="text-sm text-muted">
                   {t('scalingMetric.label')}
                 </div>
                 <div className="text-sm font-medium text-foreground truncate">
@@ -218,7 +225,7 @@ export const ScalingStatusCard = ({
                 </div>
               </div>
               <div>
-                <div className="text-sm text-default-500">
+                <div className="text-sm text-muted">
                   {t('targetValue.label')}
                 </div>
                 <div className="text-sm font-medium text-foreground">
@@ -231,7 +238,7 @@ export const ScalingStatusCard = ({
                 isIconOnly
                 variant="light"
                 size="sm"
-                className="text-default-500"
+                className="text-muted"
                 aria-label={t('replicas.toggle')}
                 aria-expanded={isReplicasOpen}
                 onPress={() => setIsReplicasOpen((v) => !v)}
@@ -252,7 +259,7 @@ export const ScalingStatusCard = ({
               }`}
             >
               <div className="overflow-hidden">
-                <div className="border-t border-default-100 pt-3 -mx-6 px-6">
+                <div className="border-t border-default pt-3">
                   <ClientSideDataTable
                     data={replicas.map(toReplicaRow)}
                     columns={replicaColumns}

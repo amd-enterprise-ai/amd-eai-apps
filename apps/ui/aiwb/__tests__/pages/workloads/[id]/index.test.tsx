@@ -13,7 +13,6 @@ import {
 import { useRouter } from 'next/router';
 
 import { useProject } from '@/contexts/ProjectContext';
-import { mockWorkloads } from '@/__mocks__/services/app/workloads.data';
 import { cancelFineTuningJob } from '@/lib/app/models';
 import { getProjectFineTunedModel } from '@/lib/app/aims';
 import {
@@ -25,9 +24,7 @@ import { deleteInferenceDeployment } from '@/lib/app/inference';
 import { getDataset } from '@/lib/app/datasets';
 import { getChart } from '@/lib/app/charts';
 
-import { WorkloadType } from '@amdenterpriseai/types';
-import { WorkloadStatus } from '@/types/enums/workloads';
-import { Workload } from '@/types/workloads';
+import type { Workload } from '@/types/workloads';
 
 import WorkloadDetailsPage from '@/pages/[project]/workloads/[id]/index';
 
@@ -155,26 +152,35 @@ describe('WorkloadDetailsPage', () => {
   const mockBack = vi.fn();
 
   const mockWorkload: Workload = {
-    ...mockWorkloads[0],
+    id: 'workload-1',
+    name: 'Llama 7B Inference',
+    displayName: 'Llama 7B Inference',
+    description: null,
+    createdBy: 'test-user',
+    updatedBy: 'test-user',
+    namespace: 'test-project',
+    chartId: 'chart-1',
+    datasetId: null,
+    type: 'INFERENCE',
+    status: 'Running',
+    createdAt: '2023-01-01T00:00:00Z',
+    updatedAt: '2023-01-01T01:00:00Z',
     endpoints: {
       external: 'https://example.com/external',
       internal: 'http://workload-1.default.svc.cluster.local',
-    },
-    allocatedResources: {
-      gpuCount: 2,
-      vram: 4294967296,
     },
   };
 
   const mockWorkspaceWorkload: Workload = {
     ...mockWorkload,
     id: 'workspace-1',
-    type: WorkloadType.WORKSPACE,
-    status: WorkloadStatus.RUNNING,
+    type: 'WORKSPACE',
+    status: 'Running',
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(navigator.clipboard.writeText).mockResolvedValue(undefined);
     (useRouter as Mock).mockReturnValue({
       query: { id: 'workload-1', project: 'test-project' },
       push: mockPush,
@@ -355,6 +361,45 @@ describe('WorkloadDetailsPage', () => {
         ).not.toBeInTheDocument();
       });
     });
+
+    it('renders the description when present', async () => {
+      (getWorkload as Mock).mockResolvedValue({
+        ...mockWorkload,
+        description: 'A helpful description',
+      });
+
+      await act(async () => {
+        render(<WorkloadDetailsPage />, { wrapper });
+      });
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('list.headers.description.title'),
+        ).toBeInTheDocument();
+        expect(screen.getByText('A helpful description')).toBeInTheDocument();
+      });
+    });
+
+    it('omits the description row when no description is present', async () => {
+      (getWorkload as Mock).mockResolvedValue({
+        ...mockWorkload,
+        description: null,
+      });
+
+      await act(async () => {
+        render(<WorkloadDetailsPage />, { wrapper });
+      });
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('details.sections.basicInformation'),
+        ).toBeInTheDocument();
+      });
+
+      expect(
+        screen.queryByText('list.headers.description.title'),
+      ).not.toBeInTheDocument();
+    });
   });
 
   describe('Action Buttons', () => {
@@ -416,7 +461,7 @@ describe('WorkloadDetailsPage', () => {
     it('does not show delete button for deleted workload', async () => {
       const deletedWorkload = {
         ...mockWorkload,
-        status: WorkloadStatus.DELETED,
+        status: 'Deleted',
       };
 
       // Mock the service to return the deleted workload
@@ -433,60 +478,10 @@ describe('WorkloadDetailsPage', () => {
       });
     });
 
-    it('does not show delete button for MODEL_DOWNLOAD workload', async () => {
-      // MODEL_DOWNLOAD has no owning capability surface — the workloads detail
-      // page must not offer Delete (which would hit the throw in the mutation).
-      const modelDownloadWorkload = {
-        ...mockWorkload,
-        type: WorkloadType.MODEL_DOWNLOAD,
-        status: WorkloadStatus.RUNNING,
-      };
-
-      (getWorkload as Mock).mockResolvedValue(modelDownloadWorkload);
-
-      await act(async () => {
-        render(<WorkloadDetailsPage />, { wrapper });
-      });
-
-      await waitFor(() => {
-        expect(
-          screen.getByText('details.sections.basicInformation'),
-        ).toBeInTheDocument();
-      });
-      expect(
-        screen.queryByText('list.actions.delete.label'),
-      ).not.toBeInTheDocument();
-    });
-
-    it('does not show delete button for CUSTOM workload', async () => {
-      // Same reasoning as MODEL_DOWNLOAD — CUSTOM has no capability-specific
-      // delete endpoint, so the Delete button must not appear.
-      const customWorkload = {
-        ...mockWorkload,
-        type: WorkloadType.CUSTOM,
-        status: WorkloadStatus.RUNNING,
-      };
-
-      (getWorkload as Mock).mockResolvedValue(customWorkload);
-
-      await act(async () => {
-        render(<WorkloadDetailsPage />, { wrapper });
-      });
-
-      await waitFor(() => {
-        expect(
-          screen.getByText('details.sections.basicInformation'),
-        ).toBeInTheDocument();
-      });
-      expect(
-        screen.queryByText('list.actions.delete.label'),
-      ).not.toBeInTheDocument();
-    });
-
     it('does not show workspace button for non-running workload', async () => {
       const pendingWorkspaceWorkload = {
         ...mockWorkspaceWorkload,
-        status: WorkloadStatus.PENDING,
+        status: 'Pending',
       };
 
       // Mock the service to return the pending workspace workload
@@ -508,7 +503,7 @@ describe('WorkloadDetailsPage', () => {
     it('does not show chat button for workspace workload', async () => {
       const workloadWithoutChat = {
         ...mockWorkload,
-        type: WorkloadType.WORKSPACE,
+        type: 'WORKSPACE',
       };
 
       // Mock the service to return workspace workload
@@ -627,12 +622,12 @@ describe('WorkloadDetailsPage', () => {
     it('fetches model using workload.id for fine-tuning workloads when complete', async () => {
       // For FINE_TUNING, the workload itself IS the model — use workload.id directly
       // to look up the AIMModel via WORKLOAD_ID_LABEL. model_id is not used.
-      const mockFTWorkload: Workload = {
+      const mockFTWorkload = {
         ...mockWorkload,
         id: 'ft-workload-id',
         name: 'wb-llm-finetune-abc123-job',
-        type: WorkloadType.FINE_TUNING,
-        status: WorkloadStatus.COMPLETE,
+        type: 'FINE_TUNING',
+        status: 'Complete',
       };
 
       (getWorkload as Mock).mockResolvedValue(mockFTWorkload);
@@ -656,12 +651,12 @@ describe('WorkloadDetailsPage', () => {
 
     it('does not fetch model for in-progress fine-tuning workloads', async () => {
       // AIMModel CR doesn't exist until training completes — skip model fetch.
-      const mockFTWorkload: Workload = {
+      const mockFTWorkload = {
         ...mockWorkload,
         id: 'ft-workload-id',
         name: 'wb-llm-finetune-abc123-job',
-        type: WorkloadType.FINE_TUNING,
-        status: WorkloadStatus.RUNNING,
+        type: 'FINE_TUNING',
+        status: 'Running',
       };
 
       (getWorkload as Mock).mockResolvedValue(mockFTWorkload);
@@ -681,11 +676,11 @@ describe('WorkloadDetailsPage', () => {
     });
 
     it('fetches model for fine-tuning workloads using workload id', async () => {
-      const mockFTWorkload: Workload = {
+      const mockFTWorkload = {
         ...mockWorkload,
         id: 'ft-workload-id',
-        type: WorkloadType.FINE_TUNING,
-        status: WorkloadStatus.COMPLETE,
+        type: 'FINE_TUNING',
+        status: 'Complete',
       };
 
       (getWorkload as Mock).mockResolvedValue(mockFTWorkload);
@@ -708,12 +703,12 @@ describe('WorkloadDetailsPage', () => {
     });
 
     it('calls cancelFineTuningJob for fine-tuning workloads', async () => {
-      const mockFTWorkload: Workload = {
+      const mockFTWorkload = {
         ...mockWorkload,
         id: 'workload-4',
         name: 'Model fine-tuning',
-        type: WorkloadType.FINE_TUNING,
-        status: WorkloadStatus.RUNNING,
+        type: 'FINE_TUNING',
+        status: 'Running',
       };
 
       (getWorkload as Mock).mockResolvedValue(mockFTWorkload);
@@ -751,11 +746,11 @@ describe('WorkloadDetailsPage', () => {
       // INFERENCE row on this page is a raw workload-table row. The
       // inference capability DELETE expects an AIM service id and would 404
       // on a workload-table id, so the Delete action must be hidden.
-      const mockInferenceWorkload: Workload = {
+      const mockInferenceWorkload = {
         ...mockWorkload,
         id: 'inference-7',
-        type: WorkloadType.INFERENCE,
-        status: WorkloadStatus.RUNNING,
+        type: 'INFERENCE',
+        status: 'Running',
       };
 
       (getWorkload as Mock).mockResolvedValue(mockInferenceWorkload);
@@ -775,12 +770,12 @@ describe('WorkloadDetailsPage', () => {
     });
 
     it('calls deleteWorkspace for workspace workloads', async () => {
-      const mockWorkspace: Workload = {
+      const mockWorkspace = {
         ...mockWorkload,
         id: 'workspace-5',
         name: 'wb-vscode-abc',
-        type: WorkloadType.WORKSPACE,
-        status: WorkloadStatus.RUNNING,
+        type: 'WORKSPACE',
+        status: 'Running',
       };
 
       (getWorkload as Mock).mockResolvedValue(mockWorkspace);
@@ -880,26 +875,29 @@ describe('WorkloadDetailsPage', () => {
   });
 
   describe('Clipboard Functionality', () => {
-    it('has copy buttons available', async () => {
+    it('copies external host URL when the copy button is clicked', async () => {
       await act(async () => {
         render(<WorkloadDetailsPage />, { wrapper });
       });
 
-      // Verify clipboard functionality is available
-      expect(navigator.clipboard.writeText).toBeDefined();
-    });
-
-    it('can simulate copy action', async () => {
-      await act(async () => {
-        render(<WorkloadDetailsPage />, { wrapper });
+      await waitFor(() => {
+        expect(
+          screen.getByDisplayValue(
+            'https://example.com/external/v1/chat/completions',
+          ),
+        ).toBeInTheDocument();
       });
 
-      // Simulate copy action by directly calling the mocked function
-      await act(async () => {
-        navigator.clipboard.writeText('test');
+      const copyButtons = screen.getAllByRole('button', {
+        name: 'actions.copy.title',
       });
+      fireEvent.click(copyButtons[0]);
 
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('test');
+      await waitFor(() => {
+        expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+          'https://example.com/external/v1/chat/completions',
+        );
+      });
     });
   });
 

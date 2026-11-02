@@ -1,24 +1,24 @@
 {
   "list": {
     "title": "API Keys",
-    "clusterAuthDisabled": "API key management is not available because cluster-auth is disabled.",
+    "apiKeysDisabled": "API key management is not available in this environment.",
     "filters": {
       "search": {
-        "placeholder": "Search API keys"
+        "placeholder": "Search"
       }
     },
     "actions": {
       "create": {
-        "title": "Create API Key"
+        "title": "Create API key"
       },
       "viewDetails": {
-        "title": "View Details"
+        "title": "View details"
       },
       "edit": {
-        "title": "Edit API Key"
+        "title": "Edit API key"
       },
       "delete": {
-        "title": "Delete API Key",
+        "title": "Delete API key",
         "confirmation": {
           "title": "Delete API key",
           "description": "Are you sure you want to delete the API key <strong>{{name}}</strong>? This action is permanent and will immediately revoke access for any clients using this key."
@@ -35,13 +35,13 @@
           "title": "Name"
         },
         "secretKey": {
-          "title": "Secret Key"
+          "title": "Secret key"
         },
         "createdAt": {
-          "title": "Created At"
+          "title": "Created at"
         },
         "createdBy": {
-          "title": "Created By"
+          "title": "Created by"
         },
         "actions": {
           "title": ""
@@ -55,6 +55,35 @@
         "pageSize": {
           "label": "Show",
           "entities": "API keys"
+        }
+      }
+    },
+    "linkedDeployments": {
+      "headers": {
+        "name": {
+          "title": "Name"
+        },
+        "status": {
+          "title": "Status"
+        },
+        "replicas": {
+          "title": "Replicas"
+        },
+        "createdBy": {
+          "title": "Created by"
+        },
+        "createdAt": {
+          "title": "Created at"
+        }
+      },
+      "empty": {
+        "description": "No linked deployments found"
+      },
+      "pagination": {
+        "showing": "Showing {{from}} to {{to}} of {{total}} deployments",
+        "pageSize": {
+          "label": "Show",
+          "entities": "deployments"
         }
       }
     }
@@ -97,20 +126,12 @@
       }
     },
     "linkedDeployments": {
-      "title": "Linked deployments",
-      "empty": "No linked deployments found",
-      "headers": {
-        "name": "Name",
-        "status": "Status",
-        "replicas": "Replicas",
-        "createdBy": "Created by",
-        "createdAt": "Created at"
-      }
+      "title": "Linked deployments"
     }
   },
   "form": {
     "create": {
-      "title": "Create API Key",
+      "title": "Create API key",
       "action": {
         "create": "Create API key",
         "cancel": "Cancel"
@@ -120,6 +141,7 @@
           "label": "Name",
           "placeholder": "Enter API key name",
           "error": {
+            "required": "Name is required",
             "minLength": "Name must be at least 3 characters",
             "maxLength": "Name must not exceed 64 characters"
           }
@@ -156,7 +178,7 @@
       }
     },
     "edit": {
-      "title": "Edit API Key",
+      "title": "Edit API key",
       "action": {
         "save": "Save API key",
         "cancel": "Cancel"

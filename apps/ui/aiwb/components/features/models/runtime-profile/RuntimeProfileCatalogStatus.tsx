@@ -8,6 +8,10 @@ type Props = {
   isLoading: boolean;
   isError: boolean;
   errorMessage?: string;
+  showNoValidCombinationsWarning?: boolean;
+  noValidCombinationsMessage?: string;
+  showBaseImageOptionsWarning?: boolean;
+  baseImageOptionsWarningMessage?: string;
   showEmptyAcceleratorsWarning: boolean;
   emptyAcceleratorsMessage: string;
   loadingMessage: string;
@@ -20,6 +24,10 @@ export function RuntimeProfileCatalogStatus({
   isLoading,
   isError,
   errorMessage,
+  showNoValidCombinationsWarning = false,
+  noValidCombinationsMessage,
+  showBaseImageOptionsWarning = false,
+  baseImageOptionsWarningMessage,
   showEmptyAcceleratorsWarning,
   emptyAcceleratorsMessage,
   loadingMessage,
@@ -27,10 +35,20 @@ export function RuntimeProfileCatalogStatus({
   retryLabel,
   onRetry,
 }: Props) {
+  if (showNoValidCombinationsWarning && noValidCombinationsMessage) {
+    return (
+      <p
+        className="text-sm text-warning"
+        data-testid="runtime-profile-no-valid-combinations"
+      >
+        {noValidCombinationsMessage}
+      </p>
+    );
+  }
   if (isError) {
     return (
       <div
-        className="flex flex-col gap-2 rounded-medium border border-danger/40 bg-danger-50/10 p-3 text-sm"
+        className="flex flex-col gap-2 rounded-md border border-danger/40 bg-danger-soft p-3 text-sm"
         data-testid="runtime-profile-catalog-error"
       >
         <p className="text-danger">{errorMessage ?? loadErrorMessage}</p>
@@ -43,7 +61,7 @@ export function RuntimeProfileCatalogStatus({
   if (isLoading) {
     return (
       <div
-        className="flex items-center gap-2 text-sm text-default-500"
+        className="flex items-center gap-2 text-sm text-muted"
         data-testid="runtime-profile-catalog-loading"
       >
         <Spinner size="sm" />
@@ -51,10 +69,20 @@ export function RuntimeProfileCatalogStatus({
       </div>
     );
   }
+  if (showBaseImageOptionsWarning && baseImageOptionsWarningMessage) {
+    return (
+      <p
+        className="text-sm text-warning"
+        data-testid="runtime-profile-base-image-options-warning"
+      >
+        {baseImageOptionsWarningMessage}
+      </p>
+    );
+  }
   if (showEmptyAcceleratorsWarning) {
     return (
       <p
-        className="text-sm text-warning-600"
+        className="text-sm text-warning"
         data-testid="runtime-profile-empty-accelerators"
       >
         {emptyAcceleratorsMessage}

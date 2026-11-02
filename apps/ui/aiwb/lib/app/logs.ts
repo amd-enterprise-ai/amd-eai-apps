@@ -2,18 +2,18 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { LogLevel } from '@/types/enums/workloads';
+import type { LogLevel } from '@/types/workloads';
 
-export const LOG_LEVEL_COLORS: Record<LogLevel, string> = {
-  [LogLevel.TRACE]: '#999999',
-  [LogLevel.DEBUG]: '#666666',
-  [LogLevel.INFO]: '#11a8cd',
-  [LogLevel.WARNING]: '#e5e510',
-  [LogLevel.ERROR]: '#f14c4c',
-  [LogLevel.CRITICAL]: '#ff0000',
-  [LogLevel.UNKNOWN]: '#666666',
+const LOG_LEVEL_COLORS: Record<LogLevel, string> = {
+  trace: '#999999',
+  debug: '#666666',
+  info: '#11a8cd',
+  warning: '#e5e510',
+  error: '#f14c4c',
+  critical: '#ff0000',
+  unknown: '#666666',
 };
 
 export const getLogLevelColor = (level: LogLevel): string => {
-  return LOG_LEVEL_COLORS[level] || LOG_LEVEL_COLORS[LogLevel.UNKNOWN];
+  return LOG_LEVEL_COLORS[level] || LOG_LEVEL_COLORS.unknown;
 };

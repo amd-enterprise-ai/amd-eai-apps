@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: MIT
 
 import React from 'react';
-import { HeroUIProvider } from '@heroui/react';
 import { type GlobalProvider, useLadleContext, ThemeState } from '@ladle/react';
 import { ThemeProvider as NextThemesProvider } from 'next-themes';
 import { MDXProvider } from '@mdx-js/react';
@@ -33,14 +32,12 @@ export const Provider: GlobalProvider = ({ children }) => {
   const theme = themeMap[globalState.theme] || 'dark';
 
   return (
-    <HeroUIProvider>
-      <NextThemesProvider
-        disableTransitionOnChange
-        attribute="class"
-        forcedTheme={theme}
-      >
-        <MDXProvider components={components}>{children}</MDXProvider>
-      </NextThemesProvider>
-    </HeroUIProvider>
+    <NextThemesProvider
+      disableTransitionOnChange
+      attribute="class"
+      forcedTheme={theme}
+    >
+      <MDXProvider components={components}>{children}</MDXProvider>
+    </NextThemesProvider>
   );
 };

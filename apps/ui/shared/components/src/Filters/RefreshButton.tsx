@@ -26,7 +26,7 @@ export const RefreshButton = ({
   lastFetchedTimestamp,
   compact = true,
 }: RefreshButtonProps) => {
-  const { t } = useTranslation('common');
+  const { t } = useTranslation('sharedComponents');
 
   const timeSinceLastUpdate = useMemo(() => {
     if (!lastFetchedTimestamp) return undefined;
@@ -42,7 +42,7 @@ export const RefreshButton = ({
       : t('actions.refresh.title');
   }, [timeSinceLastUpdate, t]);
 
-  const label = isLoading ? t('data.refreshing') : t('data.refresh');
+  const label = isLoading ? t('data.refreshing') : t('actions.refresh.title');
 
   return (
     <Tooltip

@@ -21,10 +21,10 @@ const DragOverlay = memo(
   }) => (
     <div
       className={cn(
-        'absolute inset-0 z-10 rounded top-0.5 left-0.5 right-0.5 bottom-0.5 border-1 border-dashed flex flex-col items-center justify-center transition-colors gap-2',
+        'absolute inset-0 z-10 rounded top-0.5 left-0.5 right-0.5 bottom-0.5 border border-dashed flex flex-col items-center justify-center transition-colors gap-2',
         canDrop
-          ? 'bg-background/80 border-success-400 text-success-400'
-          : 'bg-background/80 border-danger-400 text-danger-400',
+          ? 'bg-background/80 border-success text-success'
+          : 'bg-background/80 border-danger text-danger',
       )}
     >
       {canDrop ? (

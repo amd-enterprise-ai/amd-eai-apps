@@ -24,7 +24,7 @@ Test Teardown       Close test browser
 
 *** Test Cases ***
 # =============================================================================
-# Report Issue (EAI-2366)
+# Report Issue
 # =============================================================================
 
 Report issue menu entry links user to support mailto
@@ -39,3 +39,15 @@ Report issue menu entry links user to support mailto
     And user is on models page
     When user opens the user menu
     Then report issue menu entry should link to support mailto
+
+User menu is labeled for actions
+    [Documentation]    Verify that the global user menu exposes an accessible label
+    ...                describing its actions.
+    [Tags]    ui    navigation    user-menu    smoke
+
+    Given a ready project with user access exists
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    And user is on models page
+    When user opens the user menu
+    Then the user menu should be labeled for actions

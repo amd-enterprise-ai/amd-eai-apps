@@ -3,14 +3,15 @@
 // SPDX-License-Identifier: MIT
 
 import {
-  Select,
   SelectItem,
   DrawerForm,
   Alert,
   FormFieldComponent,
   FormPasswordInput,
+  FormSelect,
+  type SelectRenderItem,
 } from '@amdenterpriseai/components';
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 
 import { IconAt } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -90,6 +91,21 @@ const InviteUserModal: React.FC<Props> = ({
 
   const allProjects = useMemo(() => projectData?.data || [], [projectData]);
 
+  const renderProjectSelectValue = useCallback(
+    (items: SelectRenderItem[]) => {
+      if (items.length === 0) {
+        return null;
+      }
+      const names = items.map((item) => {
+        const id = String(item.key);
+        const project = allProjects.find((p) => p.id === id);
+        return project?.name ?? id;
+      });
+      return names.join(', ');
+    },
+    [allProjects],
+  );
+
   const formSchema: ZodType<InviteUserFormData> = useMemo(
     () =>
       z.object({
@@ -120,7 +136,7 @@ const InviteUserModal: React.FC<Props> = ({
           .transform((val) => (val ? val.split(',') : [])),
         roles: z
           .string()
-          .nonempty(t('modal.addUser.form.roles.validation.selected') || ''),
+          .nonempty(t('modal.addUser.form.roles.validation.required') || ''),
         tempPassword: z
           .union([
             z
@@ -174,63 +190,14 @@ const InviteUserModal: React.FC<Props> = ({
     },
   });
 
-  const formContent: FormField<InviteUserFormData>[] = useMemo(
-    () => [
-      {
-        name: 'email',
-        label: t('modal.addUser.form.email.label'),
-        isRequired: true,
-        icon: (props) => <IconAt size="14" {...props} />,
-      },
-      {
-        name: 'roles',
-        label: t('modal.addUser.form.roles.label'),
-        isRequired: true,
-        component: (formElemProps) => (
-          <Select
-            labelPlacement="outside"
-            placeholder={t('modal.addUser.form.roles.placeholder')}
-            variant="bordered"
-            {...formElemProps}
-            defaultSelectedKeys={[UserRole.PLATFORM_ADMIN]}
-            disallowEmptySelection
-          >
-            <SelectItem key={UserRole.PLATFORM_ADMIN}>
-              {t('modal.addUser.form.roles.options.platformAdmin')}
-            </SelectItem>
-            <SelectItem key={UserRole.TEAM_MEMBER}>
-              {t('modal.addUser.form.roles.options.teamMember')}
-            </SelectItem>
-          </Select>
-        ),
-      },
-      {
-        name: 'projectIds',
-        label: t('modal.addUser.form.projects.label'),
-        placeholder: t('modal.addUser.form.projects.placeholder'),
-        isRequired: false,
-        component: (formElemProps) => (
-          <Select
-            data-testid="project-select"
-            labelPlacement="outside"
-            selectionMode="multiple"
-            defaultSelectedKeys={selectedProjectIds || []}
-            variant="bordered"
-            {...formElemProps}
-          >
-            {allProjects.map((project: any) => (
-              <SelectItem
-                key={project.id}
-                data-testid={`project-${project.id}`}
-              >
-                {project.name}
-              </SelectItem>
-            ))}
-          </Select>
-        ),
-      },
-    ],
-    [t, allProjects, selectedProjectIds],
+  const emailField: FormField<InviteUserFormData> = useMemo(
+    () => ({
+      name: 'email',
+      label: t('modal.addUser.form.email.label'),
+      isRequired: true,
+      icon: (props) => <IconAt size="14" {...props} />,
+    }),
+    [t],
   );
 
   return (
@@ -258,14 +225,45 @@ const InviteUserModal: React.FC<Props> = ({
       validationSchema={formSchema}
       renderFields={(form) => (
         <div className="flex flex-col gap-4">
-          {formContent.map((field) => (
-            <FormFieldComponent<InviteUserFormData>
-              key={field.name}
-              formField={field}
-              errorMessage={form.formState.errors[field.name]?.message}
-              register={form.register}
-            />
-          ))}
+          <FormFieldComponent<InviteUserFormData>
+            formField={emailField}
+            errorMessage={form.formState.errors.email?.message}
+            register={form.register}
+          />
+          <FormSelect<InviteUserFormData>
+            form={form}
+            name="roles"
+            label={t('modal.addUser.form.roles.label')}
+            placeholder={t('modal.addUser.form.roles.placeholder')}
+            disallowEmptySelection
+            isRequired
+          >
+            <SelectItem key={UserRole.PLATFORM_ADMIN}>
+              {t('modal.addUser.form.roles.options.platformAdmin')}
+            </SelectItem>
+            <SelectItem key={UserRole.TEAM_MEMBER}>
+              {t('modal.addUser.form.roles.options.teamMember')}
+            </SelectItem>
+          </FormSelect>
+          <FormSelect<InviteUserFormData>
+            form={form}
+            name="projectIds"
+            data-testid="project-select"
+            label={t('modal.addUser.form.projects.label')}
+            placeholder={t('modal.addUser.form.projects.placeholder')}
+            selectionMode="multiple"
+            renderValue={renderProjectSelectValue}
+          >
+            {allProjects.map((project) => (
+              <SelectItem
+                key={project.id}
+                textValue={project.name}
+                data-testid={`project-${project.id}`}
+              >
+                {project.name}
+              </SelectItem>
+            ))}
+          </FormSelect>
           {isTempPasswordRequired ? (
             <>
               <FormPasswordInput
@@ -276,12 +274,12 @@ const InviteUserModal: React.FC<Props> = ({
                 isRequired
               />
               <Alert
-                color="warning"
+                status="warning"
                 description={t('modal.addUser.instructionTempPassword')}
               />
             </>
           ) : (
-            <p className="text-small">{t('modal.addUser.instruction')}</p>
+            <p className="text-sm">{t('modal.addUser.instruction')}</p>
           )}
         </div>
       )}

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 *** Settings ***
-Documentation       BDD keywords for fine-tuning drawer UI features.
+Documentation       BDD keywords for fine-tuning wizard UI features.
 ...                 Composes page-level interactions into business-meaningful keywords
 ...                 suitable for Given-When-Then test cases.
 ...
@@ -13,11 +13,15 @@ Library             String
 Library             Process
 Resource            common/session.resource
 Resource            pages/models_page.resource
+Resource            pages/workloads_page.resource
 Resource            resources/airm_clusters.resource
 Resource            resources/airm_projects.resource
 Resource            resources/aiwb_common.resource
+Resource            resources/aiwb_datasets.resource
 Resource            resources/aiwb_models.resource
 Resource            resources/aiwb_aims.resource
+Resource            resources/aiwb_secrets.resource
+Library             libraries/FinetuneRecipeSelector.py
 
 
 *** Keywords ***
@@ -38,6 +42,57 @@ A completed fine-tuned model exists for the test project
     ...    Delegates to the API resource keyword to avoid duplication and drift.
     A completed fine-tuned model exists in the namespace
 
+A completed described fine-tuned model exists for the test project
+    [Documentation]    Creates a completed fine-tuned model with its user-supplied description.
+    A completed described fine-tuned model exists in the namespace
+
+A LoRA-output fine-tuning job exists
+    [Documentation]    Starts a fine-tuning job that produces a standalone LoRA adapter.
+    An adapter-output fine-tuning job is started
+
+A base model that can be fine-tuned with LoRA but cannot serve adapters exists
+    [Documentation]    Picks a base model this cluster can train a LoRA adapter for, but whose
+    ...                serving profiles can never load that adapter afterwards — the situation
+    ...                in which the wizard is expected to withhold LoRA output. Records the
+    ...                choice for the later "user selects the base model that cannot serve
+    ...                adapters" step.
+    ...
+    ...                Skips when every LoRA-capable base model here can serve adapters: there
+    ...                is then no cause to withhold anything, and failing would report a
+    ...                missing restriction that is correctly absent.
+
+    ${response}=    Get finetunable models    expected_status=200
+    VAR    ${models}    ${response.json()["data"]}
+    ${profiles}=    All inference profiles
+    ${canonical_name}=    Find LoRA recipe without adapter support    ${models}    ${profiles}
+    Skip If    $canonical_name == ''
+    ...    Every LoRA-capable base model on this cluster can serve adapters — nothing to withhold
+    VAR    ${LORA_NO_ADAPTER_BASE_MODEL}    ${canonical_name}    scope=TEST
+    Log    Base model that cannot serve adapters: ${canonical_name}    INFO
+
+A base model that can be fine-tuned with LoRA and can serve adapters exists
+    [Documentation]    Picks a base model this cluster can train a LoRA adapter for and whose
+    ...                serving profiles can load that adapter afterwards — the case in which
+    ...                LoRA output stays on offer. Records the choice for the later "user
+    ...                selects the base model that can serve adapters" step.
+    ...
+    ...                Any scenario that goes on to choose LoRA output needs this: picking a
+    ...                LoRA recipe without regard to adapter serving lands on a base model
+    ...                for which the wizard now withholds LoRA, and the run would wait on an
+    ...                option that never becomes selectable.
+    ...
+    ...                Skips when no LoRA-capable base model here can serve adapters: LoRA
+    ...                output cannot be exercised at all on such a cluster.
+
+    ${response}=    Get finetunable models    expected_status=200
+    VAR    ${models}    ${response.json()["data"]}
+    ${profiles}=    All inference profiles
+    ${canonical_name}=    Find LoRA recipe with adapter support    ${models}    ${profiles}
+    Skip If    $canonical_name == ''
+    ...    No LoRA-capable base model on this cluster can serve adapters — LoRA output is not offered
+    VAR    ${LORA_ADAPTER_BASE_MODEL}    ${canonical_name}    scope=TEST
+    Log    Base model that can serve adapters: ${canonical_name}    INFO
+
 More fine-tuned models exist in the namespace than fit a single page
     [Documentation]    Seeds enough AIMModel CRs to force at least two pages at the default
     ...                page size (10). Uses kubectl so no GPU is required — the CRs share the
@@ -55,8 +110,8 @@ Test project is selected
 User is on fine-tune models page
     [Documentation]    Navigates to the Fine-tune Models tab on the models page.
     ...                Expects ${UI_BASE_URL} and ${TEST_PROJECT} to be set.
-    ...                EAI-6124 moved the fine-tune table off the Custom Models
-    ...                tab into its own tab; scenarios that used to navigate to
+    ...                The fine-tune table lives on its own tab, not the Custom Models
+    ...                tab; scenarios that used to navigate to
     ...                "user is on custom models page" should now use this.
 
     Navigate to fine-tune models page    ${UI_BASE_URL}    ${TEST_PROJECT}[name]
@@ -65,10 +120,10 @@ User is on fine-tune models page
 # When keywords (actions)
 # =============================================================================
 
-User opens fine-tuning drawer
-    [Documentation]    Clicks the Fine-tune button to open the fine-tuning drawer.
+User opens fine-tuning wizard
+    [Documentation]    Clicks the Fine-tune button to open the fine-tuning wizard.
 
-    Open finetune drawer
+    Open finetune wizard
 
 User opens the base model selector
     [Documentation]    Clicks the base model select to expand the option list.
@@ -85,6 +140,9 @@ User selects the first compatible recipe
     EXCEPT
         Skip    No GPU-compatible fine-tuning recipes available for this cluster
     END
+    ${option_text}=    Get base model option text
+    ${recipe_name}=    Evaluate    $option_text.split("\n")[0]
+    VAR    ${SELECTED_FINETUNING_RECIPE}    ${recipe_name}    scope=TEST
     Click first base model option
 
 User selects a gated base model
@@ -106,6 +164,193 @@ User selects a gated base model
     Wait Until Keyword Succeeds    10s    500ms    Base model options should be non-empty
     Click base model option with name    ${gated_name}
 
+User selects the existing HuggingFace token
+    [Documentation]    Opens the HuggingFace token dropdown in the fine-tuning wizard and
+    ...                selects the token created by the "a secret ... is created via AIWB"
+    ...                Given step.
+    ...                Requires: TEST_AIWB_SECRET_NAME (set by that Given step)
+
+    Open project Hugging Face token dropdown
+    Click Hugging Face token option labeled    ${TEST_AIWB_SECRET_NAME}
+
+User creates a new HuggingFace token via the token selector
+    [Documentation]    Opens the HuggingFace token dropdown, clicks "Add new", fills in a
+    ...                unique display name and a syntactically valid dummy token, and submits
+    ...                the popover. Exercises the inline token-creation flow a user follows
+    ...                when a gated model needs a token the project doesn't have yet. The
+    ...                selector auto-selects the newly created token on success.
+
+    ${suffix}=    Generate Random String    8    [LOWER][NUMBERS]
+    Open project Hugging Face token dropdown
+    Click Hugging Face token add new button
+    Fill Hugging Face token dialog fields    finetune-hf-${suffix}    hf_dummytoken1234567890abcdef
+    Click Hugging Face token dialog submit button
+    Wait For Elements State    ${HF_TOKEN_DIALOG_SUBMIT_SELECTOR}    detached    timeout=15s
+
+User continues to training settings
+    [Documentation]    Advances from model selection to training data.
+
+    Click fine-tuning wizard next button
+
+User selects the first training dataset
+    [Documentation]    Selects the first available fine-tuning dataset.
+
+    Select first training dataset
+
+User selects LoRA fine-tuning type
+    [Documentation]    Chooses LoRA training for a recipe that supports it.
+
+    Select LoRA fine-tuning type
+
+User selects ${count:\d+} training datasets
+    [Documentation]    Selects the requested number of available fine-tuning datasets.
+
+    FOR    ${index}    IN RANGE    ${count}
+        Select training dataset by index    ${index}
+    END
+
+User selects all training datasets
+    [Documentation]    Selects every available fine-tuning dataset.
+
+    Select all training datasets
+
+Training datasets should show their file sizes
+    [Documentation]    Verifies available training datasets include their file sizes.
+
+    Dataset selector should show file sizes
+
+User continues to target settings
+    [Documentation]    Advances from training data to output settings.
+
+    Click fine-tuning wizard next button
+
+User names the fine-tuned model and continues
+    [Documentation]    Names the output model on the Target step and advances.
+    [Arguments]    ${name}
+
+    Fill finetune display name    ${name}
+    Click fine-tuning wizard next button
+
+User goes back in fine-tuning wizard
+    [Documentation]    Returns to the previous wizard step.
+
+    Click fine-tuning wizard back button
+
+User continues to hyper-parameter settings
+    [Documentation]    Names the output model and advances to optional hyper-parameters.
+
+    ${suffix}=    Generate Random String    8    [LOWER][NUMBERS]
+    Fill finetune display name    finetune-hyperparameters-${suffix}
+    Click fine-tuning wizard next button
+
+User enables hyper-parameter customization
+    [Documentation]    Enables the optional custom hyper-parameter fields.
+
+    Enable hyper-parameter customization
+
+User continues to confirmation
+    [Documentation]    Advances from hyperparameter settings to the wizard confirmation step.
+
+    Click fine-tuning wizard next button
+
+User sets custom decimal hyperparameters
+    [Documentation]    Enters decimal values whose confirmation display should match field precision.
+
+    Fill learning rate    1.4
+    Fill LoRA dropout    0.054
+
+Format hyperparameter placeholder
+    [Documentation]    Matches JavaScript String formatting for recipe values.
+    [Arguments]    ${value}
+
+    IF    $value is None
+        RETURN    Auto
+    END
+    ${text}=    Evaluate    str(int($value)) if isinstance($value, float) and $value.is_integer() else str($value)
+    RETURN    ${text}
+
+The hyperparameter defaults should show the selected recipe's values
+    [Documentation]    Confirms that placeholders match the selected recipe, or Auto when
+    ...    that recipe does not define a value.
+
+    ${response}=    Get finetunable models    expected_status=200
+    VAR    ${recipes}    ${response.json()["data"]}
+    ${recipe}=    Evaluate
+    ...    next(recipe for recipe in $recipes if recipe["canonicalName"] == $SELECTED_FINETUNING_RECIPE)
+    ${hyperparameters}=    Get From Dictionary    ${recipe}    hyperparameters
+    ${expected_epochs}=    Format hyperparameter placeholder    ${hyperparameters["epochs"]}
+    ${expected_learning_rate}=    Format hyperparameter placeholder    ${hyperparameters["learningRate"]}
+    ${epochs}    ${learning_rate}=    Get hyperparameter input placeholders
+    Should Be Equal    ${epochs}    ${expected_epochs}
+    Should Be Equal    ${learning_rate}    ${expected_learning_rate}
+
+The confirmation should format decimal hyperparameters to their step precision
+    [Documentation]    Verifies the collapsed summary uses one decimal for learning rate and
+    ...    three decimals for dropout.
+
+    ${summary}=    Get hyperparameters summary text
+    Should Match Regexp    ${summary}    (?s).*Learning rate multiplier\\s+1\\.4\\s+.*
+    Should Match Regexp    ${summary}    (?s).*Dropout\\s+0\\.054(?:\\s|$).*
+
+User submits the fine-tuning form
+    [Documentation]    Completes the remaining wizard steps and starts training.
+
+    Click fine-tuning wizard next button
+    Select first training dataset
+    Click fine-tuning wizard next button
+    ${suffix}=    Generate Random String    8    [LOWER][NUMBERS]
+    Fill finetune display name    finetune-defaults-${suffix}
+    Click fine-tuning wizard next button
+    Click fine-tuning wizard next button
+    Click finetune wizard submit button
+
+User submits fine-tuning leaving the batch size field at its default
+    [Documentation]    Advances through the remaining wizard steps, enables hyper-parameter
+    ...                customization, and interacts with the batch size field the way a
+    ...                user accepting the default (Auto) value would: focusing it and
+    ...                moving on without typing anything, then starts training.
+    ...
+    ...                Regression coverage: a HeroUI v3 migration left the shared
+    ...                number-input control briefly surfacing an invalid empty-string/NaN
+    ...                sentinel for an untouched optional field once it was focused and
+    ...                blurred, which could block submission or reach the backend as a
+    ...                validation error.
+
+    Click fine-tuning wizard next button
+    Select first training dataset
+    Click fine-tuning wizard next button
+    ${suffix}=    Generate Random String    8    [LOWER][NUMBERS]
+    Fill finetune display name    finetune-defaults-${suffix}
+    Click fine-tuning wizard next button
+    Enable hyper-parameter customization
+    Focus and blur batch size input
+    Click fine-tuning wizard next button
+    Click finetune wizard submit button
+
+User submits the fine-tuning form with a description
+    [Documentation]    Completes the wizard with a description and starts training.
+
+    Click fine-tuning wizard next button
+    Select first training dataset
+    Click fine-tuning wizard next button
+    ${suffix}=    Generate Random String    8    [LOWER][NUMBERS]
+    VAR    ${TEST_FINETUNING_DISPLAY_NAME}    finetune-described-${suffix}    scope=TEST
+    Fill finetune display name    ${TEST_FINETUNING_DISPLAY_NAME}
+    Fill finetune description    ${FINETUNED_MODEL_DESCRIPTION}
+    Click fine-tuning wizard next button
+    Click fine-tuning wizard next button
+    Click finetune wizard submit button
+
+User submits fine-tuning with the selected training datasets
+    [Documentation]    Completes the wizard using the datasets already selected.
+
+    Click fine-tuning wizard next button
+    ${suffix}=    Generate Random String    8    [LOWER][NUMBERS]
+    Fill finetune display name    finetune-multiple-${suffix}
+    Click fine-tuning wizard next button
+    Click fine-tuning wizard next button
+    Click finetune wizard submit button
+
 User selects a non-gated base model
     [Documentation]    Opens the base model dropdown and selects the first recipe whose
     ...                hfTokenRequired flag is explicitly false in the finetunable catalog API.
@@ -125,31 +370,58 @@ User selects a non-gated base model
     Wait Until Keyword Succeeds    10s    500ms    Base model options should be non-empty
     Click base model option with name    ${non_gated_name}
 
+User selects the base model that can serve adapters
+    [Documentation]    Selects the LoRA-capable base model with adapter-serving support
+    ...                that the matching Given step picked for this cluster.
+
+    Click base model select
+    Wait Until Keyword Succeeds    10s    500ms    Base model options should be non-empty
+    Click base model option with name    ${LORA_ADAPTER_BASE_MODEL}
+
+User selects the base model that cannot serve adapters
+    [Documentation]    Selects the LoRA-capable base model without adapter-serving support
+    ...                that the matching Given step picked for this cluster.
+
+    Click base model select
+    Wait Until Keyword Succeeds    10s    500ms    Base model options should be non-empty
+    Click base model option with name    ${LORA_NO_ADAPTER_BASE_MODEL}
+
+User submits LoRA adapter fine-tuning
+    [Documentation]    Completes the wizard with representative LoRA hyper-parameters.
+    Click fine-tuning wizard next button
+    Select LoRA fine-tuning type
+    Select first training dataset
+    Click fine-tuning wizard next button
+    ${suffix}=    Generate Random String    8    [LOWER][NUMBERS]
+    Fill finetune display name    finetune-lora-${suffix}
+    Click fine-tuning wizard next button
+    Enable hyper-parameter customization
+    Fill LoRA rank    16
+    Fill LoRA alpha    32
+    Fill LoRA dropout    0.05
+    Click fine-tuning wizard next button
+    Click finetune wizard submit button
+
 # =============================================================================
 # Then keywords (verification)
 # =============================================================================
 
 The HuggingFace token section should be visible
-    [Documentation]    Verifies the Hugging Face Authentication section is shown in the drawer.
+    [Documentation]    Verifies the Hugging Face Authentication section is shown in the wizard.
     ...                The section is mounted only when the selected base model is gated.
 
     HF token section should be present
 
 The HuggingFace token section should not be visible
-    [Documentation]    Verifies the Hugging Face Authentication section is absent from the drawer.
+    [Documentation]    Verifies the Hugging Face Authentication section is absent from the wizard.
     ...                The section is unmounted when the selected base model is not gated.
 
     HF token section should not be present
 
-Submitting the form without a token should be blocked
-    [Documentation]    Fills in the display name, clicks the confirm button, and verifies the
-    ...                drawer remains open with the HF token section still visible — proving
-    ...                that the missing HF token (not an unrelated validation error) blocked
-    ...                form submission.
+Continuing without a token should be blocked
+    [Documentation]    Verifies the wizard cannot leave the model step without the required token.
 
-    ${suffix}=    Generate Random String    8    [LOWER][NUMBERS]
-    Fill finetune display name    test-hf-${suffix}
-    Click finetune confirm button
+    Fine-tuning wizard next button should be disabled
     HF token section should be present
 
 Compatible fine-tuning recipes should be listed with hardware names
@@ -195,51 +467,150 @@ Each base model should appear at most once in the recipe list
         Append To List    ${seen_names}    ${name}
     END
 
-Fine-tuning drawer should show no compatible recipes message
+The fine-tuning job should start without a validation error
+    [Documentation]    Verifies the wizard closed after the fine-tune mutation succeeded.
+
+    Fine-tuning wizard should be closed
+
+Fine-tuning workload details should show its description
+    [Documentation]    Finds the submitted job and verifies its description on workload details.
+
+    ${workload}=    Wait Until Keyword Succeeds
+    ...    2 min
+    ...    5 sec
+    ...    Resolve submitted fine-tuning workload
+    Navigate to workload details page by id
+    ...    ${UI_BASE_URL}
+    ...    ${TEST_PROJECT}[name]
+    ...    ${workload}[id]
+    ${description}=    Get workload description text
+    Should Be Equal    ${description}    ${FINETUNED_MODEL_DESCRIPTION}
+
+Resolve submitted fine-tuning workload
+    [Documentation]    Returns the workload created by the current wizard submission.
+
+    ${namespace}=    Get Project Namespace
+    ${response}=    Get AIWB workloads
+    ...    ${namespace}
+    ...    workload_type=FINE_TUNING
+    ...    expected_status=200
+    VAR    ${workloads}    ${response.json()}[data]
+    ${matches}=    Evaluate
+    ...    [item for item in $workloads if item["displayName"] == $TEST_FINETUNING_DISPLAY_NAME]
+    Length Should Be    ${matches}    1
+    VAR    ${TEST_FINETUNING_WORKLOAD_ID}    ${matches}[0][id]    scope=TEST
+    RETURN    ${matches}[0]
+
+User opens details for the completed fine-tuned model
+    [Documentation]    Opens the details dialog for the prepared fine-tuned model.
+
+    Open details action from model row    ${TEST_MODEL_NAME}
+
+Fine-tuned model details should show its description
+    [Documentation]    Verifies the prepared model's description is visible in its details.
+
+    Model details should show description    ${FINETUNED_MODEL_DESCRIPTION}
+
+The training dataset selection limit should be shown
+    [Documentation]    Verifies the wizard explains that at most ten datasets may be selected.
+
+    Wait For Elements State    ${FINETUNE_DATASET_LIMIT_TOAST_SELECTOR}    visible    timeout=10s
+
+The fine-tuning success toast should offer navigation to fine-tuned models
+    [Documentation]    Verifies a submitted model training job offers navigation to its listing.
+
+    Fine-tuning success toast link should be visible    View models
+
+The fine-tuning success toast should offer navigation to LoRAs
+    [Documentation]    Verifies a submitted LoRA training job offers navigation to its listing.
+
+    Fine-tuning success toast link should be visible    View LoRAs
+
+LoRA fine-tuning should not be offered
+    [Documentation]    Verifies the user cannot choose an output this base model could never
+    ...                have deployed. Offering it would send the user down a path the run is
+    ...                refused at the end of.
+
+    ${enabled}=    Get LoRA fine-tuning type enabled state
+    Should Not Be True    ${enabled}
+    ...    msg=LoRA output should be unavailable for a base model whose adapters could never be served
+
+The wizard should explain that adapters for this model cannot be deployed
+    [Documentation]    Verifies the unavailable option says why. A silently unavailable choice
+    ...                leaves the user to guess whether the product is broken or their base
+    ...                model is the wrong one.
+
+    ${text}=    Get fine-tuning type options text
+    Should Match Regexp    ${text}    (?i)adapter
+    ...    msg=The unavailable option should mention adapters so the user can tell what is missing
+    Should Match Regexp    ${text}    (?i)deploy
+    ...    msg=The unavailable option should say the adapter could not be deployed
+
+A usable fine-tuning type should be chosen instead
+    [Documentation]    Verifies the wizard does not leave the form resting on an output the
+    ...                user can no longer pick, which would block the run with nothing to
+    ...                change on screen.
+
+    ${checked}=    Get LoRA fine-tuning type checked state
+    Should Not Be True    ${checked}    msg=An unavailable output should not stay chosen
+    ${chosen}=    Get chosen fine-tuning type name
+    Should Not Be Empty    ${chosen}    msg=The wizard should move to an output the user can still run
+
+Fine-tuning wizard should show no compatible recipes message
     [Documentation]    Verifies the base model select shows a message that no fine-tuning
     ...    recipes are available for the cluster's GPU hardware.
 
     Base model select should show empty state
 
-The batch size input should be locked until a recipe is chosen
-    [Documentation]    Verifies the batch size input is disabled before any recipe
-    ...                is selected. The form gates the field on recipe selection so
-    ...                the GPU-count-derived constraints can be applied to a known
-    ...                recipe (EAI-5822).
-
-    Open advanced fine-tuning settings
-    Batch size input should be disabled
-
 The batch size input should require multiples of the recipe's GPU count
-    [Documentation]    Verifies the batch size input enforces the recipe's GPU count
-    ...                as both its minimum value and its step — preventing users from
-    ...                submitting batch sizes that would silently crash the workload
-    ...                (EAI-5822).
+    [Documentation]    Verifies the first batch-size increment starts from the selected
+    ...                recipe recommendation and then adds the recipe's GPU count.
     ...
-    ...                Verified behaviorally by clicking the + stepper twice from the
-    ...                empty initial state: the first click sets the value to the
-    ...                recipe's GPU count (the minimum), and the second click adds
-    ...                another GPU-count's worth (the step). Reading the DOM directly
-    ...                wouldn't work — react-aria's NumberField uses `type="text"` and
-    ...                exposes no `min`/`step`/`aria-valuemin` attributes on the input.
-    ...
-    ...                Skips when the selected recipe uses a single GPU (first
-    ...                increment ≤ 1), since any positive integer is a valid multiple
-    ...                of 1 and the constraint is not testable.
-
-    Open advanced fine-tuning settings
     Batch size input should be enabled
+    ${response}=    Get finetunable models    expected_status=200
+    VAR    ${recipes}    ${response.json()["data"]}
+    ${recipe}=    Evaluate
+    ...    next(recipe for recipe in $recipes if recipe["canonicalName"] == $SELECTED_FINETUNING_RECIPE)
+    ${hyperparameters}=    Get From Dictionary    ${recipe}    hyperparameters
+    ${gpu_count}=    Get From Dictionary    ${recipe}    gpuCount
+    ${recipe_batch_size}=    Get From Dictionary    ${hyperparameters}    batchSize
+    IF    $recipe_batch_size is not None
+        ${expected}=    Evaluate    $recipe_batch_size + $gpu_count
+        Click batch size increment button
+        ${value}=    Get batch size value
+        Should Be Equal As Integers    ${value}    ${expected}
+        ...    msg=Expected the first increment to start from the recipe recommendation (${recipe_batch_size}) and add ${gpu_count}, got ${value}
+    ELSE
+        Click batch size increment button
+        ${value}=    Get batch size value
+        Should Be Equal As Integers    ${value}    ${gpu_count}
+        Skip If    ${gpu_count} <= 1
+        ...    Selected recipe uses ${gpu_count} GPU; multiple-of constraint does not apply
+        Click batch size increment button
+        ${value}=    Get batch size value
+        ${expected}=    Evaluate    2 * $gpu_count
+        Should Be Equal As Integers    ${value}    ${expected}
+        ...    msg=Expected the second increment to add ${gpu_count}, got ${value}
+    END
 
-    Click batch size increment button
-    ${gpu_count}=    Get batch size value
-    Skip If    ${gpu_count} <= 1
-    ...    Selected recipe uses ${gpu_count} GPU; multiple-of constraint does not apply
+The completed fine-tuned model identity should be presented together
+    [Documentation]    Verifies the model's name, description, base model, and tuning type
+    ...    are grouped in the Name cell.
+    ${name_cell_text}=    Get fine-tune model name cell text    ${TEST_MODEL_NAME}
+    Should Contain    ${name_cell_text}    ${TEST_MODEL_NAME}
+    Should Contain    ${name_cell_text}    ${FINETUNED_MODEL_DESCRIPTION}
+    Should Contain    ${name_cell_text}    ${FINETUNED_MODEL_BASE_MODEL}
+    Should Contain    ${name_cell_text}    Full
 
-    Click batch size increment button
-    ${after_step}=    Get batch size value
-    ${expected}=    Evaluate    ${gpu_count} * 2
-    Should Be Equal As Integers    ${after_step}    ${expected}
-    ...    msg=Stepper should add the recipe's GPU count (${gpu_count}) per click; expected ${expected}, got ${after_step}
+Its operational and creation details should remain visible
+    [Documentation]    Verifies the compact table preserves the model's status, workloads,
+    ...    creation time, and creator columns.
+    ${headers}=    Get fine-tune models table header text
+    Should Contain    ${headers}    Status
+    Should Contain    ${headers}    Workloads
+    Should Contain    ${headers}    Created at
+    Should Contain    ${headers}    Created by
+
 # =============================================================================
 # Keywords for fine-tuning from completed model row action
 # =============================================================================
@@ -251,19 +622,24 @@ User opens fine-tune action on the completed model row
     Open fine-tune action from model row    ${TEST_MODEL_NAME}
 
 The user can submit the fine-tuning form without a token
-    [Documentation]    Fills in the display name and submits the drawer for a re-fine-tuned
+    [Documentation]    Fills in the display name and submits the wizard for a re-fine-tuned
     ...                source, then confirms the HuggingFace token section never appears —
     ...                the source keeps its weights in project storage, so no token is
     ...                requested and the submission is not gated on one.
 
     Wait For Elements State    ${BASE_MODEL_SELECT_SELECTOR}    visible    timeout=15s
+    Click fine-tuning wizard next button
+    Select first training dataset
+    Click fine-tuning wizard next button
     ${suffix}=    Generate Random String    8    [LOWER][NUMBERS]
     Fill finetune display name    refinetune-${suffix}
-    Click finetune confirm button
+    Click fine-tuning wizard next button
+    Click fine-tuning wizard next button
+    Click finetune wizard submit button
     HF token section should not be present
 
-Fine-tuning drawer should be open
-    [Documentation]    Verifies the fine-tuning drawer is visible (base model select is shown).
+Fine-tuning wizard should be open
+    [Documentation]    Verifies the fine-tuning wizard is visible (base model select is shown).
 
     Wait For Elements State    ${BASE_MODEL_SELECT_SELECTOR}    visible    timeout=15s
 

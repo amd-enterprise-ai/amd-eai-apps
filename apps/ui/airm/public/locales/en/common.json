@@ -10,24 +10,6 @@
       "title": "Resource Manager"
     }
   },
-  "sharedComponents": {
-    "filterDropdown": {
-      "selectAll": {
-        "label": "Select all"
-      }
-    },
-    "FormFileUpload": {
-      "remove": "Remove",
-      "add_one": "Choose a file",
-      "add_other": "Add files",
-      "drop_one": "Drop a file here to upload",
-      "drop_other": "Drop files here to upload",
-      "dropFail_one": "The file cannot be uploaded",
-      "dropFail_other": "These files cannot be uploaded",
-      "footerFiles_one": "{{count}} file",
-      "footerFiles_other": "{{count}} files"
-    }
-  },
   "pages": {
     "collections": {
       "title": "Collections"
@@ -87,52 +69,19 @@
       "title": "Error"
     }
   },
-  "menu": {
-    "actions": {
-      "open": "Open menu",
-      "close": "Close ,enu",
-      "themeToggle": "Toggle light/dark mode",
-      "theme": "Theme: {{theme}}",
-      "logout": "Logout",
-      "reportIssue": "Report issue"
-    }
-  },
   "actions": {
     "add": "Add",
     "back": {
       "title": "Back"
     },
     "confirm": {
-      "title": "Confirm",
       "message": "Are you sure?"
-    },
-    "close": {
-      "title": "Close"
-    },
-    "cancel": {
-      "title": "Cancel"
-    },
-    "clear": {
-      "title": "Clear"
-    },
-    "copy": {
-      "title": "Copy",
-      "copied": "Copied"
-    },
-    "clearFilters": {
-      "title": "Clear filters"
     },
     "create": {
       "title": "create"
     },
     "delete": {
       "title": "Delete"
-    },
-    "download": {
-      "title": "Download"
-    },
-    "refresh": {
-      "title": "Refresh"
     },
     "remove": {
       "title": "Remove"
@@ -161,13 +110,8 @@
       }
     }
   },
-  "theme": {
-    "light": "Light",
-    "dark": "Dark"
-  },
   "links": {
     "home": "Home",
-    "documentation": "Documentation",
     "support": "Support",
     "about": "About"
   },
@@ -200,52 +144,17 @@
       "projectIdRequired": "Project ID is required"
     }
   },
-  "statistics": {
-    "upperLimitPrefix": "out of",
-    "noData": "No data"
-  },
   "projectSelection": {
     "placeholder": "Select project",
     "label": "Selected project",
     "tooltip": "Select a target project you want to work in"
   },
-  "timeRange": {
-    "description": "Time range selection",
-    "range": {
-      "15m": "15 min",
-      "30m": "30 min",
-      "1h": "1 hour",
-      "24h": "24 hours",
-      "7d": "7 days"
-    },
-    "lastUpdated": "Last update: {{timestamp}}"
-  },
   "charts": {
     "category": {
       "others": "Others"
     },
-    "loading": "Loading ...",
     "nodata": "Data not available",
     "refresh": "Refresh",
     "refreshing": "Refreshing ..."
-  },
-  "data": {
-    "lastUpdated": "Last update: {{timestamp}}",
-    "refresh": "Refresh",
-    "refreshing": "Refreshing ..."
-  },
-  "status": {
-    "description": "The system returned the following error message:",
-    "errorDetail": {
-      "title": "Error details",
-      "action": {
-        "next": "Next error",
-        "prev": "Previous error"
-      }
-    }
-  },
-  "password": {
-    "showPassword": "Show password",
-    "hidePassword": "Hide password"
   }
 }

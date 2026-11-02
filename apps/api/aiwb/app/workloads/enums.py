@@ -22,5 +22,10 @@ class WorkloadType(StrEnum):
     WORKSPACE = "WORKSPACE"
 
 
+class TrainingOutput(StrEnum):
+    LORA = "lora"
+    MERGED = "merged"
+
+
 class ModelSourceType(StrEnum):
     CUSTOM = "custom"

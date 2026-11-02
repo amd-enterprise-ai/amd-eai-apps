@@ -2,9 +2,10 @@
 #
 # SPDX-License-Identifier: MIT
 
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +34,22 @@ async def get_api_keys_for_namespace(
     return list(result.scalars().all())
 
 
+async def count_api_keys(session: AsyncSession) -> int:
+    """Count every API key across all namespaces."""
+    return (await session.execute(select(func.count()).select_from(ApiKey))).scalar_one()
+
+
+async def get_all_api_keys(session: AsyncSession) -> list[ApiKey]:
+    """
+    Get every API key across all namespaces.
+
+    Unscoped on purpose: callers auditing keys against the namespaces that still exist have to see
+    the ones whose namespace does not, which a per-namespace query cannot reach.
+    """
+    result = await session.execute(select(ApiKey).order_by(ApiKey.namespace, ApiKey.created_at))
+    return list(result.scalars().all())
+
+
 async def get_api_key_by_id(
     session: AsyncSession,
     api_key_id: UUID,
@@ -57,9 +74,9 @@ async def create_api_key(
     session: AsyncSession,
     display_name: str,
     truncated_key: str,
-    cluster_auth_key_id: str,
     namespace: str,
     creator: str,
+    expires_at: datetime | None = None,
 ) -> ApiKey:
     """
     Create a new API key in the database.
@@ -68,25 +85,21 @@ async def create_api_key(
         session: Database session
         display_name: User-friendly display name for the API key
         truncated_key: Truncated key for display
-        cluster_auth_key_id: Cluster Auth accessor/key_id
         namespace: The namespace name
         creator: Email of the user creating the key
+        expires_at: Expiry timestamp (None = never); OpenBao enforces the actual drop.
 
     Returns:
         The created API key
 
     Raises:
         ConflictException: If an API key with the same display name already exists in the namespace
-
-    Note:
-        ttl, expires_at, renewable, and num_uses are not stored in the database.
-        They are fetched from Cluster Auth on demand as it is the source of truth for key validity.
     """
     new_api_key = ApiKey(
         display_name=display_name,
         truncated_key=truncated_key,
-        cluster_auth_key_id=cluster_auth_key_id,
         namespace=namespace,
+        expires_at=expires_at,
         created_by=creator,
         updated_by=creator,
     )

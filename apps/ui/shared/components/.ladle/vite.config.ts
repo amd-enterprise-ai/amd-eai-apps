@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 import { defineConfig } from 'vite';
 import { createRequire } from 'module';
@@ -11,9 +10,12 @@ const require = createRequire(import.meta.url);
 const ladleReactPath = require.resolve('@ladle/react');
 const nextAuthStub = resolve(__dirname, './stubs/next-auth.tsx');
 
+// No React plugin here on purpose: Ladle installs its own only when the config
+// declares none, and its MDX loader can drive that one but not `plugin-react`,
+// whose `transform` is a Vite 6 object hook rather than the plain function the
+// loader looks for. Adding one back breaks every `.stories.mdx`.
 export default defineConfig({
   root: resolve(__dirname, '..'),
-  plugins: [react()],
   resolve: {
     alias: {
       '@': resolve(__dirname, '../'),
@@ -37,6 +39,7 @@ export default defineConfig({
       'next-auth/providers/keycloak': nextAuthStub,
       'next-auth': resolve(__dirname, './stubs/next-auth.ts'),
       'next/router': resolve(__dirname, './stubs/next-router.ts'),
+      'next/navigation': resolve(__dirname, './stubs/next-navigation.ts'),
       'next-i18next': resolve(__dirname, './stubs/next-i18next.ts'),
     },
   },

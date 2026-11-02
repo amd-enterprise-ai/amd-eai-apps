@@ -1,0 +1,21 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+--pythonpath
+.
+
+--outputdir
+results
+
+--loglevel
+INFO
+
+--consolewidth
+120
+
+--reporttitle
+Cluster Environment Check E2E Report
+
+--logtitle
+Cluster Environment Check E2E Log

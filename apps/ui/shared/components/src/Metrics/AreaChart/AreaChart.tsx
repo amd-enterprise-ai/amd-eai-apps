@@ -9,6 +9,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { cn } from '@heroui/react';
 import { IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
+import { useTranslation } from 'next-i18next';
 import React from 'react';
 
 import { useOnWindowResize } from '@amdenterpriseai/hooks';
@@ -519,6 +520,7 @@ interface AreaChartProps extends React.HTMLAttributes<HTMLDivElement> {
 
 const AreaChart = React.forwardRef<HTMLDivElement, AreaChartProps>(
   (props, ref) => {
+    const { t } = useTranslation('sharedComponents');
     const {
       data = [],
       categories = [],
@@ -548,7 +550,7 @@ const AreaChart = React.forwardRef<HTMLDivElement, AreaChartProps>(
       legendPosition = 'right',
       fill = 'solid',
       isLoading = false,
-      loadingText = 'Loading ...',
+      loadingText = t('data.loading'),
       tooltipCallback,
       customTooltip,
       showTooltipOnNull = false,

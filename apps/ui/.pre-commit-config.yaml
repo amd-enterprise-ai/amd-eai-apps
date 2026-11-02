@@ -2,8 +2,14 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Shared UI workspace root. airm/ and aiwb/ have their own orphan configs.
-# This config covers shared/ packages that aren't under an orphan config.
+# Shared UI workspace root. airm/ and aiwb/ have their own configs and are nested projects
+# under this one, so a commit touching only an app would otherwise run the whole-workspace
+# shared format and lint below. The files: regexes — project-relative, hence no apps/ui
+# prefix — keep these hooks to commits that can actually change what they report: the shared
+# packages themselves, plus the files that decide which packages exist, which formatter
+# version runs over them, and what these hooks do at all. A narrower scope would let a
+# membership, toolchain or hook-definition edit shrink these hooks' reach without ever
+# running them to show it.
 
 repos:
   - repo: local
@@ -12,9 +18,11 @@ repos:
         name: Format (shared UI packages)
         entry: pnpm -r --filter './shared/**' run format:fix
         language: system
+        files: ^(shared/|(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.pre-commit-config\.yaml)$)
         pass_filenames: false
       - id: lint-shared
         name: Lint (shared UI packages)
         entry: pnpm -r --filter './shared/**' run lint
         language: system
+        files: ^(shared/|(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.pre-commit-config\.yaml)$)
         pass_filenames: false

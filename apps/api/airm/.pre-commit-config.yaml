@@ -2,8 +2,6 @@
 #
 # SPDX-License-Identifier: MIT
 
-orphan: true
-
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.9
@@ -21,20 +19,3 @@ repos:
         stages: [pre-push]
         verbose: true
         fail_fast: true
-      - id: robot-dryrun
-        name: Robot Framework dry-run validation
-        description: Validates keyword names, arguments, imports, and syntax without executing tests
-        entry: bash -c 'cd ../../.. && tooling/robot_dryrun.sh'
-        language: system
-        pass_filenames: false
-        files: ^specs/.*\.(robot|resource|py|txt|csv)$
-        stages: [pre-push]
-        verbose: true
-      - id: spectral-airm
-        name: AIRM API OpenAPI Spectral
-        description: Lint OpenAPI spec with Spectral
-        entry: bash -c 'cd ../../.. && tooling/spectral/run_spectral.sh apps/api/airm'
-        language: system
-        pass_filenames: false
-        stages: [manual]
-        verbose: true

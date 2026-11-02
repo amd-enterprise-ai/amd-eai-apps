@@ -57,9 +57,11 @@ vi.mock('@/services/app', () => ({
   fetchProjectWorkloadsMetrics: vi.fn(() =>
     Promise.resolve({
       data: mockedData,
-      total: 2,
-      page: 1,
-      pageSize: 10,
+      pagination: {
+        total: 2,
+        page: 1,
+        pageSize: 10,
+      },
     }),
   ),
 }));

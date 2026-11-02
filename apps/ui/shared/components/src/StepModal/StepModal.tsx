@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { cn } from '@heroui/react';
 import {
   ModalPrimitive,
   ModalPrimitiveBody,
@@ -16,11 +15,10 @@ import { forwardRef, useImperativeHandle } from 'react';
 import { useTranslation } from 'next-i18next';
 
 import { StepModalHandle, StepModalStep } from '@amdenterpriseai/types';
-import { CloseButton, ActionButton } from '../Buttons';
+import { ActionButton } from '../Buttons';
 import Stepper from '../Stepper/Stepper';
 
 interface Props {
-  className?: string;
   initialStep: number;
   steps: StepModalStep[];
   allowPrevious?: boolean;
@@ -30,23 +28,12 @@ interface Props {
   isActioning?: boolean;
   resetOnClose?: boolean;
   title?: string;
-  size?:
-    | '2xl'
-    | 'sm'
-    | 'md'
-    | 'lg'
-    | 'xl'
-    | 'full'
-    | 'xs'
-    | '3xl'
-    | '4xl'
-    | '5xl';
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'full' | 'cover';
 }
 
 export const StepModal = forwardRef<StepModalHandle, Props>(
   (
     {
-      className,
       allowPrevious,
       initialStep = 0,
       steps,
@@ -60,7 +47,7 @@ export const StepModal = forwardRef<StepModalHandle, Props>(
     },
     ref,
   ) => {
-    const { t } = useTranslation('common');
+    const { t } = useTranslation('sharedComponents');
     const [currentStep, setCurrentStep] = useState<number>(initialStep || 0);
 
     useImperativeHandle(
@@ -109,75 +96,65 @@ export const StepModal = forwardRef<StepModalHandle, Props>(
       }
     }, [resetOnClose, onCancel]);
 
+    const step = steps[currentStep];
+    const showPrev = currentStep > 0 && allowPrevious && !step?.hidePrev;
+    const showNext = currentStep < steps.length - 1 && !step?.hideNext;
+
+    const defaultFooterRowClass =
+      showPrev && showNext
+        ? 'flex w-full min-w-0 items-center justify-between gap-2'
+        : 'flex w-full min-w-0 items-center justify-end gap-2';
+
     return (
       <ModalPrimitive
         isOpen={isOpen}
         size={size}
         onOpenChange={onOpenChange}
-        classNames={{
-          base: cn('overflow-y-auto overflow-x-hidden', className),
-          header: 'border-b-1 border-default-200 w-full pr-[64px]',
-          body: 'py-6',
-          closeButton: 'top-2.5 right-2.5',
-          footer: 'justify-center w-full',
-        }}
         onClose={handleClose}
-        closeButton={<CloseButton />}
-        hideCloseButton={isActioning}
         isDismissable={
           !isActioning &&
-          (typeof steps[currentStep]?.canCloseByOverlayPress === 'undefined' ||
-            steps[currentStep]?.canCloseByOverlayPress)
+          (typeof step?.canCloseByOverlayPress === 'undefined' ||
+            step?.canCloseByOverlayPress)
         }
       >
-        <ModalPrimitiveContent>
+        <ModalPrimitiveContent hideCloseButton={isActioning}>
           <ModalPrimitiveHeader>
             {title ?? steps?.[currentStep].label}
           </ModalPrimitiveHeader>
-          <ModalPrimitiveBody className="w-full">
+          <ModalPrimitiveBody>
             <div className="mx-auto w-5/6">
               <Stepper
                 step={currentStep}
-                steps={steps.map((step) => ({ label: step.label }))}
+                steps={steps.map((s) => ({ label: s.label }))}
               />
             </div>
             {steps?.[currentStep].content}
           </ModalPrimitiveBody>
           <ModalPrimitiveFooter>
-            {steps?.[currentStep]?.customActions ? (
-              steps?.[currentStep]?.customActions
+            {step?.customActions ? (
+              step.customActions
             ) : (
-              <div className={'flex items-center gap-2'}>
-                {currentStep > 0 &&
-                allowPrevious &&
-                !steps?.[currentStep]?.hidePrev ? (
+              <div className={defaultFooterRowClass}>
+                {showPrev ? (
                   <ActionButton
                     secondary
                     aria-label={
-                      steps?.[currentStep]?.backActionLabel ||
-                      t('actions.previous') ||
-                      ''
+                      step?.backActionLabel || t('actions.previous') || ''
                     }
                     onPress={handlePrev}
                   >
-                    {steps?.[currentStep]?.backActionLabel ||
-                      t('actions.previous')}
+                    {step?.backActionLabel || t('actions.previous')}
                   </ActionButton>
                 ) : null}
-                {currentStep < steps.length - 1 &&
-                !steps?.[currentStep]?.hideNext ? (
+                {showNext ? (
                   <ActionButton
                     primary
                     isLoading={isActioning}
-                    aria-label={
-                      steps?.[currentStep].nextActionLabel ||
-                      t('actions.next') ||
-                      ''
-                    }
+                    aria-label={step.nextActionLabel || t('actions.next') || ''}
                     type="submit"
                     onPress={handleNext}
                   >
-                    {steps?.[currentStep].nextActionLabel || t('actions.next')}
+                    {step.nextActionLabel || t('actions.next')}
                   </ActionButton>
                 ) : null}
               </div>

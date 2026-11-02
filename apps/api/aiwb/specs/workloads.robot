@@ -7,14 +7,14 @@ Documentation       Test scenarios for the AIWB workloads polymorphic read-only 
 ...                 The workloads endpoint is the cross-cutting surface that returns
 ...                 all workload types (inference, fine-tuning, workspaces) for shared
 ...                 read concerns. Mutations and capability-specific filters live on
-...                 their own routers (EAI-6313).
+...                 their own routers.
 Resource            resources/aiwb_workloads.resource
 Resource            resources/airm_projects.resource
 
 
 *** Test Cases ***
 Workloads endpoint serves only cross-cutting read operations
-    [Documentation]    Acceptance scenario from EAI-6313.
+    [Documentation]    Acceptance scenario for the read-only workloads view.
     ...    Polymorphic list/get/logs/metrics remain on the workloads router;
     ...    chat, delete, and the chattable filter must respond from the
     ...    capability endpoints instead (inference / fine-tuning / workspaces).

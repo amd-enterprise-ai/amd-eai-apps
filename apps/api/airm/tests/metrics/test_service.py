@@ -519,6 +519,9 @@ async def test_get_metrics_for_workloads_in_project() -> None:
         )
 
     assert isinstance(result, WorkloadsWithMetrics)
+    assert result.pagination.page == 1
+    assert result.pagination.page_size == 10
+    assert result.pagination.total == 1
     assert len(result.data) == 1
     workload_result = result.data[0]
     assert workload_result.gpu_count == 1
@@ -946,6 +949,9 @@ async def test_get_metrics_for_workloads_in_cluster():
         )
 
     assert isinstance(result, WorkloadsWithMetrics)
+    assert result.pagination.page == 1
+    assert result.pagination.page_size == 10
+    assert result.pagination.total == 1
     assert len(result.data) == 1
     workload_result = result.data[0]
     assert workload_result.gpu_count == 2

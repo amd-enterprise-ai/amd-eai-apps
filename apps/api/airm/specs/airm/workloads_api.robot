@@ -63,7 +63,7 @@ Delete workload via API
     Then workload should be visible via API
 
     When workload is deleted via AIRM API
-    Then workload should not be visible via API
+    Then workload should report a deletion status via API
 
 Submit workload and verify initial status is pending
     [Documentation]    Verify that a newly submitted workload has initial status PENDING
@@ -81,9 +81,11 @@ Submit workload and verify it transitions to running
     [Documentation]    Verify that a workload transitions from PENDING to RUNNING status
     ...    Tests: Workload submission → wait for RUNNING status
     ...    Uses stable manifest with sleep infinity to ensure workload stays running
+    ...
+    ...    Runs in a fresh project so unrelated workloads cannot change the lifecycle being tested.
     [Tags]    workload    api    status    smoke
 
-    Given a ready project with user access exists
+    Given a fresh project with user access exists
     And workload is submitted with manifest via AIRM API
     ...    manifest_path=${CURDIR}/../test_data/manifests/stable-test-deployment.yaml
     ...    display_name=stable-transition-test

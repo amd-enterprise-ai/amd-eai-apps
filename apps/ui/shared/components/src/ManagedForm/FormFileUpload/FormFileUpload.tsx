@@ -16,7 +16,7 @@ import FileUploadFooter from './FileUploadFooter';
 import { createFileList, validateFileInput } from './utils';
 
 interface Props<T extends FieldValues>
-  extends Omit<InputProps, 'form' | 'name' | 'isClearable'> {
+  extends Omit<InputProps, 'form' | 'name'> {
   form: UseFormReturn<T>;
   name: Path<T>;
   accept?: string;
@@ -79,8 +79,8 @@ export const FormFileUpload = <T extends FieldValues>({
   multiple = false,
   ...props
 }: Props<T>): React.ReactElement => {
-  const { t } = useTranslation('common', {
-    keyPrefix: 'sharedComponents.FormFileUpload',
+  const { t } = useTranslation('sharedComponents', {
+    keyPrefix: 'FormFileUpload',
   });
 
   const registration = form.register(name);
@@ -236,18 +236,22 @@ export const FormFileUpload = <T extends FieldValues>({
 
   return (
     <Input
-      labelPlacement="outside"
-      variant="bordered"
       {...props}
       {...registration}
       onChange={handleFileChange}
       ref={fileInputRef}
       name={name}
       classNames={{
-        input: 'sr-only',
-        inputWrapper: 'h-auto h-min-auto p-1 relative',
-        innerWrapper: 'flex-col',
-        label: 'top-5 -translate-y-3',
+        input: 'sr-only flex-none w-0 min-w-0 p-0 border-0',
+        inputWrapper: cn(
+          'h-auto p-1 relative w-full',
+          '[&_[data-slot=input-group-prefix]]:flex-1',
+          '[&_[data-slot=input-group-prefix]]:min-w-0',
+          '[&_[data-slot=input-group-prefix]]:w-full',
+          '[&_[data-slot=input-group-prefix]]:p-0',
+          '[&_[data-slot=input-group-prefix]]:border-0',
+          '[&_[data-slot=input-group-prefix]]:rounded-none',
+        ),
       }}
       className={cn(className, {
         'text-opacity-disabled': props?.isReadOnly,
@@ -260,7 +264,7 @@ export const FormFileUpload = <T extends FieldValues>({
       errorMessage={errorMessage}
       startContent={
         <div
-          className="flex flex-col w-full gap-1"
+          className="flex flex-col w-full min-w-0 gap-1"
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
@@ -270,7 +274,7 @@ export const FormFileUpload = <T extends FieldValues>({
           )}
           {files.length > 0 ? (
             <>
-              <div className="flex flex-col w-full gap-1 ">
+              <div className="flex flex-col w-full min-w-0 gap-1">
                 {files.map((file, index) => (
                   <FileElement
                     key={index}

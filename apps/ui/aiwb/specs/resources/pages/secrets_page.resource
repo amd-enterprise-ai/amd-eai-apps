@@ -102,6 +102,22 @@ Fill Secret Value
     Wait For Elements State    ${textarea}    visible    timeout=10s
     Fill Text    ${textarea}    ${value}
 
+Fill S3 Access Key ID
+    [Documentation]    Fills in S3 Access Key ID field in the Add Secret drawer.
+    [Arguments]    ${access_key_id}
+
+    VAR    ${input}    css=${DRAWER_SELECTOR} input[name="s3AccessKeyId"]
+    Wait For Elements State    ${input}    visible    timeout=10s
+    Fill Text    ${input}    ${access_key_id}
+
+Fill S3 Secret Access Key
+    [Documentation]    Fills in S3 Secret Access Key field in the Add Secret drawer.
+    [Arguments]    ${secret_access_key}
+
+    VAR    ${input}    css=${DRAWER_SELECTOR} input[name="s3SecretAccessKey"]
+    Wait For Elements State    ${input}    visible    timeout=10s
+    Fill Text    ${input}    ${secret_access_key}
+
 Click Submit Secret Button
     [Documentation]    Clicks the "Add secret" submit button in the drawer.
 
@@ -131,6 +147,13 @@ Wait For Confirmation Modal
 
     VAR    ${modal}    css=${CONFIRMATION_MODAL_SELECTOR}
     Wait For Elements State    ${modal}    visible    timeout=10s
+
+Get Confirmation Modal Text
+    [Documentation]    Returns the full text content of the confirmation modal.
+
+    VAR    ${modal}    css=${CONFIRMATION_MODAL_SELECTOR}
+    ${text}=    Get Text    ${modal}
+    RETURN    ${text}
 
 Click Confirm Delete Button
     [Documentation]    Clicks the confirm button in the delete confirmation modal.

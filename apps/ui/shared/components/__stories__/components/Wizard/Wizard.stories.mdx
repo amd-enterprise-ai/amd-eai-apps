@@ -1,0 +1,206 @@
+<>
+  {/* Copyright © Advanced Micro Devices, Inc., or its affiliates.
+
+      SPDX-License-Identifier: MIT */}
+
+</>
+
+import { Meta } from "@ladle/react";
+
+<Meta title="Components/Wizard/Description" />
+
+# Wizard
+
+`Wizard` renders a guided multi-step flow: steps are declared as children and the
+flow ends with a Check step for reviewing everything before submitting.
+
+## Always a fullscreen modal
+
+The wizard owns a fixed HeroUI fullscreen modal, including its backdrop, header,
+scrolling body, footer and close affordances. Its size and modal behavior cannot
+be reconfigured by callers.
+
+```tsx
+{isOpen ? (
+  <Wizard
+    title="Model deployment"
+    onClose={() => setIsOpen(false)}
+    onComplete={save}
+  >
+    {steps}
+  </Wizard>
+) : null}
+```
+
+Mounting the Wizard opens it and starts a fresh navigation session; unmounting
+closes it. The required `onClose` callback drives both the header close button
+and the first step's Cancel button. Escape and backdrop clicks do not dismiss
+the flow, and close controls are unavailable while an action is pending. The
+caller decides whether values outside the Wizard are preserved or reset between
+sessions. See the `Default` story for the complete open/close pattern.
+
+## Values are yours
+
+The wizard owns navigation, not state. It never reads a value or a schema: it
+asks each step whether the user may leave it, and calls back when the flow ends.
+Anything that can answer those two questions works behind it.
+
+### One form, many steps
+
+The usual pairing is `ManagedForm`: submit through the form when the Check step
+completes. Fields and markup are both ordinary children, and `renderSummary`
+reads the caller's own values straight out of the surrounding scope.
+
+```tsx
+<ManagedForm
+  validationSchema={schema}
+  defaultValues={defaultValues}
+  onFormSuccess={save}
+  renderFields={(form) => {
+    const values = { ...defaultValues, ...form.watch() };
+    return (
+      <Wizard
+        onClose={() => setIsOpen(false)}
+        onComplete={() => form.handleSubmit(save)()}
+      >
+        <Wizard.Step
+          id="details"
+          title="Details"
+          canProceed={detailsSchema.safeParse(values).success}
+          renderSummary={() => (
+            <Wizard.SummaryRow label="Name" value={values.name} />
+          )}
+        >
+          <FormInput form={form} name="name" label="Name" />
+        </Wizard.Step>
+        <Wizard.Step id="review" title="Review">
+          <p>Review the details before continuing.</p>
+        </Wizard.Step>
+      </Wizard>
+    );
+  }}
+/>
+```
+
+Pressing Enter inside a step never submits the surrounding form, so a step that
+happens to hold a single input behaves like every other step: the flow only
+advances through Next.
+
+`ManagedForm` unregisters fields that have not mounted yet, so merge watched
+values over the defaults when a later step may start with a valid default.
+
+Gating a step does not replace the final schema: submitting through the form
+still validates everything, including cross-step rules no single step can see.
+
+### No form at all
+
+A flow with a handful of fields does not need a form library. Keep the values in
+`useState`, give `canProceed` a boolean, and validate again in `onComplete` — the
+`WithUseStateAndZod` story runs one Zod schema over plain state, reuses each
+step's slice to gate Next, and finishes with an asynchronous step action.
+
+```tsx
+const [values, setValues] = useState(defaults);
+
+const complete = () => {
+  const result = schema.safeParse(values);
+  if (result.success) {
+    save(result.data);
+  }
+};
+
+<Wizard onClose={() => setIsOpen(false)} onComplete={complete}>
+  <Wizard.Step
+    id="capacity"
+    title="Capacity"
+    canProceed={capacitySchema.safeParse(values).success}
+    renderSummary={() => (
+      <Wizard.SummaryRow label="Replicas" value={values.replicas} />
+    )}
+  >
+    <Input
+      label="Replicas"
+      value={values.replicas}
+      onValueChange={(replicas) =>
+        setValues((current) => ({ ...current, replicas }))
+      }
+    />
+  </Wizard.Step>
+</Wizard>;
+```
+
+## Unlocking Next
+
+`canProceed={false}` disables Next. `onNext` runs before advancing. Handle
+expected failures in the callback and return `false` to keep the user where they
+are; unexpected errors propagate to the caller.
+
+```tsx
+<Wizard.Step id="terms" title="Terms" canProceed={hasAccepted}>
+  <Checkbox onValueChange={setHasAccepted}>I accept</Checkbox>
+</Wizard.Step>
+<Wizard.Step id="deploy" title="Deploy" onNext={() => deploy()}>
+  <p>Deploying takes a few seconds.</p>
+</Wizard.Step>
+```
+
+A disabled Next says that the step is incomplete but not why, so telling the user
+what is wrong stays with the fields themselves — see the `WithUseStateAndZod`
+story, where the same Zod result that gates Next also feeds the input's error
+message.
+
+`isOptional` only labels a step. Validation remains explicit through
+`canProceed`, so presentation cannot silently bypass the final schema.
+
+## Step states
+
+The current step is expanded for editing. Passed steps collapse to their
+`renderSummary` output and offer an Edit action; steps the user has not reached
+are not rendered at all. The step indicator is generated from each child's
+`title` and order, with a final Check step appended for reviewing the completed
+flow.
+
+A collapsed step hides its inputs behind the summary rather than unmounting
+them, because a form drops the value of any field that leaves the DOM. Keep that
+in mind for inputs that render heavy content — they stay mounted for the whole
+flow.
+
+Only `Wizard.Step` children count as steps, so a conditional one can be left out
+with `{condition && <Wizard.Step … />}` and the flow renumbers itself. Extending
+the `useState` flow above, a rollout step is worth asking about only once there
+is more than one replica:
+
+```tsx
+<Wizard onClose={() => setIsOpen(false)} onComplete={complete}>
+  <Wizard.Step id="name" title="Workload" /* … */ />
+  <Wizard.Step id="capacity" title="Capacity" /* … */ />
+  {Number(values.replicas) > 1 && (
+    <Wizard.Step
+      id="rollout"
+      title="Rollout"
+      canProceed={values.rollout !== ""}
+      renderSummary={() => (
+        <Wizard.SummaryRow label="Strategy" value={values.rollout} />
+      )}
+    >
+      <Input
+        label="Rollout strategy"
+        value={values.rollout}
+        onValueChange={(rollout) =>
+          setValues((current) => ({ ...current, rollout }))
+        }
+      />
+    </Wizard.Step>
+  )}
+</Wizard>
+```
+
+The step slots in ahead of Check the moment the condition turns true, and the
+indicator counts four instead of three. Two consequences are worth planning for:
+a gate does not have to come from the schema — here it is a plain comparison —
+and the final schema has to tolerate a value the user was never asked for, since
+a one-replica deployment reaches Check without ever seeing the step.
+
+The current and reached steps are tracked by `id`, so inserting or removing a
+conditional step does not skip another step. A newly inserted step before the
+current position is visited before the flow continues.

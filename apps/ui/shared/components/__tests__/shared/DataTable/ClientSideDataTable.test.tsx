@@ -3,8 +3,25 @@
 // SPDX-License-Identifier: MIT
 
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 import { TFunction } from 'next-i18next';
+
+// v3 Select opens its option list via a react-aria overlay; `userEvent` drives
+// the trigger press, and the option list mounts in a portal. Helper centralises
+// the open-and-pick flow used by the frame-size selector tests.
+const selectFrameSize = async (size: PageFrameSize) => {
+  const user = userEvent.setup();
+  const selectTrigger = document.querySelector(
+    'button[data-slot="select-trigger"]',
+  ) as HTMLElement;
+  await user.click(selectTrigger);
+  const options = await screen.findAllByRole('option');
+  const target = options.find(
+    (option) => option.textContent === size.toString(),
+  );
+  await user.click(target as HTMLElement);
+};
 
 import { PageFrameSize } from '@amdenterpriseai/types';
 
@@ -153,7 +170,7 @@ describe('ClientSideDataTable', () => {
     expect(pagination).toBeFalsy();
   });
 
-  it('should render the correct number of rows per when frame size changed', () => {
+  it('should render the correct number of rows per when frame size changed', async () => {
     const mockData = generateRandomData(30);
 
     act(() => {
@@ -168,30 +185,13 @@ describe('ClientSideDataTable', () => {
       );
     });
 
-    act(() => {
-      const pageFrameSelectWrapper = screen.queryByText(
-        'list.pagination.pageSize.label',
-      )?.nextElementSibling;
-      const selectTrigger = (pageFrameSelectWrapper as Element).querySelector(
-        'button[data-slot="trigger"]',
-      );
-
-      fireEvent.click(selectTrigger!);
-    });
-
-    act(() => {
-      const select = screen.queryAllByRole('option');
-      const mediumPageSize = select.find(
-        (option) => option.textContent === PageFrameSize.MEDIUM.toString(),
-      );
-      fireEvent.click(mediumPageSize!);
-    });
+    await selectFrameSize(PageFrameSize.MEDIUM);
 
     const rows25 = screen.getAllByRole('row');
     expect(rows25).toHaveLength(PageFrameSize.MEDIUM + 1); // +1 for the header row
   });
 
-  it('should render the correct number of rows per when frame size changed that fits all the rows', () => {
+  it('should render the correct number of rows per when frame size changed that fits all the rows', async () => {
     const mockData = generateRandomData(30);
 
     act(() => {
@@ -206,24 +206,7 @@ describe('ClientSideDataTable', () => {
       );
     });
 
-    act(() => {
-      const pageFrameSelectWrapper = screen.queryByText(
-        'list.pagination.pageSize.label',
-      )?.nextElementSibling;
-      const selectTrigger = (pageFrameSelectWrapper as Element).querySelector(
-        'button[data-slot="trigger"]',
-      );
-
-      fireEvent.click(selectTrigger!);
-    });
-
-    act(() => {
-      const select = screen.queryAllByRole('option');
-      const largePageSize = select.find(
-        (option) => option.textContent === PageFrameSize.LARGE.toString(),
-      );
-      fireEvent.click(largePageSize!);
-    });
+    await selectFrameSize(PageFrameSize.LARGE);
 
     const rows100 = screen.getAllByRole('row');
     expect(rows100).toHaveLength(31); // +1 for the header row
@@ -291,26 +274,11 @@ describe('ClientSideDataTable', () => {
     act(() => {
       const paginationButton = screen.getAllByLabelText('pagination item 2');
       fireEvent.click(paginationButton[0]);
-
-      const pageFrameSelectWrapper = screen.queryByText(
-        'list.pagination.pageSize.label',
-      )?.nextElementSibling;
-      const selectTrigger = (pageFrameSelectWrapper as Element).querySelector(
-        'button[data-slot="trigger"]',
-      );
-
-      fireEvent.click(selectTrigger!);
     });
 
-    act(() => {
-      const select = screen.queryAllByRole('option');
-      const mediumPageSize = select.find(
-        (option) => option.textContent === PageFrameSize.MEDIUM.toString(),
-      );
-      fireEvent.click(mediumPageSize!);
-    });
+    await selectFrameSize(PageFrameSize.MEDIUM);
 
-    const rows = await screen.getAllByRole('row');
+    const rows = screen.getAllByRole('row');
     expect(rows).toHaveLength(PageFrameSize.MEDIUM + 1); // +1 for the header row
   });
 
@@ -370,7 +338,7 @@ describe('ClientSideDataTable', () => {
     act(() => {
       const aliceRow = screen.getByText('Bob').closest('tr');
       expect(aliceRow).toBeTruthy();
-      const dropDown = within(aliceRow!).getByLabelText('list.actions.label');
+      const dropDown = within(aliceRow!).getByLabelText('Actions');
       fireEvent.click(dropDown);
     });
 

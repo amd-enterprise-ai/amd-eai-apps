@@ -12,11 +12,7 @@ End-to-end tests for the AI Resource Manager (AIRM) backend service, covering AP
 
 ### Prerequisites
 
-1. **Install development tools**:
-
-   See the **dev-tooling repository** for installation instructions:
-   - **Redflame** (recommended): Complete development environment
-   - **silodev**: Standalone CLI for testing and deployment
+1. **Install [uv](https://docs.astral.sh/uv/) and `kubectl`.**
 
 2. **Configure Kubernetes authentication** in your kubeconfig (`~/.kube/config`):
 
@@ -132,12 +128,11 @@ The `arguments.txt` file contains common Robot Framework settings. You can overr
 # Override log level for debugging
 uv run --project .. robot --argumentfile arguments.txt --loglevel TRACE .
 
-# Set timeout for long-running tests
-uv run --project .. robot --argumentfile arguments.txt --test-timeout 30m .
-
 # Change output directory
 uv run --project .. robot --argumentfile arguments.txt --outputdir /tmp/results .
 ```
+
+Per-test timeout overrides use `Test Timeout` in a suite's `*** Settings ***` table or `[Timeout]` in a test case.
 
 See `arguments.txt` for available options.
 
@@ -147,70 +142,13 @@ After running tests, Robot Framework generates HTML reports in `specs/results/`:
 
 - **`log.html`** - Detailed execution log with expandable keyword tree (open in browser)
 - **`report.html`** - High-level test report with statistics and pass/fail summary
-- **`output.xml`** - Machine-readable results used by extract commands
+- **`output.xml`** - Machine-readable results
 
 #### Browser-Based Analysis
 
 ```bash
 firefox specs/results/log.html
 ```
-
-#### Terminal-Based Analysis (Recommended for Internal Development)
-
-**When silodev is available**, use `silodev services e2e extract` for powerful command-line analysis:
-
-```bash
-# RECOMMENDED: Focus on first failure with full context
-silodev services e2e extract airm --failed --first --max-depth 3
-
-# High-level summary of all tests
-silodev services e2e extract airm --summary
-
-# Show all failed tests with full structure
-silodev services e2e extract airm --failed --max-depth 3
-
-# Show only failed keywords (when you have many failures)
-silodev services e2e extract airm --failed --failed-keywords-only --max-depth 3
-
-# Extract specific test by name
-silodev services e2e extract airm --name "Create project"
-
-# Extract tests from specific suite
-silodev services e2e extract airm --suite "Projects"
-
-# Show only slow operations (>1 second)
-silodev services e2e extract airm --min-duration 1.0
-
-# Filter by log level (hide verbose TRACE/DEBUG)
-silodev services e2e extract airm --failed --log-level WARN
-
-# Get JSON output for programmatic analysis
-silodev services e2e extract airm --failed --output json
-```
-
-**Why use extract commands?**
-
-- Essential for terminal-based workflows
-- Perfect for LLM analysis (focused, text-based output)
-- Powerful filtering and querying capabilities
-- Programmatic access via JSON output
-
-### AI-Assisted Testing with Redflame
-
-**When Redflame is available**, you can use the `/e2e-report` slash command to run E2E tests and get AI-powered analysis with issue categorization and infrastructure analysis:
-
-```bash
-# Run tests with AI-powered reporting (requires Redflame)
-redflame chat --yolo "/e2e-report skip gpu usage"
-
-# The command will:
-# 1. Execute the E2E test suite
-# 2. Analyze test failures with AI
-# 3. Categorize issues (test bugs, infrastructure problems, etc.)
-# 4. Provide actionable suggestions for fixes
-```
-
-The `/e2e-report` command provides comprehensive analysis beyond standard test output, making it easier to diagnose and resolve test failures.
 
 ### Test Tags
 
@@ -527,7 +465,6 @@ Cleanup Created Resources
 - Tests should auto-recover via safe HTTP wrappers
 - Check stuck processes: `ps aux | grep "kubectl port-forward"`
 - Verify cluster connectivity: `kubectl get pods -n airm`
-- See [CLAUDE.md](CLAUDE.md) for detailed troubleshooting
 
 **Resource conflicts:**
 
@@ -544,32 +481,20 @@ Cleanup Created Resources
 ### Debug Commands
 
 ```bash
-# RECOMMENDED: Focus on first failure with full context
-silodev services e2e extract airm --failed --first --max-depth 3
-
 # Run with verbose logging
 uv run --project .. robot --argumentfile arguments.txt --loglevel TRACE .
 
 # Dry run to validate test structure
 uv run --project .. robot --argumentfile arguments.txt --dryrun .
-
-# Extract all failed tests with full structure
-silodev services e2e extract airm --failed --max-depth 3
-
-# Check specific test execution
-silodev services e2e extract airm --name "My Test Name" --log-level DEBUG
 ```
 
 ### Getting Help
 
 - View test results: `specs/results/log.html`
 - Check Robot Framework logs for detailed execution trace
-- Use `silodev services e2e extract` to filter and analyze results
-- See [CLAUDE.md](CLAUDE.md) for AI assistant guidance
 - Refer to [Robot Framework User Guide](https://robotframework.org/robotframework/latest/RobotFrameworkUserGuide.html)
 
 ## Related Documentation
 
-- **[CLAUDE.md](CLAUDE.md)** - AI assistant troubleshooting guide (port forwarding, quota system, common patterns)
 - **[Robot Framework User Guide](https://robotframework.org/robotframework/latest/RobotFrameworkUserGuide.html)** - Official Robot Framework documentation
 - **[RequestsLibrary Documentation](https://marketsquare.github.io/robotframework-requests/doc/RequestsLibrary.html)** - HTTP request library reference

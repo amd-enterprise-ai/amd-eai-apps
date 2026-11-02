@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 import { PageFrameSize } from '@amdenterpriseai/types';
 
@@ -76,25 +77,15 @@ describe('ClientSidePagination', () => {
       );
     });
 
-    const pageFrameSelectWrapper =
-      screen.queryByText('Show')?.nextElementSibling;
-    const selectTrigger = (pageFrameSelectWrapper as Element).querySelector(
-      'button[data-slot="trigger"]',
-    );
+    const user = userEvent.setup();
+    const selectTrigger = screen.getByRole('button', { name: /Show/ });
 
-    if (selectTrigger) {
-      fireEvent.click(selectTrigger);
-    }
+    await user.click(selectTrigger);
 
-    const select = await screen.queryAllByRole('option');
+    const options = await screen.findAllByRole('option');
+    await user.click(options[1]);
 
-    if (select[1]) {
-      fireEvent.click(select[1]);
-    }
-
-    expect(mockOnFrameSizeChange).toHaveBeenCalledWith(
-      PageFrameSize.MEDIUM.toString(),
-    );
+    expect(mockOnFrameSizeChange).toHaveBeenCalledWith(PageFrameSize.MEDIUM);
   });
 
   it('should call onPageChange when page is changed', async () => {

@@ -4,22 +4,85 @@
 
 import { fireEvent, render, screen } from '@testing-library/react';
 
-import { CatalogItem } from '@/types/catalog';
-import { CatalogItemCategory, CatalogItemType } from '@/types/enums/catalog';
+import { WorkspaceCatalogTableItem } from '@/types/workspaces';
 
 import { CatalogItemCard } from '@/components/features/catalog/CatalogItemCard';
 
+const makeWorkload = (
+  status: 'Pending' | 'Running' | 'Failed',
+  id = `${status.toLowerCase()}-workload`,
+) =>
+  ({
+    id,
+    type: 'WORKSPACE',
+    name: 'test-workload',
+    displayName: 'test-workload',
+    createdBy: 'user-1',
+    updatedBy: null,
+    namespace: 'project1',
+    endpoints: {},
+    status,
+    createdAt: '2023-01-01T00:00:00Z',
+    updatedAt: '2023-01-01T00:00:00Z',
+  }) as NonNullable<WorkspaceCatalogTableItem['workloads']>[number];
+
+vi.mock('@amdenterpriseai/components', async (importOriginal) => {
+  const components =
+    await importOriginal<typeof import('@amdenterpriseai/components')>();
+  return {
+    ...components,
+    ActionButton: ({
+      'aria-label': ariaLabel,
+      children,
+      color,
+      isDisabled,
+      onPress,
+    }: any) => (
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        data-color={color}
+        disabled={isDisabled}
+        onClick={onPress}
+      >
+        {children}
+      </button>
+    ),
+    ActionsDropdown: ({ children, actions }: any) => (
+      <div data-testid="nested-dropdown">
+        {children}
+        <div data-testid="dropdown-content">
+          {actions?.map((action: any) => (
+            <button
+              key={action.key}
+              type="button"
+              disabled={action.isDisabled}
+              onClick={() => action.onPress?.()}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    ),
+  };
+});
+
 describe('CatalogItemCard', () => {
-  const mockItem: CatalogItem = {
+  const mockItem: WorkspaceCatalogTableItem = {
     id: 'item-1',
     name: 'Test Catalog Item',
     displayName: 'Test Catalog Item',
     slug: 'test-catalog-item',
     description: 'Short description',
     longDescription: 'Long description',
-    type: CatalogItemType.WORKSPACE,
-    category: CatalogItemCategory.DEVELOPMENT,
+    type: 'WORKSPACE',
+    category: 'development',
     createdAt: '2023-01-01T00:00:00Z',
+    updatedAt: '2023-01-01T00:00:00Z',
+    createdBy: null,
+    updatedBy: null,
+    usageScope: 'user',
     tags: ['tag1', 'tag2'],
     featuredImage: '',
     requiredResources: {
@@ -61,7 +124,6 @@ describe('CatalogItemCard', () => {
         item={mockItem}
         primaryAction={primaryAction}
         secondaryAction={secondaryAction}
-        pendingLabel={'Pending'}
         readyAction={readyAction}
       />,
     );
@@ -78,7 +140,6 @@ describe('CatalogItemCard', () => {
       <CatalogItemCard
         item={mockItem}
         primaryAction={primaryAction}
-        pendingLabel={'Pending'}
         readyAction={readyAction}
       />,
     );
@@ -94,12 +155,29 @@ describe('CatalogItemCard', () => {
         item={mockItem}
         primaryAction={primaryAction}
         secondaryAction={secondaryAction}
-        pendingLabel={'Pending'}
         readyAction={readyAction}
       />,
     );
     fireEvent.click(screen.getByText('Secondary'));
     expect(secondaryAction.onPress).toHaveBeenCalledWith(mockItem);
+  });
+
+  it('uses danger color for both failed workload action buttons', () => {
+    render(
+      <CatalogItemCard
+        item={mockItem}
+        isFailed
+        secondaryAction={secondaryAction}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Secondary' })).toHaveAttribute(
+      'data-color',
+      'danger',
+    );
+    expect(
+      screen.getByRole('button', { name: 'card.actionsMenu' }),
+    ).toHaveAttribute('data-color', 'danger');
   });
 
   it('opens external link when external link button is clicked', () => {
@@ -108,7 +186,6 @@ describe('CatalogItemCard', () => {
       <CatalogItemCard
         item={mockItem}
         primaryAction={primaryAction}
-        pendingLabel={'Pending'}
         readyAction={readyAction}
       />,
     );
@@ -125,7 +202,6 @@ describe('CatalogItemCard', () => {
         item={{ ...mockItem, available: false }}
         primaryAction={primaryAction}
         secondaryAction={secondaryAction}
-        pendingLabel={'Pending'}
         readyAction={readyAction}
       />,
     );
@@ -138,7 +214,6 @@ describe('CatalogItemCard', () => {
       <CatalogItemCard
         item={{ ...mockItem, externalUrl: '' }}
         primaryAction={primaryAction}
-        pendingLabel={'Pending'}
         readyAction={readyAction}
       />,
     );
@@ -147,5 +222,80 @@ describe('CatalogItemCard', () => {
         name: /more information|card\.moreInformation/i,
       }),
     ).not.toBeInTheDocument();
+  });
+
+  describe('deploying status indicator', () => {
+    it('shows deploying status and a disabled launch button', () => {
+      render(
+        <CatalogItemCard
+          item={{ ...mockItem, workloads: [makeWorkload('Pending')] }}
+          isPending
+          primaryAction={primaryAction}
+        />,
+      );
+
+      expect(screen.getByText('status.Deploying')).toBeInTheDocument();
+      const launchButton = screen.getByText('list.actions.launch');
+      expect(launchButton).toBeDisabled();
+      expect(screen.queryByText('Pending...')).not.toBeInTheDocument();
+      expect(screen.queryByText('View')).not.toBeInTheDocument();
+    });
+
+    it.each([
+      {
+        name: 'without a pending workload',
+        workloads: [],
+        props: { isPending: true },
+        showsFailed: false,
+      },
+      {
+        name: 'after deployment',
+        workloads: [makeWorkload('Running')],
+        props: { isPending: true, isDeployed: true },
+        showsFailed: false,
+      },
+      {
+        name: 'after failure',
+        workloads: [makeWorkload('Failed')],
+        props: { isPending: true, isFailed: true },
+        showsFailed: true,
+      },
+    ])(
+      'does not show deploying status $name',
+      ({ workloads, props, showsFailed }) => {
+        render(
+          <CatalogItemCard item={{ ...mockItem, workloads }} {...props} />,
+        );
+
+        expect(screen.queryByText('status.Deploying')).not.toBeInTheDocument();
+        if (showsFailed) {
+          expect(screen.getByText('status.Failed')).toBeInTheDocument();
+        } else {
+          expect(screen.queryByText('status.Failed')).not.toBeInTheDocument();
+        }
+      },
+    );
+  });
+
+  describe('details action', () => {
+    it('opens details for the running workload when multiple workloads exist', () => {
+      const onOpenWorkloadDetails = vi.fn();
+
+      render(
+        <CatalogItemCard
+          item={{
+            ...mockItem,
+            workloads: [makeWorkload('Pending'), makeWorkload('Running')],
+          }}
+          isDeployed
+          readyAction={readyAction}
+          onOpenWorkloadDetails={onOpenWorkloadDetails}
+        />,
+      );
+
+      fireEvent.click(screen.getByText('list.actions.details'));
+
+      expect(onOpenWorkloadDetails).toHaveBeenCalledWith('running-workload');
+    });
   });
 });

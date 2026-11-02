@@ -59,6 +59,7 @@ def test_upload_dataset_success():
     assert data["name"] == "Test Dataset"
     assert data["description"] == "Test Description"
     assert data["type"] == DatasetType.FINETUNING.value
+    assert data["sizeBytes"] == len(test_file_content)
 
 
 @override_dependencies(MINIO_OVERRIDES)
@@ -84,6 +85,7 @@ def test_list_datasets_success():
     assert len(body["data"]) == 2
     assert body["data"][0]["name"] == "Dataset 1"
     assert body["data"][1]["name"] == "Dataset 2"
+    assert body["data"][0]["sizeBytes"] is None
     assert body["pagination"] == {"page": 1, "pageSize": 10, "total": 2}
     # Nested pagination envelope must not leak loose top-level keys.
     assert "total" not in body
@@ -137,6 +139,7 @@ def test_get_dataset_success():
     data = response.json()
     assert data["id"] == str(dataset_id)
     assert data["name"] == "Test Dataset"
+    assert data["sizeBytes"] is None
 
 
 @override_dependencies(MINIO_OVERRIDES)

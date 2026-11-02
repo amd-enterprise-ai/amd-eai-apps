@@ -10,7 +10,7 @@ Documentation       Shared session and request helpers for AIM external endpoint
 ...                 the session-level setting alone does not prevent strict cert
 ...                 validation. Routing every external-endpoint call through these
 ...                 helpers keeps `${VERIFY_SSL}` honored consistently and prevents
-...                 the SSLError regression seen on int-test (EAI-6199, EAI-6259).
+...                 the SSLError regression seen on a test cluster.
 ...
 ...                 New AIM external-endpoint keywords should reuse these helpers
 ...                 instead of calling `Create Session` / `*On Session` directly.
@@ -54,5 +54,19 @@ Post To AIM External Endpoint
     ...    ${expected_status}=any    ${timeout}=${None}
     ${response}=    POST On Session    ${session_name}    ${path}
     ...    json=${json}    headers=${headers}    expected_status=${expected_status}
+    ...    timeout=${timeout}    verify=${VERIFY_SSL}
+    RETURN    ${response}
+
+Post Multipart To AIM External Endpoint
+    [Documentation]    Multipart POST against an AIM external session — used by the audio
+    ...                endpoints (`/v1/audio/transcriptions`, `/v1/audio/translations`),
+    ...                which take a `multipart/form-data` file upload rather than a JSON
+    ...                body. `files` and `data` are forwarded to requests unchanged; the
+    ...                Content-Type boundary is set by requests, so do not pass one in
+    ...                `headers`. Honors `verify=${VERIFY_SSL}` like the JSON variant.
+    [Arguments]    ${session_name}    ${path}    ${files}    ${data}=${None}    ${headers}=${None}
+    ...    ${expected_status}=any    ${timeout}=${None}
+    ${response}=    POST On Session    ${session_name}    ${path}
+    ...    files=${files}    data=${data}    headers=${headers}    expected_status=${expected_status}
     ...    timeout=${timeout}    verify=${VERIFY_SSL}
     RETURN    ${response}

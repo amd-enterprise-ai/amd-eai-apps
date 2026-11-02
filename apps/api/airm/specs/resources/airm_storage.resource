@@ -25,6 +25,11 @@ ${SECOND_STORAGE_ID}         ${None}
 ${TEST_STORAGE_SECRET_ID}    ${None}
 @{CREATED_STORAGE_IDS}       # List to track created storage IDs for cleanup
 ${TEST_VALID_S3_SPEC}            ${None}
+# The object store and bucket the platform provisions for projects. An override must be a bucket
+# URL including the /<bucket> path: the S3 Jobs take the bucket name from that path. For another
+# install, set AIRM_SPECS_S3_BUCKET_URL, or pass --variable AIRM_E2E_S3_BUCKET_URL:<url>. The two
+# names differ deliberately, matching the AIWB pair in aiwb_storages.resource.
+${AIRM_E2E_S3_BUCKET_URL}    %{AIRM_SPECS_S3_BUCKET_URL=http://filer-s3.seaweedfs-instance.svc.cluster.local:80/default-bucket}
 
 
 *** Keywords ***
@@ -36,20 +41,21 @@ ${TEST_VALID_S3_SPEC}            ${None}
 A valid S3 storage spec exists
     [Documentation]    Creates a valid S3 storage specification for testing
     ...    The spec includes bucket URL and credential field names
-    ...    Uses Minio-compatible S3 URL format with cluster-internal service name
+    ...    Points at the bucket the platform already provisions, so the S3 jobs authenticate with
+    ...    the project's own credentials and need no bucket-creation rights. Test objects are kept
+    ...    apart by key prefix, not by bucket.
+    ...    Canonicalize the URL before it enters the spec: it is written verbatim into the S3 Jobs'
+    ...    ConfigMap as BUCKET_URL, which they parse with urlparse, so a schemeless override
+    ...    (e.g. store:80/default-bucket) would otherwise leave them with an empty endpoint.
 
-    ${unique_suffix}=    Generate Random String    8    [LOWER][NUMBERS]
-    VAR    ${bucket_name}    e2e-test-bucket-${unique_suffix}
-
-    # Use cluster-internal Minio service name for pods to access
-    # The headless service provides direct access to Minio pods
+    ${bucket_url}=    Normalize Object Storage Bucket URL    ${AIRM_E2E_S3_BUCKET_URL}
     &{s3_spec}=    Create dictionary
-    ...    bucketUrl=http://default-minio-tenant-hl.minio-tenant-default.svc.cluster.local:9000/${bucket_name}
+    ...    bucketUrl=${bucket_url}
     ...    accessKeyName=ACCESS_KEY_ID
     ...    secretKeyName=SECRET_ACCESS_KEY
 
     Set test variable    ${TEST_VALID_S3_SPEC}    ${s3_spec}
-    Log    Valid S3 storage spec created with bucket: ${bucket_name}    DEBUG
+    Log    Valid S3 storage spec created for bucket URL: ${bucket_url}    DEBUG
 
 A secret for storage credentials exists
     [Documentation]    Creates a secret to be used for storage credentials
@@ -587,7 +593,7 @@ Test data "${data}" is written to S3 bucket
     ...    Requires storage to be assigned to project (ConfigMap exists)
     ...    For local development, creates ConfigMap and Secret manually since Agent doesn't run
 
-    # Generate random suffix for unique job names
+    # Generate random suffix for unique job names and a unique S3 key prefix
     ${random_suffix}=    Generate Random Suffix
 
     # Get storage details to extract ConfigMap and secret info
@@ -615,8 +621,33 @@ Test data "${data}" is written to S3 bucket
     ${secret_json}=    Set Variable    ${secret_response.json()}
     ${external_secret_name}=    Get from dictionary    ${secret_json}    name
 
-    # For local development, manually create ConfigMap and Secret
-    # In a real cluster, these would be created by the Agent
+    # Bound cleanup to the key prefix this test owns. The unique suffix also keeps the writer Job
+    # name collision-free when tests run concurrently in the same namespace.
+    ${test_prefix}=    Set Variable    e2e-test-storage-${random_suffix}/
+    ${test_key}=    Set Variable    ${test_prefix}${data}
+
+    # Register cleanup before creating anything. If setup or a later assertion fails, teardown
+    # still removes any partial local resources and any object the writer managed to create.
+    @{local_resources}=    Create List
+    &{cleanup_context}=    Create Dictionary
+    ...    namespace=${TEST_PROJECT}[name]
+    ...    config_map_name=${config_map_name}
+    ...    secret_name=${external_secret_name}
+    ...    access_key_name=${access_key_name}
+    ...    secret_key_name=${secret_key_name}
+    ...    bucket_url=${bucket_url}
+    ...    test_data_prefix=${test_prefix}
+    ...    local_resources=${local_resources}
+    ...    write_started=${False}
+    Set Test Variable    ${TEST_S3_CLEANUP_CONTEXT}    ${cleanup_context}
+    Set Test Variable    ${TEST_S3_KEY}    ${test_key}
+    Register S3 Local Resources For Cleanup
+    ...    ${TEST_PROJECT}[name]
+    ...    ${config_map_name}
+    ...    ${external_secret_name}
+
+    # For local development, manually create ConfigMap and Secret. In a real cluster, these
+    # would be created by the Agent.
     Create Storage ConfigMap For Local Testing
     ...    ${TEST_PROJECT}[name]
     ...    ${config_map_name}
@@ -630,40 +661,34 @@ Test data "${data}" is written to S3 bucket
     ...    ${external_secret_name}
     ...    ${access_key_name}
     ...    ${secret_key_name}
+    ...    ${bucket_url}
 
-    # Generate unique S3 object key with e2e-test prefix
-    ${timestamp}=    Evaluate    int(__import__('time').time())
-    ${test_key}=    Set Variable    e2e-test-storage-${timestamp}/${data}
+    # Mark the write as started immediately before apply: from this point, teardown must attempt
+    # object cleanup even when Job submission or a later assertion fails.
+    Set To Dictionary    ${cleanup_context}    write_started=${True}
+    ${job_name}=    Set Variable    s3-writer-test-${random_suffix}
+    TRY
+        ${job_name}=    Submit S3 Writer Job
+        ...    ${TEST_PROJECT}[name]
+        ...    ${config_map_name}
+        ...    ${external_secret_name}
+        ...    ${access_key_name}
+        ...    ${secret_key_name}
+        ...    ${test_key}
+        ...    ${data}
+        ...    ${random_suffix}
 
-    # Submit S3 writer job
-    ${job_name}=    Submit S3 Writer Job
-    ...    ${TEST_PROJECT}[name]
-    ...    ${config_map_name}
-    ...    ${external_secret_name}
-    ...    ${access_key_name}
-    ...    ${secret_key_name}
-    ...    ${test_key}
-    ...    ${data}
-    ...    ${random_suffix}
+        Wait For Job Completion    ${job_name}    ${TEST_PROJECT}[name]    timeout=2 min
+        Verify Job Succeeded    ${job_name}    ${TEST_PROJECT}[name]
+        ${logs}=    Get Job Logs    ${job_name}    ${TEST_PROJECT}[name]
+    FINALLY
+        # Stop a timed-out writer before teardown deletes its objects. Otherwise it can write
+        # after cleanup and recreate the leak this teardown is meant to prevent.
+        Delete Job    ${job_name}    ${TEST_PROJECT}[name]
+    END
 
-    # Wait for job to complete
-    Wait For Job Completion    ${job_name}    ${TEST_PROJECT}[name]    timeout=2 min
-
-    # Verify job succeeded
-    Verify Job Succeeded    ${job_name}    ${TEST_PROJECT}[name]
-
-    # Get and log the job output
-    ${logs}=    Get Job Logs    ${job_name}    ${TEST_PROJECT}[name]
-
-    # Clean up the job
-    Delete Job    ${job_name}    ${TEST_PROJECT}[name]
-
-    # Clean up ConfigMap and Secret for local testing
-    Delete Storage Resources For Local Testing    ${TEST_PROJECT}[name]    ${config_map_name}    ${external_secret_name}
-
-    # Store the test key for later verification
-    Set Test Variable    ${TEST_S3_KEY}    ${test_key}
-
+    # Teardown retains enough metadata to recreate these access resources if deleting a storage
+    # makes the Agent remove them first.
     Log    Successfully wrote test data '${data}' to S3 at key: ${test_key}    INFO
 
 S3 bucket data should still exist
@@ -695,6 +720,7 @@ S3 bucket data should still exist
     ...    expected_status=200
 
     ${new_storage_id}=    Get from dictionary    ${create_response.json()}    id
+    Append To List    ${CREATED_STORAGE_IDS}    ${new_storage_id}
 
     # Wait for storage to sync
     Wait until keyword succeeds    1 min    5 sec
@@ -717,6 +743,10 @@ S3 bucket data should still exist
     ${external_secret_name}=    Get from dictionary    ${secret_json}    name
 
     # For local development, manually create ConfigMap and Secret
+    Register S3 Local Resources For Cleanup
+    ...    ${TEST_PROJECT}[name]
+    ...    ${config_map_name}
+    ...    ${external_secret_name}
     Create Storage ConfigMap For Local Testing
     ...    ${TEST_PROJECT}[name]
     ...    ${config_map_name}
@@ -730,6 +760,7 @@ S3 bucket data should still exist
     ...    ${external_secret_name}
     ...    ${access_key_name}
     ...    ${secret_key_name}
+    ...    ${bucket_url}
 
     # Submit S3 reader job
     ${job_name}=    Submit S3 Reader Job
@@ -751,10 +782,9 @@ S3 bucket data should still exist
     # Get and log the job output
     ${logs}=    Get Job Logs    ${job_name}    ${TEST_PROJECT}[name]
 
-    # Clean up
+    # Clean up the reader Job. Keep the verification storage until Test teardown so its access
+    # resources remain available; the existing storage cleanup step deletes the API resource.
     Delete Job    ${job_name}    ${TEST_PROJECT}[name]
-    Delete Storage Resources For Local Testing    ${TEST_PROJECT}[name]    ${config_map_name}    ${external_secret_name}
-    Delete storage    ${new_storage_id}    expected_status=204
 
     Log    ✓ Verified S3 data persists after storage deletion    INFO
 
@@ -825,6 +855,10 @@ New storage can access data from previous storage "${expected_data}"
 
     # For local development, manually create ConfigMap and Secret
     ${bucket_url}=    Get from dictionary    ${TEST_VALID_S3_SPEC}    bucketUrl
+    Register S3 Local Resources For Cleanup
+    ...    ${TEST_PROJECT}[name]
+    ...    ${config_map_name}
+    ...    ${external_secret_name}
     Create Storage ConfigMap For Local Testing
     ...    ${TEST_PROJECT}[name]
     ...    ${config_map_name}
@@ -838,6 +872,7 @@ New storage can access data from previous storage "${expected_data}"
     ...    ${external_secret_name}
     ...    ${access_key_name}
     ...    ${secret_key_name}
+    ...    ${bucket_url}
 
     # Submit S3 reader job using the new storage's ConfigMap
     ${job_name}=    Submit S3 Reader Job
@@ -859,8 +894,100 @@ New storage can access data from previous storage "${expected_data}"
     # Get and log the job output
     ${logs}=    Get Job Logs    ${job_name}    ${TEST_PROJECT}[name]
 
-    # Clean up
+    # Clean up the reader Job. Object cleanup and local credential teardown run in Test teardown
+    # so they also happen when any assertion above fails.
     Delete Job    ${job_name}    ${TEST_PROJECT}[name]
-    Delete Storage Resources For Local Testing    ${TEST_PROJECT}[name]    ${config_map_name}    ${external_secret_name}
 
     Log    ✓ Verified new storage can access data from previous storage    INFO
+
+Register S3 Local Resources For Cleanup
+    [Documentation]    Record a temporary ConfigMap and Secret for deletion after S3 cleanup.
+    [Arguments]    ${namespace}    ${config_map_name}    ${secret_name}
+
+    ${cleanup_context}=    Get Variable Value    ${TEST_S3_CLEANUP_CONTEXT}    ${None}
+    IF    $cleanup_context is None    RETURN
+
+    &{local_resource}=    Create Dictionary
+    ...    namespace=${namespace}
+    ...    config_map_name=${config_map_name}
+    ...    secret_name=${secret_name}
+    Append To List    ${cleanup_context}[local_resources]    ${local_resource}
+
+Ensure S3 Cleanup Access Resources Exist
+    [Documentation]    Recreate cleanup access resources only when the Agent removed them.
+    [Arguments]    ${cleanup_context}
+
+    ${config_result}=    Run Process
+    ...    kubectl    get    configmap    ${cleanup_context}[config_map_name]
+    ...    -n    ${cleanup_context}[namespace]    -o    name
+    IF    ${config_result.rc} != 0
+        ${config_missing}=    Evaluate    'not found' in $config_result.stderr.lower()
+        IF    not ${config_missing}
+            Fail    Could not inspect cleanup ConfigMap: ${config_result.stderr}
+        END
+        Create Storage ConfigMap For Local Testing
+        ...    ${cleanup_context}[namespace]
+        ...    ${cleanup_context}[config_map_name]
+        ...    ${cleanup_context}[bucket_url]
+        ...    ${cleanup_context}[access_key_name]
+        ...    ${cleanup_context}[secret_key_name]
+        ...    ${cleanup_context}[secret_name]
+    END
+
+    ${secret_result}=    Run Process
+    ...    kubectl    get    secret    ${cleanup_context}[secret_name]
+    ...    -n    ${cleanup_context}[namespace]    -o    name
+    IF    ${secret_result.rc} != 0
+        ${secret_missing}=    Evaluate    'not found' in $secret_result.stderr.lower()
+        IF    not ${secret_missing}
+            Fail    Could not inspect cleanup Secret: ${secret_result.stderr}
+        END
+        Create ExternalSecret For Local Testing
+        ...    ${cleanup_context}[namespace]
+        ...    ${cleanup_context}[secret_name]
+        ...    ${cleanup_context}[access_key_name]
+        ...    ${cleanup_context}[secret_key_name]
+        ...    ${cleanup_context}[bucket_url]
+    END
+
+Clean Up S3 Test Objects
+    [Documentation]    Best-effort teardown for direct-S3 test objects and local credentials.
+    ...
+    ...    Runs before API resource teardown, on both passing and failing test paths. Dedicated
+    ...    e2e-test-bucket-* buckets are removed after their objects; platform-owned buckets are
+    ...    never deleted.
+
+    ${cleanup_context}=    Get Variable Value    ${TEST_S3_CLEANUP_CONTEXT}    ${None}
+    IF    $cleanup_context is None    RETURN
+
+    IF    ${cleanup_context}[write_started]
+        TRY
+            # Storage deletion may make the Agent remove the original access resources before
+            # teardown. Recreate only what is genuinely absent: applying over live resources can
+            # overwrite controller-managed credentials on the normal passing path.
+            Ensure S3 Cleanup Access Resources Exist    ${cleanup_context}
+
+            Remove S3 Test Objects
+            ...    ${cleanup_context}[namespace]
+            ...    ${cleanup_context}[config_map_name]
+            ...    ${cleanup_context}[secret_name]
+            ...    ${cleanup_context}[access_key_name]
+            ...    ${cleanup_context}[secret_key_name]
+            ...    ${cleanup_context}[test_data_prefix]
+        EXCEPT    AS    ${error}
+            Log    S3 test-object teardown failed: ${error}    WARN
+        END
+    END
+
+    FOR    ${resource}    IN    @{cleanup_context}[local_resources]
+        TRY
+            Delete Storage Resources For Local Testing
+            ...    ${resource}[namespace]
+            ...    ${resource}[config_map_name]
+            ...    ${resource}[secret_name]
+        EXCEPT    AS    ${error}
+            Log    Local S3 test-resource teardown failed: ${error}    WARN
+        END
+    END
+
+    Set Test Variable    ${TEST_S3_CLEANUP_CONTEXT}    ${None}

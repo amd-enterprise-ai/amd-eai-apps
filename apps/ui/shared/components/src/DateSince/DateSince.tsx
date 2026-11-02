@@ -53,7 +53,10 @@ export const DateSince = ({ date, className }: DateSinceProps) => {
 
   return (
     <Tooltip content={absFormatted} placement="top" isDisabled={days > 1}>
-      <span className={className}>{displayText}</span>
+      {/* biome-ignore lint/a11y/useSemanticElements: the element reveals the absolute date rather than performing an action. */}
+      <span className={className} role="button" tabIndex={0}>
+        {displayText}
+      </span>
     </Tooltip>
   );
 };

@@ -36,39 +36,43 @@ describe('FilterDropdown Component', () => {
     items: mockItems,
   };
 
+  const getTrigger = () => screen.getByRole('button', { name: 'Test Filter' });
+
   it('renders correctly with default props', () => {
     render(<FilterDropdown {...defaultProps} />);
-    const triggerButton = screen.getByRole('button', { name: 'Test Filter' });
-    expect(triggerButton).toBeInTheDocument();
-    expect(triggerButton).toHaveTextContent('Test Filter');
+    const trigger = getTrigger();
+    expect(trigger).toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByDisplayValue('Test Filter')).toBeInTheDocument();
   });
 
   it('reflects external selection in the dropdown menu', async () => {
+    const user = userEvent.setup();
     render(<FilterDropdown {...defaultProps} selectedKeys={['item1']} />);
-    const triggerButton = screen.getByRole('button', { name: 'Test Filter' });
-    await fireEvent.click(triggerButton);
+    const triggerButton = getTrigger();
+    await user.click(triggerButton);
 
-    const item1 = await screen.findByRole('menuitemcheckbox', {
+    const item1 = await screen.findByRole('option', {
       name: 'Item One',
     });
-    expect(item1).toHaveAttribute('aria-checked', 'true');
+    expect(item1).toHaveAttribute('aria-selected', 'true');
   });
 
   it('displays multiple selected items in the dropdown menu', async () => {
     render(
       <FilterDropdown {...defaultProps} selectedKeys={['item1', 'item2']} />,
     );
-    const triggerButton = screen.getByRole('button', { name: 'Test Filter' });
+    const triggerButton = getTrigger();
     await fireEvent.click(triggerButton);
 
-    const item1 = await screen.findByRole('menuitemcheckbox', {
+    const item1 = await screen.findByRole('option', {
       name: 'Item One',
     });
-    const item2 = await screen.findByRole('menuitemcheckbox', {
+    const item2 = await screen.findByRole('option', {
       name: 'Item Two',
     });
-    expect(item1).toHaveAttribute('aria-checked', 'true');
-    expect(item2).toHaveAttribute('aria-checked', 'true');
+    expect(item1).toHaveAttribute('aria-selected', 'true');
+    expect(item2).toHaveAttribute('aria-selected', 'true');
   });
 
   it('selects all items by default when no selection is provided', async () => {
@@ -79,35 +83,32 @@ describe('FilterDropdown Component', () => {
       screen.queryByRole('button', { name: 'Reset filter' }),
     ).not.toBeInTheDocument();
 
-    const triggerButton = screen.getByRole('button', { name: 'Test Filter' });
+    const triggerButton = getTrigger();
     await fireEvent.click(triggerButton);
 
-    const menu = await screen.findByRole('menu');
-    const selectedItems = menu.querySelectorAll('[aria-checked="true"]');
+    const menu = await screen.findByRole('listbox');
+    const selectedItems = menu.querySelectorAll('[aria-selected="true"]');
     expect(selectedItems.length).toBe(3);
   });
 
   it('selects no items when defaultSelectedKeys is an empty array', async () => {
     render(<FilterDropdown {...defaultProps} defaultSelectedKeys={[]} />);
-    const triggerButton = screen.getByRole('button', { name: 'Test Filter' });
+    const triggerButton = getTrigger();
     await fireEvent.click(triggerButton);
 
-    const menu = await screen.findByRole('menu');
-    const selectedItems = menu.querySelectorAll('[aria-checked="true"]');
+    const menu = await screen.findByRole('listbox');
+    const selectedItems = menu.querySelectorAll('[aria-selected="true"]');
     expect(selectedItems.length).toBe(0);
   });
 
   it('shows reset button and active state after user interaction', async () => {
     render(<FilterDropdown {...defaultProps} />);
-    const triggerButton = screen.getByRole('button', { name: 'Test Filter' });
-    act(() => {
-      triggerButton.focus();
-    });
-    await userEvent.keyboard('[Space]');
-    await screen.findByRole('menuitemcheckbox', { name: 'Item One' });
+    const triggerButton = getTrigger();
+    await fireEvent.click(triggerButton);
+    await screen.findByRole('option', { name: 'Item One' });
     await userEvent.keyboard('[ArrowDown]');
     await userEvent.keyboard('[Space]');
-    await userEvent.keyboard('[Escape]');
+    await fireEvent.click(triggerButton);
 
     await waitFor(() => {
       const badge = screen.getByText('1');
@@ -128,10 +129,10 @@ describe('FilterDropdown Component', () => {
         onSelectionChange={onSelectionChangeMock}
       />,
     );
-    const triggerButton = screen.getByRole('button', { name: 'Test Filter' });
+    const triggerButton = getTrigger();
     triggerButton.focus();
     await userEvent.keyboard('[Space]');
-    await screen.findByRole('menuitemcheckbox', { name: 'Item One' });
+    await screen.findByRole('option', { name: 'Item One' });
     await userEvent.keyboard('[ArrowDown]');
     await userEvent.keyboard('[Space]');
 
@@ -149,7 +150,7 @@ describe('FilterDropdown Component', () => {
 
   it('renders all provided items', async () => {
     render(<FilterDropdown {...defaultProps} />);
-    const triggerButton = screen.getByRole('button', { name: 'Test Filter' });
+    const triggerButton = getTrigger();
     await fireEvent.click(triggerButton);
 
     for (const item of mockItems) {
@@ -160,79 +161,68 @@ describe('FilterDropdown Component', () => {
 
   it('applies showDivider property to dropdown items', async () => {
     render(<FilterDropdown {...defaultProps} />);
-    const triggerButton = screen.getByRole('button', { name: 'Test Filter' });
+    const triggerButton = getTrigger();
     await fireEvent.click(triggerButton);
 
-    const itemWithDivider = (await screen.findByText('Item Three')).closest(
-      '[role="menuitemcheckbox"]',
-    );
-    expect(itemWithDivider).toHaveClass('mb-1.5');
-
-    const itemWithoutDivider = (await screen.findByText('Item One')).closest(
-      '[role="menuitemcheckbox"]',
-    );
-    expect(itemWithoutDivider).not.toHaveClass('mb-1.5');
+    await screen.findByRole('listbox');
+    expect(screen.getAllByRole('separator')).toHaveLength(1);
   });
 
   it('supports external control via defaultSelectedKeys', async () => {
     render(
       <FilterDropdown {...defaultProps} defaultSelectedKeys={['item2']} />,
     );
-    const triggerButton = screen.getByRole('button', { name: 'Test Filter' });
+    const triggerButton = getTrigger();
     await fireEvent.click(triggerButton);
 
-    const item2 = await screen.findByRole('menuitemcheckbox', {
+    const item2 = await screen.findByRole('option', {
       name: 'Item Two',
     });
-    expect(item2).toHaveAttribute('aria-checked', 'true');
+    expect(item2).toHaveAttribute('aria-selected', 'true');
 
-    const item1 = await screen.findByRole('menuitemcheckbox', {
+    const item1 = await screen.findByRole('option', {
       name: 'Item One',
     });
-    expect(item1).toHaveAttribute('aria-checked', 'false');
+    expect(item1).toHaveAttribute('aria-selected', 'false');
   });
 
-  it('handles keyboard interactions - Space to open and Escape to close dropdown', async () => {
+  it('handles keyboard interactions - open and close dropdown', async () => {
     render(<FilterDropdown {...defaultProps} />);
-    const triggerButton = screen.getByRole('button', { name: 'Test Filter' });
+    const triggerButton = getTrigger();
 
-    triggerButton.focus();
-    await userEvent.keyboard('[Space]');
+    await fireEvent.click(triggerButton);
 
-    const dropdownMenu = screen.getByRole('menu');
-    expect(dropdownMenu).toBeInTheDocument();
+    const listbox = screen.getByRole('listbox');
+    expect(listbox).toBeInTheDocument();
 
-    await userEvent.keyboard('[Escape]');
+    await fireEvent.click(triggerButton);
 
     await waitFor(() => {
-      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      expect(screen.queryByRole('option')).not.toBeInTheDocument();
     });
   });
 
-  it('opens dropdown with keyboard, selects second item, then closes and clear filter', async () => {
+  it('opens dropdown, selects second item, then closes and clear filter', async () => {
     render(<FilterDropdown {...defaultProps} />);
-    const triggerButton = screen.getByRole('button', { name: 'Test Filter' });
+    const triggerButton = getTrigger();
 
-    act(() => {
-      triggerButton.focus();
-    });
-    await userEvent.keyboard('[Space]');
+    await fireEvent.click(triggerButton);
 
-    const dropdownMenu = screen.getByRole('menu');
-    expect(dropdownMenu).toBeInTheDocument();
+    const listbox = screen.getByRole('listbox');
+    expect(listbox).toBeInTheDocument();
 
+    await screen.findByRole('option', { name: 'Item One' });
     await userEvent.keyboard('[ArrowDown]');
     await userEvent.keyboard('[Space]');
 
-    await userEvent.keyboard('[Escape]');
-
     await waitFor(() => {
-      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      expect(screen.getByText('1')).toBeInTheDocument();
     });
 
+    await fireEvent.click(triggerButton);
+
     await waitFor(() => {
-      const badge = screen.getByText('1');
-      expect(badge).toBeInTheDocument();
+      expect(screen.queryByRole('option')).not.toBeInTheDocument();
     });
 
     act(() => {
@@ -251,39 +241,111 @@ describe('FilterDropdown Component', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('keyboard interaction: select and deselect items returns to default all-selected state', async () => {
+  it('clears active filter state after reset', async () => {
+    const user = userEvent.setup();
     render(<FilterDropdown {...defaultProps} />);
-    const triggerButton = screen.getByRole('button', { name: 'Test Filter' });
+    const triggerButton = getTrigger();
 
-    act(() => {
-      triggerButton.focus();
-    });
-    await userEvent.keyboard('[Space]');
-
-    const dropdownMenu = screen.getByRole('menu');
-    expect(dropdownMenu).toBeInTheDocument();
-
-    await userEvent.keyboard('[Space]');
-    await userEvent.keyboard('[ArrowDown]');
-    await userEvent.keyboard('[Space]');
-    await userEvent.keyboard('[Space]');
-    await userEvent.keyboard('[ArrowUp]');
-    await userEvent.keyboard('[Space]');
-
-    await userEvent.keyboard('[Escape]');
+    await user.click(triggerButton);
+    await user.click(await screen.findByRole('option', { name: 'Item Two' }));
 
     await waitFor(() => {
-      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('actions.clear.title')).toBeInTheDocument();
     });
 
-    expect(screen.queryByRole('badge')).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Reset filter' }),
-    ).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
 
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    });
+
+    await user.click(screen.getByLabelText('actions.clear.title'));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByLabelText('actions.clear.title'),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('closes the dropdown when Escape is pressed', async () => {
+    render(<FilterDropdown {...defaultProps} />);
+    const triggerButton = getTrigger();
     await fireEvent.click(triggerButton);
-    const menu = await screen.findByRole('menu');
-    const selectedItems = menu.querySelectorAll('[aria-checked="true"]');
-    expect(selectedItems.length).toBe(3);
+    const listbox = await screen.findByRole('listbox');
+    expect(listbox).toBeInTheDocument();
+
+    act(() => {
+      listbox.focus();
+    });
+    await userEvent.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    });
+  });
+
+  it('closes on Escape even when a filter option is selected', async () => {
+    // The underlying RAC Listbox defaults to escapeKeyBehavior="clearSelection",
+    // which swallows the first Escape to clear the selection instead of letting
+    // the popover dismiss. The filter opts out so Escape always closes — even
+    // when a selection is present.
+    const user = userEvent.setup();
+    render(<FilterDropdown {...defaultProps} selectedKeys={['item1']} />);
+    const triggerButton = getTrigger();
+    await user.click(triggerButton);
+
+    const selectedOption = await screen.findByRole('option', {
+      name: 'Item One',
+    });
+    expect(selectedOption).toHaveAttribute('aria-selected', 'true');
+
+    const listbox = screen.getByRole('listbox');
+    act(() => {
+      listbox.focus();
+    });
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    });
+  });
+
+  it('stays interactive after dismissal — dropdown can be reopened', async () => {
+    const user = userEvent.setup();
+    render(<FilterDropdown {...defaultProps} />);
+    const triggerButton = getTrigger();
+
+    await user.click(triggerButton);
+    const listbox = await screen.findByRole('listbox');
+    expect(listbox).toBeInTheDocument();
+
+    act(() => {
+      listbox.focus();
+    });
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    });
+
+    await user.click(triggerButton);
+    expect(await screen.findByRole('listbox')).toBeInTheDocument();
+  });
+
+  it('applies muted styling to item descriptions when shown', async () => {
+    const user = userEvent.setup();
+    render(<FilterDropdown {...defaultProps} showDescription />);
+    await user.click(getTrigger());
+    await screen.findByRole('listbox');
+    const description = await screen.findByText('First item description');
+    expect(description.closest('.text-muted')).not.toBeNull();
+  });
+
+  it('applies reduced opacity to selection indicators before user interaction', async () => {
+    const user = userEvent.setup();
+    render(<FilterDropdown {...defaultProps} />);
+    await user.click(getTrigger());
+    await screen.findByRole('listbox');
+    expect(document.querySelector('.opacity-30')).not.toBeNull();
   });
 });

@@ -28,10 +28,24 @@ PROJECT_ACCESS_RESPONSES: dict[int | str, dict] = {
     404: {"description": "Project or namespace not found."},
 }
 
-# For endpoints that require cluster-auth to be enabled (api-keys router).
-CLUSTER_AUTH_RESPONSES: dict[int | str, dict] = {
+
+EXTERNAL_SERVICE_RESPONSES: dict[int | str, dict] = {
+    502: {
+        "description": (
+            "The cluster could not be reached, or refused the request for a reason it did not attribute to the request."
+        )
+    },
+}
+
+# Raised (as UnhealthyException) when a platform dependency is unfit for the operation through no
+# fault of the caller. Distinct from the 4xx codes, which all mean "change the request and retry":
+# no change to this request can make it succeed until the install is fixed.
+UNHEALTHY_PLATFORM_RESPONSES: dict[int | str, dict] = {
     503: {
-        "description": "Cluster-auth is disabled or unavailable; API key operations require CLUSTER_AUTH_ENABLED=true."
+        "description": (
+            "The install is not configured to serve this operation. Retrying the same request, or any variant "
+            "of it, cannot help; an administrator has to correct the configuration first."
+        )
     },
 }
 

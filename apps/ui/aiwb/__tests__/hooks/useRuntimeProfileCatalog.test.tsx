@@ -49,9 +49,12 @@ describe('useRuntimeProfileCatalog', () => {
     vi.mocked(getClusterAccelerators).mockResolvedValue({
       data: [
         {
+          acceleratorType: 'gpu',
+          acceleratorVendor: 'amd',
           deviceId: '74a1',
           productName: 'AMD Instinct MI300X',
           allocatableCount: 4,
+          acceleratorModel: 'MI300X',
         },
       ],
     });
@@ -120,6 +123,7 @@ describe('useRuntimeProfileCatalog', () => {
       precisions: ['fp16'],
       acceleratorCounts: [1, 2, 4, 8],
       optimizationClasses: ['general'],
+      profilesAvailable: false,
     });
     const { result } = renderHook(() => useRuntimeProfileCatalog('proj-a'), {
       wrapper: wrapper(client),

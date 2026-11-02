@@ -62,6 +62,75 @@ Delete Custom Model
     Log    Delete custom model response status: ${response.status_code}    DEBUG
     RETURN    ${response}
 
+Custom Model Profiles List Endpoint
+    [Documentation]    Return the profiles list endpoint URL for a custom model.
+    ...    Pattern: /projects/{project}/models/{model}/profiles
+    [Arguments]    ${project}    ${model}
+    ${endpoint}=    Service API Endpoint    aiwb    endpoint=projects/${project}/models/${model}/profiles
+    RETURN    ${endpoint}
+
+List Custom Model Profiles
+    [Documentation]    GET the list of profiles (Default plus named) for a custom model.
+    ...    Pattern: GET /projects/{project}/models/{model}/profiles
+    [Arguments]    ${project}    ${model}    ${expected_status}=any
+    Create api session    aiwb
+    ${endpoint}=    Custom Model Profiles List Endpoint    ${project}    ${model}
+    Log    GET ${endpoint}    DEBUG
+    ${response}=    Safe Get Request    ${endpoint}    expected_status=${expected_status}
+    Log    List custom model profiles response status: ${response.status_code}    DEBUG
+    RETURN    ${response}
+
+Create Custom Model Profile
+    [Documentation]    POST a create-profile request for a custom model.
+    ...    Pattern: POST /projects/{project}/models/{model}/profiles
+    [Arguments]    ${project}    ${model}    ${body}    ${expected_status}=any
+    Create api session    aiwb
+    ${endpoint}=    Custom Model Profiles List Endpoint    ${project}    ${model}
+    Log    POST ${endpoint} body=${body}    DEBUG
+    ${response}=    Safe Post Request    ${endpoint}    json=${body}    expected_status=${expected_status}
+    Log    Create custom model profile response status: ${response.status_code}    DEBUG
+    RETURN    ${response}
+
+Custom Model Profile Detail Endpoint
+    [Documentation]    Return the profile detail endpoint URL for a custom model.
+    ...    Pattern: /projects/{project}/models/{model}/profiles/{profile}
+    [Arguments]    ${project}    ${model}    ${profile}
+    ${endpoint}=    Service API Endpoint    aiwb    endpoint=projects/${project}/models/${model}/profiles/${profile}
+    RETURN    ${endpoint}
+
+Get Custom Model Profile
+    [Documentation]    GET a single profile by AIMProfileSet resource name, or the literal 'default'.
+    ...    Pattern: GET /projects/{project}/models/{model}/profiles/{profile}
+    [Arguments]    ${project}    ${model}    ${profile}    ${expected_status}=any
+    Create api session    aiwb
+    ${endpoint}=    Custom Model Profile Detail Endpoint    ${project}    ${model}    ${profile}
+    Log    GET ${endpoint}    DEBUG
+    ${response}=    Safe Get Request    ${endpoint}    expected_status=${expected_status}
+    Log    Get custom model profile response status: ${response.status_code}    DEBUG
+    RETURN    ${response}
+
+Patch Custom Model Profile
+    [Documentation]    PATCH a named profile's display name and/or runtime configuration.
+    ...    Pattern: PATCH /projects/{project}/models/{model}/profiles/{profile}
+    [Arguments]    ${project}    ${model}    ${profile}    ${body}    ${expected_status}=any
+    Create api session    aiwb
+    ${endpoint}=    Custom Model Profile Detail Endpoint    ${project}    ${model}    ${profile}
+    Log    PATCH ${endpoint} body=${body}    DEBUG
+    ${response}=    Safe Patch Request    ${endpoint}    json=${body}    expected_status=${expected_status}
+    Log    Patch custom model profile response status: ${response.status_code}    DEBUG
+    RETURN    ${response}
+
+Delete Custom Model Profile
+    [Documentation]    DELETE a saved profile by AIMProfileSet resource name, or the literal 'default'.
+    ...    Pattern: DELETE /projects/{project}/models/{model}/profiles/{profile}
+    [Arguments]    ${project}    ${model}    ${profile}    ${expected_status}=any
+    Create api session    aiwb
+    ${endpoint}=    Custom Model Profile Detail Endpoint    ${project}    ${model}    ${profile}
+    Log    DELETE ${endpoint}    DEBUG
+    ${response}=    Safe Delete Request    ${endpoint}    expected_status=${expected_status}
+    Log    Delete custom model profile response status: ${response.status_code}    DEBUG
+    RETURN    ${response}
+
 Custom Models Runtime Profile Options Endpoint
     [Documentation]    Return the runtime-profile-options endpoint URL for a project.
     ...    Pattern: /projects/{project}/models/runtime-profile-options
@@ -78,6 +147,25 @@ Get Runtime Profile Options
     Log    GET ${endpoint}    DEBUG
     ${response}=    Safe Get Request    ${endpoint}    expected_status=${expected_status}
     Log    Runtime profile options response status: ${response.status_code}    DEBUG
+    RETURN    ${response}
+
+Custom Models Runtime Profile Options By Image Endpoint
+    [Documentation]    Return the base-image runtime-profile-options endpoint URL for a project.
+    ...    Pattern: /projects/{project}/models/runtime-profile-options/base-image
+    [Arguments]    ${project}
+    ${endpoint}=    Service API Endpoint    aiwb    endpoint=projects/${project}/models/runtime-profile-options/base-image
+    RETURN    ${endpoint}
+
+Get Runtime Profile Options By Image
+    [Documentation]    GET runtime options discovered for a selected base image.
+    ...    Pattern: GET /projects/{project}/models/runtime-profile-options/base-image?imageRepository=...&imageTag=...
+    [Arguments]    ${project}    ${image_repository}    ${image_tag}    ${expected_status}=any
+    Create api session    aiwb
+    ${endpoint}=    Custom Models Runtime Profile Options By Image Endpoint    ${project}
+    &{params}=    Create Dictionary    imageRepository=${image_repository}    imageTag=${image_tag}
+    Log    GET ${endpoint} params=${params}    DEBUG
+    ${response}=    Safe Get Request    ${endpoint}    params=${params}    expected_status=${expected_status}
+    Log    Runtime profile options by image response status: ${response.status_code}    DEBUG
     RETURN    ${response}
 
 Custom Model Copy Endpoint
@@ -114,12 +202,19 @@ Custom Models Onboard Endpoint
 
 Preview Custom Model Source
     [Documentation]    POST a custom-model source preview request.
-    [Arguments]    ${project}    ${source}    ${hf_token_secret_name}=${None}    ${expected_status}=any
+    [Arguments]    ${project}    ${source}    ${hf_token_secret_name}=${None}    ${source_type}=${None}
+    ...    ${s3_storage_name}=${None}    ${expected_status}=any
     Create api session    aiwb
     ${endpoint}=    Custom Models Preview Endpoint    ${project}
     &{body}=    Create Dictionary    source=${source}
+    IF    $source_type is not None
+        Set To Dictionary    ${body}    sourceType=${source_type}
+    END
     IF    $hf_token_secret_name is not None
         Set To Dictionary    ${body}    hfTokenSecretName=${hf_token_secret_name}
+    END
+    IF    $s3_storage_name is not None
+        Set To Dictionary    ${body}    s3StorageName=${s3_storage_name}
     END
     Log    POST ${endpoint} body=${body}    DEBUG
     ${response}=    Safe Post Request    ${endpoint}
@@ -133,7 +228,7 @@ Onboard Custom Model From Preview
     ...    ``custom_profile`` is forwarded as the optional ``customProfile`` body
     ...    field (runtime profile overrides written to AIMModel.spec.profiles.overrides).
     [Arguments]    ${project}    ${preview_json}    ${image}    ${hf_token_secret_name}=${None}
-    ...    ${custom_profile}=${None}    ${expected_status}=any
+    ...    ${custom_profile}=${None}    ${source_type}=${None}    ${s3_storage_name}=${None}    ${expected_status}=any
     Create api session    aiwb
     ${endpoint}=    Custom Models Onboard Endpoint    ${project}
     &{body}=    Create Dictionary
@@ -145,6 +240,12 @@ Onboard Custom Model From Preview
     ...    image=${image}
     IF    $hf_token_secret_name is not None
         Set To Dictionary    ${body}    hfTokenSecretName=${hf_token_secret_name}
+    END
+    IF    $source_type is not None
+        Set To Dictionary    ${body}    sourceType=${source_type}
+    END
+    IF    $s3_storage_name is not None
+        Set To Dictionary    ${body}    s3StorageName=${s3_storage_name}
     END
     IF    $custom_profile is not None
         Set To Dictionary    ${body}    customProfile=${custom_profile}

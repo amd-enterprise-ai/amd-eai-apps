@@ -32,7 +32,7 @@ spec:
       timeouts:
         backendRequest: {{ .Values.gateway.api.timeouts.stream.backendRequest }}
         request: {{ .Values.gateway.api.timeouts.stream.request }}
-    # Streaming chat endpoints - needs 30m timeout (SDA-3278)
+    # Streaming chat endpoints - needs 30m timeout
     - backendRefs:
         - group: ""
           kind: Service
@@ -80,7 +80,7 @@ spec:
       name: {{ coalesce .Values.kgateway.gatewayName .Values.gateway.gatewayName }}
       namespace: {{ coalesce .Values.kgateway.namespace .Values.gateway.namespace }}
   rules:
-    # Streaming logs proxied through Next.js UI - needs 30m timeout (SDA-3278)
+    # Streaming logs proxied through Next.js UI - needs 30m timeout
     - backendRefs:
         - group: ""
           kind: Service
@@ -98,7 +98,7 @@ spec:
       timeouts:
         backendRequest: {{ .Values.gateway.api.timeouts.stream.backendRequest }}
         request: {{ .Values.gateway.api.timeouts.stream.request }}
-    # Streaming chat proxied through Next.js UI - needs 30m timeout (SDA-3278)
+    # Streaming chat proxied through Next.js UI - needs 30m timeout
     - backendRefs:
         - group: ""
           kind: Service

@@ -16,6 +16,10 @@ var (
 	EPPServiceGVK    = schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Service"}
 )
 
+// eppConfigText is the EndpointPickerConfig passed to the picker. See the args below for why
+// two parsers are registered and why their order matters.
+const eppConfigText = `{"apiVersion":"llm-d.ai/v1alpha1","kind":"EndpointPickerConfig","plugins":[{"name":"core-metrics-extractor","type":"core-metrics-extractor","parameters":{"engineConfigs":[{"name":"vllm","queuedRequestsSpec":"vllm:num_requests_waiting","runningRequestsSpec":"vllm:num_requests_running","kvUsageSpec":"vllm:kv_cache_usage_perc","loraSpec":"","cacheInfoSpec":"vllm:cache_config_info"}]}},{"name":"openai-parser","type":"openai-parser","parameters":{}},{"name":"passthrough-parser","type":"passthrough-parser","parameters":{}}],"requestHandler":{"parsers":[{"pluginRef":"openai-parser"},{"pluginRef":"passthrough-parser"}]}}`
+
 // BuildEPPDeployment constructs an EPP Deployment for the given InferenceService.
 // Each IS gets its own EPP deployment named after entry.ResourceName so multiple
 // ISes in the same namespace each watch their own InferencePool.
@@ -39,15 +43,25 @@ func BuildEPPDeployment(entry BackendEntry, eppName, image string, grpcPort int3
 			"args": []interface{}{
 				fmt.Sprintf("--pool-name=%s", entry.ResourceName),
 				fmt.Sprintf("--pool-namespace=%s", entry.ISNamespace),
+				// Only inference.networking.k8s.io/v1 is supported; set it explicitly
+				// rather than relying on the binary's default.
+				"--pool-group=inference.networking.k8s.io",
 				fmt.Sprintf("--grpc-port=%d", grpcPort),
 				"--grpc-health-port=9003",
 				"--metrics-port=9090",
-				// vLLM deployments don't expose vllm:lora_requests_info because
-				// they don't use LoRA adapters. Without this override the
-				// core-metrics-extractor fails on every poll and EPP can never
-				// pick a healthy endpoint. Setting loraSpec to "" disables the
-				// LoRA metric fetch while keeping queue/KV-cache scoring intact.
-				`--config-text={"apiVersion":"inference.networking.x-k8s.io/v1alpha1","kind":"EndpointPickerConfig","plugins":[{"type":"core-metrics-extractor","parameters":{"engineConfigs":[{"name":"vllm","queuedRequestsSpec":"vllm:num_requests_waiting","runningRequestsSpec":"vllm:num_requests_running","kvUsageSpec":"vllm:kv_cache_usage_perc","loraSpec":"","cacheInfoSpec":"vllm:cache_config_info"}]}}]}`,
+				// Two parsers, in this order. openai-parser claims the JSON endpoints
+				// (chat/completions, completions, embeddings, responses, conversations,
+				// images/generations) and parses their bodies as before.
+				// passthrough-parser claims no paths, which registers it as the fallback
+				// for everything else, and it returns the body unread. That is what lets
+				// multipart endpoints such as /v1/audio/transcriptions through: the
+				// OpenAI parser JSON-unmarshals every body it handles and fails on the
+				// leading "--" of a multipart boundary. Order matters — a fallback
+				// swallows all remaining traffic, so anything after it is never reached.
+				//
+				// loraSpec is "" because vLLM without LoRA adapters does not expose
+				// vllm:lora_requests_info, and the extractor otherwise fails every poll.
+				"--config-text=" + eppConfigText,
 			},
 			"ports": []interface{}{
 				map[string]interface{}{"name": "grpc", "containerPort": int64(grpcPort)},

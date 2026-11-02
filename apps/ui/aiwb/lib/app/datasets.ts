@@ -2,52 +2,35 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { getErrorMessage } from '@amdenterpriseai/utils/app';
-import { APIRequestError } from '@amdenterpriseai/utils/app';
+import { APIRequestError, getErrorMessage } from '@amdenterpriseai/utils/app';
 
 import { ChipDisplayVariant } from '@amdenterpriseai/types';
-import { Dataset, DatasetType } from '@/types/datasets';
-import { PaginatedList } from '@/types/pagination';
+import { apiClient, getApiClientErrorMessage } from '@/lib/api-client';
+import type { components, operations } from '@/types/api';
+import type { DatasetType } from '@/types/datasets';
 
 import { fetchAllPages } from './pagination';
+
+type DatasetResponse = components['schemas']['DatasetResponse'];
 
 export const DATASET_FILESIZE_LIMIT = 100 * 1024 * 1024; // 100MB
 
 export const getDatasetTypeVariants = (
   t: (key: string) => string,
 ): Record<DatasetType, ChipDisplayVariant> => ({
-  [DatasetType.Finetuning]: {
-    label: t(`types.${DatasetType.Finetuning}`),
+  'Fine-tuning': {
+    label: t('types.Fine-tuning'),
     color: 'warning',
   },
 });
 
-export interface ListDatasetsOptions {
-  type?: DatasetType;
-  name?: string;
-}
+type ListDatasetsQuery = NonNullable<
+  operations['get_datasets_v1_projects__project__datasets_get']['parameters']['query']
+>;
 
-// TODO(EAI-6599): Replace getAllDatasets callers (e.g. FinetuneDrawer) with a
+// TODO: Replace getAllDatasets callers (e.g. FinetuneWizard) with a
 // server-side picker so the UI scales to projects with >100 datasets without
 // walking every page.
-
-const buildDatasetsListUrl = (
-  projectId: string,
-  page: number,
-  pageSize: number,
-  options: ListDatasetsOptions,
-) => {
-  const params = new URLSearchParams();
-  params.append('pageSize', String(pageSize));
-  params.append('page', String(page));
-  if (options.type) {
-    params.append('type', options.type);
-  }
-  if (options.name) {
-    params.append('name', options.name);
-  }
-  return `/api/projects/${projectId}/datasets?${params}`;
-};
 
 /**
  * Fetches a single page of datasets for a project.
@@ -59,52 +42,49 @@ const buildDatasetsListUrl = (
  *
  * @param {string} projectId - The project (1:1 with namespace) to list in.
  * @param {object} [options] - Optional filters and pagination controls.
- * @returns {Promise<PaginatedList<Dataset>>} The requested page and pagination metadata.
  * @throws {APIRequestError} If the API request fails.
  */
 export const listDatasets = async (
   projectId: string,
-  options: ListDatasetsOptions & {
-    page?: number;
-    pageSize?: number;
-  } = {},
-): Promise<PaginatedList<Dataset>> => {
+  options: ListDatasetsQuery = {},
+) => {
   const { page = 1, pageSize = 10, ...filters } = options;
-  const response = await fetch(
-    buildDatasetsListUrl(projectId, page, pageSize, filters),
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/datasets',
     {
-      method: 'GET',
+      params: {
+        path: { project: projectId },
+        query: {
+          page,
+          pageSize,
+          type: filters.type,
+          name: filters.name,
+        },
+      },
     },
   );
 
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to list datasets: ${errorMessage}`,
+      `Failed to list datasets: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 
-  return await response.json();
+  return data;
 };
 
 /**
  * Lists every dataset for a project by walking all pages.
  *
- * Thin wrapper around fetchAllPages — see `apps/ui/aiwb/AGENTS.md`
- * "Paginated list loaders". Intended for callers that need an exhaustive
+ * Thin wrapper around fetchAllPages. Intended for callers that need an exhaustive
  * list (e.g., populating a fine-tuning dataset dropdown).
- *
- * @param {string} projectId - The project (1:1 with namespace) to list in.
- * @param {ListDatasetsOptions} [options] - Optional type and name filters.
- * @returns {Promise<Dataset[]>} All datasets matching the filters.
- * @throws {APIRequestError} If any underlying page request fails.
  */
 export const getAllDatasets = (
   projectId: string,
-  options: ListDatasetsOptions = {},
-): Promise<Dataset[]> =>
-  fetchAllPages<Dataset>((page, pageSize) =>
+  options: Pick<ListDatasetsQuery, 'type' | 'name'> = {},
+): Promise<DatasetResponse[]> =>
+  fetchAllPages<DatasetResponse>((page, pageSize) =>
     listDatasets(projectId, { ...options, page, pageSize }),
   );
 
@@ -113,42 +93,35 @@ export const getAllDatasets = (
  *
  * @param {string} id - The dataset ID
  * @param {string} projectId - The active project ID
- * @returns {Promise<Dataset>} A promise that resolves to a Dataset object.
  * @throws {APIRequestError} If the API request fails.
  */
-export const getDataset = async (
-  id: string,
-  projectId: string,
-): Promise<Dataset> => {
-  const response = await fetch(`/api/projects/${projectId}/datasets/${id}`, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
+export const getDataset = async (id: string, projectId: string) => {
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/datasets/{dataset_id}',
+    { params: { path: { project: projectId, dataset_id: id } } },
+  );
 
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to get dataset: ${errorMessage}`,
+      `Failed to get dataset: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 
-  return await response.json();
+  return data;
 };
 
 export const deleteDataset = async (
   id: string,
   projectId: string,
 ): Promise<void> => {
-  const response = await fetch(`/api/projects/${projectId}/datasets/${id}`, {
-    method: 'DELETE',
-  });
+  const { error, response } = await apiClient.DELETE(
+    '/api/projects/{project}/datasets/{dataset_id}',
+    { params: { path: { project: projectId, dataset_id: id } } },
+  );
   if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
     throw new APIRequestError(
-      `Failed to delete dataset ${id}: ${errorMessage}`,
+      `Failed to delete dataset ${id}: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }

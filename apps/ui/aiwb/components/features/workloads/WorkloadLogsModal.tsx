@@ -4,18 +4,18 @@
 
 import { useTranslation } from 'next-i18next';
 
-import { Workload } from '@/types/workloads';
-import type { ResourceMetrics } from '@/types/projects';
+import type { Workload } from '@/types/workloads';
+import type { EnrichedWorkloadMetrics } from '@/types/projects';
 
 import { Modal } from '@amdenterpriseai/components';
 import WorkloadLogs from './WorkloadLogs';
 
 interface Props {
-  workload: Workload | ResourceMetrics | undefined;
   onOpenChange: (isOpen: boolean) => void;
   isOpen: boolean;
   /** Project (namespace) the workload belongs to */
   namespace: string;
+  workload?: Workload | EnrichedWorkloadMetrics;
 }
 
 const WorkloadLogsModal = ({
@@ -38,7 +38,7 @@ const WorkloadLogsModal = ({
     <Modal
       onClose={handleClose}
       title={t('list.actions.logs.modal.title')}
-      size="5xl"
+      size="cover"
     >
       <WorkloadLogs workload={workload} isOpen={isOpen} namespace={namespace} />
     </Modal>

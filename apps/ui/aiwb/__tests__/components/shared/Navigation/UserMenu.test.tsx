@@ -50,12 +50,17 @@ vi.mock('@amdenterpriseai/utils/app', async (importOriginal) => {
   };
 });
 
-// HeroUI Dropdown renders menu in a portal; mock so menu content is inline for testing
+// HeroUI Dropdown mock with compound subcomponents for our adapter
 vi.mock('@heroui/react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@heroui/react')>();
-  return {
-    ...actual,
-    Dropdown: ({ children }: { children: React.ReactNode }) => {
+  const MockDropdownMenu = ({ children }: { children: React.ReactNode }) => (
+    <div role="menu">{children}</div>
+  );
+  const MockDropdownTrigger = ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  );
+  const MockDropdown = Object.assign(
+    ({ children }: { children: React.ReactNode }) => {
       const childArray = React.Children.toArray(children);
       return (
         <div data-testid="dropdown-mock">
@@ -66,35 +71,70 @@ vi.mock('@heroui/react', async (importOriginal) => {
         </div>
       );
     },
-    DropdownTrigger: ({ children }: { children: React.ReactNode }) => (
-      <>{children}</>
-    ),
-    DropdownMenu: ({ children }: { children: React.ReactNode }) => (
-      <>{children}</>
-    ),
+    {
+      Trigger: MockDropdownTrigger,
+      Popover: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+      Menu: MockDropdownMenu,
+      Section: ({ children }: { children: React.ReactNode }) => (
+        <div>{children}</div>
+      ),
+      Item: ({
+        children,
+        href,
+        target,
+        rel,
+        onPress,
+      }: {
+        children: React.ReactNode;
+        href?: string;
+        target?: string;
+        rel?: string;
+        onPress?: () => void;
+      }) =>
+        href ? (
+          <a href={href} target={target} rel={rel}>
+            {children}
+          </a>
+        ) : (
+          <div
+            role="menuitem"
+            onClick={onPress}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') onPress?.();
+            }}
+            tabIndex={0}
+          >
+            {children}
+          </div>
+        ),
+    },
+  );
+
+  return {
+    ...actual,
+    Dropdown: MockDropdown,
+    DropdownTrigger: MockDropdownTrigger,
+    DropdownMenu: MockDropdownMenu,
     DropdownSection: ({ children }: { children: React.ReactNode }) => (
       <div>{children}</div>
     ),
     DropdownItem: ({
       children,
-      as: Component = 'div',
       href,
       target,
       rel,
       onPress,
-      ...rest
     }: {
       children: React.ReactNode;
-      as?: React.ElementType;
       href?: string;
       target?: string;
       rel?: string;
       onPress?: () => void;
-      [key: string]: unknown;
-    }) => {
-      const safeProps = Component === 'a' ? { href, target, rel } : {};
-      return Component === 'a' ? (
-        <a {...safeProps}>{children}</a>
+    }) =>
+      href ? (
+        <a href={href} target={target} rel={rel}>
+          {children}
+        </a>
       ) : (
         <div
           role="menuitem"
@@ -103,12 +143,10 @@ vi.mock('@heroui/react', async (importOriginal) => {
             if (e.key === 'Enter' || e.key === ' ') onPress?.();
           }}
           tabIndex={0}
-          {...safeProps}
         >
           {children}
         </div>
-      );
-    },
+      ),
   };
 });
 
@@ -117,7 +155,6 @@ describe('UserMenu', () => {
     const additionalItems = (
       <DropdownSection showDivider key="switch-app-section">
         <DropdownItem
-          as="a"
           href="https://airm.example.com"
           target="_blank"
           rel="noopener noreferrer"

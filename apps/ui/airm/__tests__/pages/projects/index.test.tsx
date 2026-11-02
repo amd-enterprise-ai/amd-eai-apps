@@ -222,12 +222,15 @@ describe('projects', () => {
     });
 
     // Open the cluster select dropdown
-    const clusterSelect = screen.getByText('list.filter.cluster.placeholder');
+    const clusterSelect = screen.getByRole('button', {
+      name: /list\.filter\.cluster/,
+    });
     await fireEvent.click(clusterSelect);
 
-    // Select "Test Cluster 1"
-    const cluster1Options = await screen.getAllByText('Test Cluster 1'); // Assuming "Name 1" is in "Test Cluster 1"
-    await fireEvent.click(cluster1Options[2]);
+    const clusterOption = await screen.findByRole('option', {
+      name: 'Test Cluster 1',
+    });
+    await fireEvent.click(clusterOption);
 
     // Projects in c1 (Project Name 1, Project Name 3) should be visible
     expect(screen.getByText('Project Name 1')).toBeInTheDocument();
@@ -249,7 +252,9 @@ describe('projects', () => {
       });
     });
 
-    const statusSelect = screen.getByText('list.filter.status.placeholder');
+    const statusSelect = screen.getByRole('button', {
+      name: /list\.filter\.status/,
+    });
     await fireEvent.click(statusSelect);
 
     // Select "READY" status
@@ -286,10 +291,14 @@ describe('projects', () => {
     });
 
     // Open the cluster select dropdown and select "Test Cluster 1"
-    const clusterSelect = screen.getByText('list.filter.cluster.placeholder');
+    const clusterSelect = screen.getByRole('button', {
+      name: /list\.filter\.cluster/,
+    });
     await fireEvent.click(clusterSelect);
-    const cluster1Options = await screen.getAllByText('Test Cluster 1');
-    await fireEvent.click(cluster1Options[2]);
+    const clusterOption = await screen.findByRole('option', {
+      name: 'Test Cluster 1',
+    });
+    await fireEvent.click(clusterOption);
 
     // Only c1 projects should be visible after selecting
     expect(screen.getByText('Project Name 1')).toBeInTheDocument();
@@ -297,12 +306,12 @@ describe('projects', () => {
     expect(screen.queryByText('Project Name 2')).not.toBeInTheDocument();
     expect(screen.queryByText('Project Name 4')).not.toBeInTheDocument();
 
-    // Re-open the dropdown and click "Test Cluster 1" again to deselect it
-    // This produces an empty selection array, which previously caused all items to disappear
-    await fireEvent.click(clusterSelect);
-    await waitFor(() => {
-      const options = screen.getAllByText('Test Cluster 1');
-      fireEvent.click(options[options.length - 1]);
+    // Clear the cluster filter (v3 single-select does not toggle off on re-click)
+    const clearFiltersButton = screen.getByRole('button', {
+      name: /actions\.clearFilters/,
+    });
+    await act(async () => {
+      fireEvent.click(clearFiltersButton);
     });
 
     // All projects should be visible again (not filtered out by empty array)
@@ -325,7 +334,9 @@ describe('projects', () => {
     });
 
     // Open the status select dropdown
-    const statusSelect = screen.getByText('list.filter.status.placeholder');
+    const statusSelect = screen.getByRole('button', {
+      name: /list\.filter\.status/,
+    });
     await fireEvent.click(statusSelect);
 
     // Select "READY" status
@@ -350,14 +361,12 @@ describe('projects', () => {
       expect(screen.queryByText('Project Name 4')).not.toBeInTheDocument();
     });
 
-    // Re-open the dropdown and click "READY" again to deselect it
-    // This produces an empty selection array, which previously caused all items to disappear
-    await fireEvent.click(statusSelect);
-    await waitFor(() => {
-      const option = screen.getByRole('option', {
-        name: `status.${ProjectStatus.READY}`,
-      });
-      fireEvent.click(option);
+    // Clear the status filter (v3 single-select does not toggle off on re-click)
+    const clearFiltersButton = screen.getByRole('button', {
+      name: /actions\.clearFilters/,
+    });
+    await act(async () => {
+      fireEvent.click(clearFiltersButton);
     });
 
     // All projects should be visible again (not filtered out by empty array)

@@ -6,11 +6,7 @@ import {
   ADVANCED_PARAM_AUTOMATIC,
   filterProfilesByAdvancedParams,
 } from '@/lib/app/aims/filterProfilesByAdvancedParams';
-import {
-  AIMClusterProfile,
-  AIMMetric,
-  AIM_PROFILE_TYPE_OPTIMIZED,
-} from '@/types/aims';
+import { AIMClusterProfile, AIM_PROFILE_TYPE_OPTIMIZED } from '@/types/aims';
 
 type LegacyMeta = {
   metric?: string;
@@ -28,12 +24,12 @@ type LegacyMeta = {
 function makeProfile(
   name: string,
   meta: LegacyMeta,
-  specMetric: AIMMetric.Latency | AIMMetric.Throughput = AIMMetric.Latency,
+  specMetric: 'latency' | 'throughput' = 'latency',
 ): AIMClusterProfile {
   return {
     metadata: { name, labels: {} },
     spec: {
-      modelName: 'test-model',
+      aimId: 'test-model',
       metric: meta.metric ?? specMetric,
       type: meta.type,
       acceleratorModel: meta.gpu,
@@ -69,7 +65,7 @@ describe('filterProfilesByAdvancedParams', () => {
       precision: 'fp16',
       gpuCount: 4,
     },
-    AIMMetric.Latency,
+    'latency',
   );
   const throughputOnly = makeProfile(
     'c',
@@ -80,7 +76,7 @@ describe('filterProfilesByAdvancedParams', () => {
       precision: 'fp8',
       gpuCount: 8,
     },
-    AIMMetric.Throughput,
+    'throughput',
   );
 
   it('returns empty when profiles is empty', () => {
@@ -108,7 +104,7 @@ describe('filterProfilesByAdvancedParams', () => {
   it('excludes profiles with no metric when a metric is selected', () => {
     const noMeta: AIMClusterProfile = {
       metadata: { name: 'x', labels: {} },
-      spec: { modelName: 'm' },
+      spec: { aimId: 'm' },
       status: { status: 'Ready' },
     };
     const out = filterProfilesByAdvancedParams([noMeta, latencyA], {
@@ -182,5 +178,57 @@ describe('filterProfilesByAdvancedParams', () => {
       gpuCount: '8',
     });
     expect(out).toEqual([latencyA]);
+  });
+
+  describe('profile selection', () => {
+    it('narrows by metric only', () => {
+      const out = filterProfilesByAdvancedParams([latencyA, latencyB], {
+        selectedMetric: 'latency',
+      });
+      expect(out.map((p) => p.metadata.name)).toEqual(['a', 'b']);
+    });
+
+    it('resolves to a single profile when only one shares the metric', () => {
+      const out = filterProfilesByAdvancedParams([latencyA, throughputOnly], {
+        selectedMetric: 'throughput',
+      });
+      expect(out).toEqual([throughputOnly]);
+    });
+
+    it('resolves an explicit profile name to that single profile', () => {
+      const out = filterProfilesByAdvancedParams([latencyA, latencyB], {
+        profileName: 'b',
+      });
+      expect(out).toEqual([latencyB]);
+    });
+
+    it('returns no profiles when an explicit profile name no longer exists', () => {
+      const out = filterProfilesByAdvancedParams([latencyA, latencyB], {
+        profileName: 'missing',
+      });
+      expect(out).toEqual([]);
+    });
+
+    it('narrows automatic profile selection by advanced dimensions', () => {
+      const out = filterProfilesByAdvancedParams([latencyA, latencyB], {
+        profileName: ADVANCED_PARAM_AUTOMATIC,
+        optimizationClass: ADVANCED_PARAM_AUTOMATIC,
+        gpuModel: 'MI250',
+        precision: ADVANCED_PARAM_AUTOMATIC,
+        gpuCount: ADVANCED_PARAM_AUTOMATIC,
+      });
+      expect(out).toEqual([latencyB]);
+    });
+
+    it('returns all profiles when profile selection and filters are automatic', () => {
+      const out = filterProfilesByAdvancedParams([latencyA, latencyB], {
+        profileName: ADVANCED_PARAM_AUTOMATIC,
+        optimizationClass: ADVANCED_PARAM_AUTOMATIC,
+        gpuModel: ADVANCED_PARAM_AUTOMATIC,
+        precision: ADVANCED_PARAM_AUTOMATIC,
+        gpuCount: ADVANCED_PARAM_AUTOMATIC,
+      });
+      expect(out.map((p) => p.metadata.name)).toEqual(['a', 'b']);
+    });
   });
 });

@@ -9,8 +9,14 @@ Resource            resources/deployment.resource
 Resource            resources/airm_keywords.resource
 Resource            resources/api/health.resource
 Resource            resources/authorization.resource
+Resource            resources/airm_projects.resource
 
 Suite Setup         Verify AIRM Service Health
+# Shared projects — whether this run adopted them or created them — are removed once, here, after
+# every suite has finished with them, never by a per-test teardown, which would delete a shared
+# project other tests are still using. Keeps the "an interrupted run must not leak a project"
+# guarantee.
+Suite Teardown      Clean Up Adopted Projects
 
 
 *** Keywords ***

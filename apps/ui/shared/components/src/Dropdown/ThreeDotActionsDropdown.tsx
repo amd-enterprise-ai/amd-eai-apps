@@ -2,24 +2,13 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { Tooltip } from '../Tooltip';
 import { Button } from '../Buttons/Button';
-import {
-  Dropdown,
-  DropdownItem,
-  DropdownMenu,
-  DropdownTrigger,
-} from './DropdownPrimitive';
-import {
-  IconAlertTriangle,
-  IconDotsVertical,
-  IconInfoCircle,
-} from '@tabler/icons-react';
-import { Key } from 'react';
+import { ActionsDropdown } from './ActionsDropdown';
+import { DropdownActionItem } from './types';
+import { IconDotsVertical } from '@tabler/icons-react';
 import { useTranslation } from 'next-i18next';
 
 import { ActionItem } from '@amdenterpriseai/types';
-import { ActionFieldHintType } from '@amdenterpriseai/types';
 
 interface ThreeDotActionsDropdownProps<T> {
   actions: ActionItem<T>[];
@@ -27,106 +16,57 @@ interface ThreeDotActionsDropdownProps<T> {
   isDisabled?: boolean;
 }
 
-const handleDropdownItemAction =
-  <T,>(actions: ActionItem<T>[], item: T) =>
-  (dropdownItemKey: Key) => {
-    const action = actions.find((action) => action.key === dropdownItemKey);
-    if (action) action.onPress(item);
-  };
-
-const getDisabledKeys = <T,>(actions: ActionItem<T>[], item: T): string[] => {
-  const disabledKeys = new Set();
-  actions.forEach((action) => {
-    if (typeof action?.isDisabled === 'function') {
-      if (action.isDisabled(item)) disabledKeys.add(action.key);
-    } else if (action?.isDisabled) {
-      disabledKeys.add(action.key);
-    }
-  });
-
-  return Array.from(disabledKeys) as string[];
-};
+// `ActionItem<T>` is `DropdownActionItem` with the row `item` threaded through
+// its callbacks. Bind `item` once and let `ActionsDropdown` own the menu,
+// disabled-state, and hint-tooltip rendering.
+const toDropdownActions = <T,>(
+  actions: ActionItem<T>[],
+  item: T,
+): DropdownActionItem[] =>
+  actions.map((action) => ({
+    key: action.key,
+    className: action.className,
+    label: action.label,
+    color: action.color,
+    startContent: action.startContent,
+    description: action.description,
+    showDivider: action.showDivider,
+    onPress: () => action.onPress(item),
+    isDisabled:
+      typeof action.isDisabled === 'function'
+        ? action.isDisabled(item)
+        : action.isDisabled,
+    hint: action.hint
+      ?.filter((entry) => entry.showHint(item))
+      .map(({ type, message }) => ({ type, message })),
+  }));
 
 export const ThreeDotActionsDropdown = <T,>({
   actions,
   item,
   isDisabled,
 }: ThreeDotActionsDropdownProps<T>) => {
-  const { t } = useTranslation('common');
+  const { t } = useTranslation('sharedComponents');
   if (actions.length === 0) {
     return null;
   }
-
-  const hints = actions.flatMap(
-    (action) => action.hint?.filter((h) => h.showHint(item)) ?? [],
-  );
-  const hasHints = hints.length > 0;
-
-  const hintJsx =
-    hints && hints.length > 0 ? (
-      <div className="flex flex-col gap-1 mt-1 text-xs">
-        {hints.map((h) => (
-          <div className="flex items-center gap-1" key={h?.message}>
-            {h?.type === ActionFieldHintType.INFO && (
-              <IconInfoCircle className="text-info" />
-            )}
-            {h?.type === ActionFieldHintType.WARNING && (
-              <IconAlertTriangle className="text-warning" />
-            )}
-            {h?.type === ActionFieldHintType.ERROR && (
-              <IconAlertTriangle className="text-danger" />
-            )}
-            <span>{h?.message}</span>
-          </div>
-        ))}
-      </div>
-    ) : null;
-
-  const DropDownMenu = (
-    <DropdownMenu
-      onAction={handleDropdownItemAction(actions, item)}
-      disabledKeys={getDisabledKeys(actions, item)}
-    >
-      {actions.map((action) => (
-        <DropdownItem
-          className={[
-            action.className,
-            action?.color !== 'default' ? ` text-${action.color}` : '',
-          ].join(' ')}
-          key={action.key}
-          aria-label={action.label}
-          data-testid={action.key}
-          startContent={action.startContent}
-          description={action.description}
-          showDivider={action.showDivider}
-        >
-          {action.label}
-        </DropdownItem>
-      ))}
-    </DropdownMenu>
-  );
-
   return (
     <div className="relative flex justify-center items-center gap-2">
-      <Dropdown>
-        <DropdownTrigger>
-          <Button
-            isIconOnly
-            size="sm"
-            variant="light"
-            aria-label={t('list.actions.label')}
-            className="h-auto w-6 min-w-6"
-            isDisabled={isDisabled}
-          >
-            <IconDotsVertical className="text-default-300" />
-          </Button>
-        </DropdownTrigger>
-        {hasHints ? (
-          <Tooltip content={hintJsx}>{DropDownMenu}</Tooltip>
-        ) : (
-          DropDownMenu
-        )}
-      </Dropdown>
+      <ActionsDropdown
+        actions={toDropdownActions(actions, item)}
+        isDisabled={isDisabled}
+      >
+        <Button
+          isIconOnly
+          size="sm"
+          variant="ghost"
+          aria-label={t('list.actions.label')}
+          className="h-auto w-6 min-w-6"
+          isDisabled={isDisabled}
+        >
+          <IconDotsVertical className="text-muted" />
+        </Button>
+      </ActionsDropdown>
     </div>
   );
 };

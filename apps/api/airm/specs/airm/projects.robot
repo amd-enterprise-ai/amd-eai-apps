@@ -190,24 +190,15 @@ Remove user from project
     Then response status should be 204
     And user should not be member of project
 
-Recreate project with same name after deletion
-    [Documentation]    Verify that a project can be recreated with the same name after full deletion
-    ...    Tests: Project deletion completes fully and name constraint allows recreation
-    [Tags]    project    deletion    recreation    regression
+Recreate project with the same name after deletion
+    [Documentation]    A replacement project is created only after deletion releases the name.
+    [Tags]    projects    delete    create    regression
 
-    Given a cluster exists in system
-    ${project}=    Test Name    recreate-test
-    And a project "${project}" exists
-    ${original_id}=    Set Variable    ${TEST_PROJECT_ID}
-    And delete project request is sent
-    And the project should not exist in database
-    # Wait additional time for name to be fully released from deletion process
-    And Sleep    10s
-
-    When a project "${project}" exists
-
-    Then project should exist in database
-    And project ID should be different than "${original_id}"
+    Given a project exists
+    When the user deletes the project
+    And the user creates a project with the same name
+    Then the replacement project should exist
+    And the replacement project should have a different identity from the deleted project
 
 Delete project with secrets and verify cleanup
     [Documentation]    Verify that project deletion properly unassigns secrets
@@ -264,9 +255,14 @@ Delete project and verify comprehensive cleanup
 Delete project with workload and verify complete cleanup
     [Documentation]    Verify that project deletion removes workloads from both database and cluster
     ...    Tests: Workloads are cascade deleted from DB and pods/jobs removed from Kubernetes
+    ...
+    ...    Uses a FRESH project, never the shared "testing" one: this test destroys the project it
+    ...    is given and then waits for the namespace to disappear. Run against the shared project
+    ...    that every other suite reuses, it both breaks that reuse and can never observe its own
+    ...    deletion, because the next suite recreates the name while this one is still watching.
     [Tags]    project    deletion    workload    cleanup    critical    integration
 
-    Given a ready project with user access exists
+    Given a fresh project with user access exists
     And a workload is submitted to the project
     And workload should be running in cluster
 

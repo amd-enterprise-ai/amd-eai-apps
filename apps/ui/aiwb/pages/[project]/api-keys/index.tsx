@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: MIT
 
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import ApiKeysTable from '@/components/features/api-keys/ApiKeysTable';
+import { getPageTranslations } from '@/lib/server/i18n';
 import CreateApiKey from '@/components/features/api-keys/CreateApiKey';
 import {
   ActionButton,
@@ -24,7 +24,7 @@ import {
 
 const ApiKeysPage: React.FC & WithDocumentationLink = () => {
   const { t } = useTranslation('api-keys');
-  const { activeProject, clusterAuthEnabled } = useProject();
+  const { activeProject, apiKeysManagementEnabled } = useProject();
 
   const {
     isOpen: isCreateFormOpen,
@@ -32,10 +32,10 @@ const ApiKeysPage: React.FC & WithDocumentationLink = () => {
     onClose: onCreateFormClose,
   } = useOverlayState();
 
-  if (!clusterAuthEnabled) {
+  if (!apiKeysManagementEnabled) {
     return (
       <div className="min-h-full flex flex-col w-full items-center justify-center">
-        <p className="text-default-500">{t('list.clusterAuthDisabled')}</p>
+        <p className="text-muted">{t('list.apiKeysDisabled')}</p>
       </div>
     );
   }
@@ -67,11 +67,7 @@ export async function getServerSideProps(context: any) {
 
   return {
     props: {
-      ...(await serverSideTranslations(locale, [
-        'common',
-        'api-keys',
-        'sharedComponents',
-      ])),
+      ...(await getPageTranslations(locale, ['api-keys'])),
     },
   };
 }

@@ -269,8 +269,8 @@ def test_create_secret_with_use_case():
                     "type": "Opaque",
                     "useCase": "S3",
                     "data": {
-                        "accessKey": "AKIAIOSFODNN7EXAMPLE",
-                        "secretKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+                        "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+                        "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
                     },
                 },
             )
@@ -278,3 +278,23 @@ def test_create_secret_with_use_case():
     assert response.status_code == status.HTTP_201_CREATED
     data = response.json()
     assert data["metadata"]["name"] == "s3-secret"
+
+
+@override_dependencies(BASE_OVERRIDES)
+def test_create_s3_secret_missing_credentials_rejected():
+    """An S3 secret without recognized credential keys is rejected before reaching Kubernetes."""
+    mock_project = "test-project"
+
+    with patch("app.secrets.service.create_kubernetes_secret") as mock_gateway:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/v1/projects/{mock_project}/secrets",
+                json={
+                    "displayName": "s3-secret",
+                    "useCase": "S3",
+                    "data": {"unrelated": "dmFsdWU="},
+                },
+            )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    mock_gateway.assert_not_called()

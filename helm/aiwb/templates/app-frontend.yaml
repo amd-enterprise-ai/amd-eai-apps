@@ -44,12 +44,16 @@ spec:
           env:
             - name: NEXTAUTH_URL
               value: "https://{{ .Values.gateway.ui.prefixValue }}.{{ .Values.appDomain }}"
-            - name: KEYCLOAK_ISSUER
-              value: "{{ include "aiwb.keycloakPublicUrl" . }}/realms/{{ .Values.keycloak.realm }}"
-            - name: KEYCLOAK_ID
-              value: "{{ .Values.keycloak.clientId }}"
-            - name: KEYCLOAK_ISSUER_INTERNAL_URL
-              value: "{{ .Values.keycloak.internalUrl }}/realms/{{ .Values.keycloak.realm }}/"
+            - name: OIDC_ISSUER
+              value: {{ include "aiwb.oidcIssuer" . | quote }}
+            - name: OIDC_ISSUER_INTERNAL_URL
+              value: {{ include "aiwb.oidcInternalUrl" . | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ include "aiwb.oidcClientId" . | quote }}
+            {{- with .Values.oidc.scopes }}
+            - name: OIDC_SCOPES
+              value: {{ . | quote }}
+            {{- end }}
             - name: AIRM_API_SERVICE_URL
               value: "http://{{ .Release.Name }}-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.backend.service.port }}"
             - name: NEXTAUTH_SECRET
@@ -57,17 +61,17 @@ spec:
                 secretKeyRef:
                   name: "{{ .Values.frontend.nextAuthSecretName }}"
                   key: NEXTAUTH_SECRET
-            - name: KEYCLOAK_SECRET
+            - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.keycloak.secretName }}
+                  name: {{ include "aiwb.oidcSecretName" . | quote }}
                   key: value
             - name: STANDALONE_MODE
               value: {{ if .Values.standAloneMode }}"true"{{ else }}"false"{{ end }}
             - name: DEFAULT_NAMESPACE
               value: {{ .Values.defaultNamespace | quote }}
-            - name: CLUSTER_AUTH_ENABLED
-              value: {{ .Values.clusterAuth.enabled | quote }}
+            - name: API_KEYS_MANAGEMENT_ENABLED
+              value: {{ and .Values.apiKeysManagement.enabled .Values.openBao.enabled | quote }}
             - name: AI_GATEWAY_ENABLED
               value: {{ .Values.aiGateway.enabled | quote }}
             - name: AI_GATEWAY_URL

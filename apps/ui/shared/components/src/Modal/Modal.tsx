@@ -10,13 +10,12 @@ import {
   ModalPrimitiveHeader,
 } from './ModalPrimitive';
 import React from 'react';
-import { CloseButton } from '../Buttons';
 
 interface ModalProps {
   children: React.ReactNode;
   onClose: () => void;
   footer?: React.ReactNode;
-  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl';
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'full' | 'cover';
   title?: string;
   subTitle?: string;
   isDismissible?: boolean;
@@ -36,22 +35,14 @@ export const Modal: React.FC<ModalProps> = ({
       isOpen={true}
       onOpenChange={onClose}
       isDismissable={isDismissible}
-      size={size || 'xl'}
-      closeButton={<CloseButton />}
-      classNames={{
-        base: 'overflow-y-auto overflow-x-hidden',
-        header: 'border-b-1 border-default-200 w-full pr-[64px]',
-        body: 'pt-6 pb-2',
-        closeButton: 'top-2.5 right-2.5',
-        footer: 'justify-center w-full',
-      }}
+      size={size || 'lg'}
     >
-      <ModalPrimitiveContent className="max-h-[95vh] sm:my-1">
+      <ModalPrimitiveContent>
         <ModalPrimitiveHeader>
           <div className="flex flex-col gap-1">
             <h2>{title || ''}</h2>
             {subTitle ? (
-              <p className="dark:text-default-500 text-default-600 font-medium">
+              <p className="dark:text-muted text-foreground font-medium">
                 {subTitle}
               </p>
             ) : null}

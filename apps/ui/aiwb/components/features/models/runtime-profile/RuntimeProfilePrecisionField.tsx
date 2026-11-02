@@ -23,6 +23,12 @@ type Props<T extends FieldValues> = {
    * loaded yet).
    */
   options?: RuntimeProfileSelectOption[];
+  /**
+   * True when a runtime matrix governs but offers no valid combination. The
+   * empty `options` then means "no valid choice", not "not loaded yet", so the
+   * field must render nothing rather than the static superset.
+   */
+  isConstrained?: boolean;
 };
 
 export function RuntimeProfilePrecisionField<T extends FieldValues>({
@@ -32,9 +38,13 @@ export function RuntimeProfilePrecisionField<T extends FieldValues>({
   precisionPlaceholder,
   isDisabled = false,
   options,
+  isConstrained = false,
 }: Props<T>) {
-  const precisionOptions =
-    options && options.length > 0 ? options : RUNTIME_PROFILE_PRECISION_OPTIONS;
+  const precisionOptions = isConstrained
+    ? []
+    : options && options.length > 0
+      ? options
+      : RUNTIME_PROFILE_PRECISION_OPTIONS;
 
   // Always keep a valid precision selected, defaulting to the first option.
   // Precision is base-determined, so the static default can be absent from the
@@ -62,7 +72,7 @@ export function RuntimeProfilePrecisionField<T extends FieldValues>({
       label={precisionLabel}
       placeholder={precisionPlaceholder}
       isRequired
-      isDisabled={isDisabled}
+      isDisabled={isDisabled || isConstrained}
       data-testid="custom-model-import-model-precision"
     >
       <>

@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { cn } from '@heroui/react';
 import {
   Accordion,
   AccordionItem,
@@ -10,6 +9,7 @@ import {
   ActionsToolbar,
   AirmDocsPage,
   airmDocumentationMapping,
+  cn,
   RelevantDocs,
 } from '@amdenterpriseai/components';
 import { useOverlayState } from '@amdenterpriseai/hooks';
@@ -19,9 +19,9 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { getServerSession } from 'next-auth';
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import { useAccessControl } from '@/hooks/useAccessControl';
+import { getPageTranslations } from '@/utils/i18n';
 import { fetchClusters } from '@/services/app';
 import { fetchProjects } from '@/services/app';
 import { getClusters } from '@/services/server';
@@ -322,11 +322,7 @@ export async function getServerSideProps(context: any) {
 
     return {
       props: {
-        ...(await serverSideTranslations(locale, [
-          'common',
-          'projects',
-          'sharedComponents',
-        ])),
+        ...(await getPageTranslations(locale, ['projects'])),
         clusters: clusters?.data || [],
         projects: projects?.data || [],
       },

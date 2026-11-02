@@ -53,15 +53,7 @@ export const ClusterKubeConfig: React.FC<Props> = ({
           </div>
         )}
         {!!data && (
-          <CopySnippet
-            symbol=""
-            classNames={{
-              base: 'mt-8 w-full',
-              pre: 'whitespace-pre-wrap overflow-x-auto',
-            }}
-          >
-            <span>{data?.kubeConfig}</span>
-          </CopySnippet>
+          <CopySnippet className="mt-8 w-full" value={data.kubeConfig} />
         )}
       </div>
     </DrawerDisplay>

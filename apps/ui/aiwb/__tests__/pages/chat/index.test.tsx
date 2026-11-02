@@ -6,7 +6,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 
 import { listChattableWorkloads } from '@/lib/app/chat';
 
-import { Workload } from '@/types/workloads';
+import type { Workload } from '@/types/workloads';
 
 import ChatPage from '@/pages/[project]/chat';
 

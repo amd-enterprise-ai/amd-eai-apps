@@ -4,8 +4,8 @@
 
 """Helpers for exporting a service's OpenAPI specification to a file.
 
-The exported spec is committed under ``docs/external-docs`` and rendered into
-the public documentation site, so it must be **deterministic** — independent of
+The exported spec is rendered into the public documentation site, so it must be
+**deterministic** — independent of
 the environment it is generated in. ``FastAPI.openapi()`` is already stable for
 a given codebase except for the OpenID Connect discovery URL, which is derived
 from ``KEYCLOAK_*`` environment variables (see ``api_common.auth.config``).

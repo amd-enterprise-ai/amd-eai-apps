@@ -42,12 +42,7 @@ export const CategorySplitStatsCard = ({
   }, [data]);
 
   return (
-    <Card
-      className="h-full grow"
-      classNames={{
-        base: 'shadow-sm border-1 border-default-200 rounded-sm	dark:bg-default-100',
-      }}
-    >
+    <Card className="h-full grow">
       <CardBody>
         <div>{title}</div>
         <div className="my-4">
@@ -83,7 +78,7 @@ export const CategorySplitStatsCard = ({
                   <div key={entry.label} className="flex items-center text-sm">
                     <div
                       className={cn(
-                        'w-3 h-3 bg-primary rounded-[3px]',
+                        'w-3 h-3 bg-accent rounded-[3px]',
                         getColorClassName(
                           isLoading ? 'gray' : calculatedColors[idx],
                           'bg',
@@ -98,7 +93,7 @@ export const CategorySplitStatsCard = ({
                         entry.label
                       )}
                     </span>
-                    <span className="text-sm text-content4 flex gap-1 items-center">
+                    <span className="text-sm text-muted flex gap-1 items-center">
                       (
                       {isLoading ? (
                         <Skeleton className="h-3 w-4 rounded-[3px]" />

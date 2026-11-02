@@ -11,6 +11,9 @@ Library             ../../libraries/UICredentials.py
 
 *** Variables ***
 ${LOGIN_TIMEOUT}    30s
+# The NextAuth page names the button after the provider. The name is OIDC, and
+# an environment before the OIDC login still says Keycloak.
+${SIGN_IN_BUTTON}    button >> text=/^Sign in with (OIDC|Keycloak)$/
 
 
 *** Keywords ***
@@ -43,9 +46,9 @@ Perform Keycloak login
 
     Go To    ${base_url}/api/auth/signin
 
-    # Step 1: NextAuth page - click "Sign in with Keycloak"
-    Wait For Elements State    button >> text="Sign in with Keycloak"    visible    timeout=${LOGIN_TIMEOUT}
-    Click    button >> text="Sign in with Keycloak"
+    # Step 1: NextAuth page - click the sign-in button
+    Wait For Elements State    ${SIGN_IN_BUTTON}    visible    timeout=${LOGIN_TIMEOUT}
+    Click    ${SIGN_IN_BUTTON}
 
     # Step 2: Keycloak login form - enter username/email and submit
     Wait For Elements State    css=#username    visible    timeout=${LOGIN_TIMEOUT}

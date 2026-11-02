@@ -6,9 +6,10 @@ import { IconLoaderQuarter } from '@tabler/icons-react';
 
 // Static variant configurations - computed once, reused everywhere
 export const VARIANT_CONFIGS = {
-  primary: { variant: 'solid' as const, color: 'primary' as const },
-  tertiary: { variant: 'light' as const, color: 'default' as const },
-  secondary: { variant: 'flat' as const, color: 'default' as const }, // default
+  primary: { variant: 'primary' as const },
+  secondary: { variant: 'tertiary' as const }, // default
+  tertiary: { variant: 'ghost' as const },
+  danger: { variant: 'danger' as const },
 } as const;
 
 // Static spinner element - created once, reused

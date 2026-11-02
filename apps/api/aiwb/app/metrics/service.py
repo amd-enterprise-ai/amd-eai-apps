@@ -3,25 +3,53 @@
 # SPDX-License-Identifier: MIT
 
 import asyncio
+import logging
 from datetime import datetime
 from textwrap import dedent
+from uuid import UUID
 
 from prometheus_api_client import PrometheusConnect
 
+from ..aims.gateway import list_aim_service_replicas
+from ..cluster.service import (
+    get_project_cpu_allocation_ceiling,
+    get_project_gpu_allocation_ceiling,
+    get_project_memory_allocation_ceiling,
+    parse_cpu_value,
+    parse_memory_value,
+)
+from ..dispatch.kube_client import KubernetesClient
 from ..projects.crds import Namespace
 from .constants import (
     AIM_SERVICE_ID_METRIC_LABEL,
+    ALLOCATED_CPU_SERIES_LABEL,
+    ALLOCATED_GPUS_SERIES_LABEL,
+    ALLOCATED_SYSTEM_MEMORY_SERIES_LABEL,
     API_KEY_ID_METRIC_LABEL,
+    CPU_AVAILABLE_SERIES_LABEL,
+    CPU_USAGE_SERIES_LABEL,
     EXTPROC_REQUEST_DURATION_COUNT_METRIC,
     EXTPROC_TOKEN_USAGE_METRIC,
     GEN_AI_TOKEN_TYPE_LABEL,
     GPU_POD_METRIC_LABEL,
     NAMESPACE_METRIC_LABEL,
+    POD_CPU_USAGE_METRIC,
+    POD_MEMORY_WORKING_SET_METRIC,
+    SYSTEM_MEMORY_AVAILABLE_SERIES_LABEL,
+    SYSTEM_MEMORY_USAGE_SERIES_LABEL,
     VLLM_POD_METRIC_LABEL,
     WORKLOAD_ID_METRIC_LABEL,
 )
 from .enums import MetricName, NamespaceMetricName
-from .schemas import DateRange, MetricsScalar, MetricsScalarWithRange, MetricsTimeseries
+from .schemas import (
+    Datapoint,
+    DatapointMetadataBase,
+    DatapointsWithMetadata,
+    DateRange,
+    MetricsScalar,
+    MetricsScalarWithRange,
+    MetricsTimeseries,
+)
 from .utils import (
     a_custom_query,
     a_custom_query_range,
@@ -30,6 +58,8 @@ from .utils import (
     get_step_for_range_query,
     map_metrics_timeseries,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _pod_selector(pod_name: str | None, label: str = VLLM_POD_METRIC_LABEL) -> str:
@@ -271,17 +301,128 @@ async def get_total_tokens_metric(
     return MetricsScalar(data=max(value, 0))
 
 
+async def get_workload_resource_limits(
+    namespace: str,
+    workload_id: str,
+    kube_client: KubernetesClient,
+    pod_name: str | None = None,
+) -> tuple[float | None, float | None]:
+    """Total CPU (cores) and system-memory (bytes) limits across a workload's pods.
+
+    Best-effort decoration on top of usage: the availability ceiling is only shown
+    when the pods declare limits, so a Kubernetes read failure or limit-less pods
+    yield None rather than failing the metrics response. Summed across the pods that
+    match the usage series' scope — a single replica when pod_name is set, otherwise
+    all of the workload's pods — so the ceiling always matches the usage numerator.
+    """
+    try:
+        pods = await list_aim_service_replicas(kube_client, namespace, UUID(workload_id))
+        if pod_name:
+            pods = [p for p in pods if p.get("metadata", {}).get("name") == pod_name]
+        cpu_milli_cores = 0
+        memory_bytes = 0
+        found_cpu = False
+        found_memory = False
+        for pod in pods:
+            for container in pod.get("spec", {}).get("containers", []):
+                limits = (container.get("resources") or {}).get("limits") or {}
+                if "cpu" in limits:
+                    cpu_milli_cores += parse_cpu_value(limits["cpu"])
+                    found_cpu = True
+                if "memory" in limits:
+                    memory_bytes += parse_memory_value(limits["memory"])
+                    found_memory = True
+        return (
+            cpu_milli_cores / 1000 if found_cpu else None,
+            float(memory_bytes) if found_memory else None,
+        )
+    except Exception:
+        logger.exception("Failed to resolve resource limits for workload %s", workload_id)
+        return None, None
+
+
+def _append_ceiling_series(timeseries: MetricsTimeseries, label: str, value: float | None) -> None:
+    """Append a flat availability-ceiling series to a usage timeseries (skipped if value is None)."""
+    if value is None:
+        return
+    timeseries.data.append(
+        DatapointsWithMetadata(
+            metadata=DatapointMetadataBase(label=label),
+            values=[Datapoint(timestamp=ts, value=value) for ts in timeseries.range.timestamps],
+        )
+    )
+
+
+async def get_cpu_usage_metric(
+    workload_id: str,
+    start: datetime,
+    end: datetime,
+    step: float,
+    prometheus_client: PrometheusConnect,
+    kube_client: KubernetesClient,
+    namespace: str,
+    pod: str = "",
+    pod_name: str | None = None,
+) -> MetricsTimeseries:
+    # kubeletstats reports CPU in cores; sum across the workload's pods. The
+    # cpu_available ceiling is the summed pod CPU limit (also cores), scoped to the
+    # same pod(s) as the usage series so per-replica views compare like-for-like.
+    query = dedent(f"""
+        sum(
+            {POD_CPU_USAGE_METRIC}{{{WORKLOAD_ID_METRIC_LABEL}="{workload_id}"{pod}}}
+        )
+    """)
+    results = await a_custom_query_range(
+        client=prometheus_client, query=query, start_time=start, end_time=end, step=str(int(step))
+    )
+    timeseries = map_metrics_timeseries(results, start, end, int(step), CPU_USAGE_SERIES_LABEL)
+    cpu_cores, _ = await get_workload_resource_limits(namespace, workload_id, kube_client, pod_name)
+    _append_ceiling_series(timeseries, CPU_AVAILABLE_SERIES_LABEL, cpu_cores)
+    return timeseries
+
+
+async def get_system_memory_usage_metric(
+    workload_id: str,
+    start: datetime,
+    end: datetime,
+    step: float,
+    prometheus_client: PrometheusConnect,
+    kube_client: KubernetesClient,
+    namespace: str,
+    pod: str = "",
+    pod_name: str | None = None,
+) -> MetricsTimeseries:
+    # Working-set bytes summed across the workload's pods; the system_memory_available
+    # ceiling is the summed pod memory limit (also bytes), scoped to the same pod(s)
+    # as the usage series so per-replica views compare like-for-like.
+    query = dedent(f"""
+        sum(
+            {POD_MEMORY_WORKING_SET_METRIC}{{{WORKLOAD_ID_METRIC_LABEL}="{workload_id}"{pod}}}
+        )
+    """)
+    results = await a_custom_query_range(
+        client=prometheus_client, query=query, start_time=start, end_time=end, step=str(int(step))
+    )
+    timeseries = map_metrics_timeseries(results, start, end, int(step), SYSTEM_MEMORY_USAGE_SERIES_LABEL)
+    _, memory_bytes = await get_workload_resource_limits(namespace, workload_id, kube_client, pod_name)
+    _append_ceiling_series(timeseries, SYSTEM_MEMORY_AVAILABLE_SERIES_LABEL, memory_bytes)
+    return timeseries
+
+
 async def get_metric_by_workload_id(
     workload_id: str,
     metric: MetricName,
     start: datetime,
     end: datetime,
     prometheus_client: PrometheusConnect,
+    kube_client: KubernetesClient,
+    namespace: str,
     pod_name: str | None = None,
 ) -> MetricsTimeseries | MetricsScalar | MetricsScalarWithRange:
     step = get_step_for_range_query(start, end)
     lookback = get_aggregation_lookback_for_metrics(step)
     vllm_pod = _pod_selector(pod_name)
+    # kubeletstats CPU/memory series carry the same `pod` label as GPU series.
     gpu_pod = _pod_selector(pod_name, GPU_POD_METRIC_LABEL)
 
     match metric:
@@ -311,6 +452,14 @@ async def get_metric_by_workload_id(
             return await get_kv_cache_usage_metric(workload_id, start, end, prometheus_client, vllm_pod)
         case MetricName.TOTAL_TOKENS:
             return await get_total_tokens_metric(workload_id, prometheus_client, vllm_pod)
+        case MetricName.CPU_USAGE:
+            return await get_cpu_usage_metric(
+                workload_id, start, end, step, prometheus_client, kube_client, namespace, gpu_pod, pod_name
+            )
+        case MetricName.SYSTEM_MEMORY_USAGE:
+            return await get_system_memory_usage_metric(
+                workload_id, start, end, step, prometheus_client, kube_client, namespace, gpu_pod, pod_name
+            )
         case _:
             raise ValueError(f"Unsupported metric: {metric}")
 
@@ -320,6 +469,7 @@ async def get_gpu_device_utilization_for_namespace(
     start: datetime,
     end: datetime,
     prometheus_client: PrometheusConnect,
+    kube_client: KubernetesClient,
 ) -> MetricsTimeseries:
     step = get_step_for_range_query(start, end)
 
@@ -329,14 +479,26 @@ async def get_gpu_device_utilization_for_namespace(
         )
     """)
 
-    results = await a_custom_query_range(
-        client=prometheus_client,
-        query=query,
-        start_time=start,
-        end_time=end,
-        step=str(int(step)),
+    results, allocation = await asyncio.gather(
+        a_custom_query_range(
+            client=prometheus_client,
+            query=query,
+            start_time=start,
+            end_time=end,
+            step=str(int(step)),
+        ),
+        get_project_gpu_allocation_ceiling(namespace, kube_client),
     )
-    return map_metrics_timeseries(results, start, end, int(step), MetricName.GPU_DEVICE_UTILIZATION.value)
+    timeseries = map_metrics_timeseries(results, start, end, int(step), MetricName.GPU_DEVICE_UTILIZATION.value)
+
+    if allocation is not None:
+        timeseries.data.append(
+            DatapointsWithMetadata(
+                metadata=DatapointMetadataBase(label=ALLOCATED_GPUS_SERIES_LABEL),
+                values=[Datapoint(timestamp=ts, value=allocation) for ts in timeseries.range.timestamps],
+            )
+        )
+    return timeseries
 
 
 async def get_gpu_memory_utilization_for_namespace(
@@ -361,6 +523,58 @@ async def get_gpu_memory_utilization_for_namespace(
         step=str(int(step)),
     )
     return map_metrics_timeseries(results, start, end, int(step), MetricName.GPU_MEMORY_UTILIZATION.value)
+
+
+async def get_cpu_usage_for_namespace(
+    namespace: Namespace,
+    start: datetime,
+    end: datetime,
+    prometheus_client: PrometheusConnect,
+    kube_client: KubernetesClient,
+) -> MetricsTimeseries:
+    # Namespace CPU cores in use + the allocated_cpu ceiling (project quota or cluster
+    # capacity, in cores). Mirrors the GPU namespace metric's scope: filtered by namespace.
+    step = get_step_for_range_query(start, end)
+    query = dedent(f"""
+        sum(
+            {POD_CPU_USAGE_METRIC}{{{NAMESPACE_METRIC_LABEL}="{namespace.name}"}}
+        )
+    """)
+    results, allocation = await asyncio.gather(
+        a_custom_query_range(
+            client=prometheus_client, query=query, start_time=start, end_time=end, step=str(int(step))
+        ),
+        get_project_cpu_allocation_ceiling(namespace, kube_client),
+    )
+    timeseries = map_metrics_timeseries(results, start, end, int(step), CPU_USAGE_SERIES_LABEL)
+    _append_ceiling_series(timeseries, ALLOCATED_CPU_SERIES_LABEL, allocation)
+    return timeseries
+
+
+async def get_system_memory_usage_for_namespace(
+    namespace: Namespace,
+    start: datetime,
+    end: datetime,
+    prometheus_client: PrometheusConnect,
+    kube_client: KubernetesClient,
+) -> MetricsTimeseries:
+    # Project-aggregate working-set bytes, summed across the namespace's pods, plus the
+    # allocated_system_memory ceiling (project quota or cluster capacity, in bytes).
+    step = get_step_for_range_query(start, end)
+    query = dedent(f"""
+        sum(
+            {POD_MEMORY_WORKING_SET_METRIC}{{{NAMESPACE_METRIC_LABEL}="{namespace.name}"}}
+        )
+    """)
+    results, allocation = await asyncio.gather(
+        a_custom_query_range(
+            client=prometheus_client, query=query, start_time=start, end_time=end, step=str(int(step))
+        ),
+        get_project_memory_allocation_ceiling(namespace, kube_client),
+    )
+    timeseries = map_metrics_timeseries(results, start, end, int(step), SYSTEM_MEMORY_USAGE_SERIES_LABEL)
+    _append_ceiling_series(timeseries, ALLOCATED_SYSTEM_MEMORY_SERIES_LABEL, allocation)
+    return timeseries
 
 
 async def get_gpu_utilization_by_workload_in_namespace(
@@ -409,12 +623,17 @@ async def get_metric_by_namespace(
     start: datetime,
     end: datetime,
     prometheus_client: PrometheusConnect,
+    kube_client: KubernetesClient,
 ) -> MetricsTimeseries:
     match metric:
         case NamespaceMetricName.GPU_DEVICE_UTILIZATION:
-            return await get_gpu_device_utilization_for_namespace(namespace, start, end, prometheus_client)
+            return await get_gpu_device_utilization_for_namespace(namespace, start, end, prometheus_client, kube_client)
         case NamespaceMetricName.GPU_MEMORY_UTILIZATION:
             return await get_gpu_memory_utilization_for_namespace(namespace, start, end, prometheus_client)
+        case NamespaceMetricName.CPU_USAGE:
+            return await get_cpu_usage_for_namespace(namespace, start, end, prometheus_client, kube_client)
+        case NamespaceMetricName.SYSTEM_MEMORY_USAGE:
+            return await get_system_memory_usage_for_namespace(namespace, start, end, prometheus_client, kube_client)
 
 
 async def get_input_tokens_by_api_key(

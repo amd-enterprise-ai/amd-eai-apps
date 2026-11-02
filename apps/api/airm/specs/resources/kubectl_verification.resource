@@ -47,8 +47,11 @@ Verify namespace does not exist
     ${result}=    Run Process    kubectl    get    namespace    ${namespace}
     ...    stdout=DEVNULL    stderr=PIPE
 
+    # values=False because the bare comparison Robot appends ("0 == 0") says nothing to a reader:
+    # the number is a kubectl exit code, and rc 0 simply means the namespace was still found.
     Should Not Be Equal As Integers    ${result.rc}    0
-    ...    msg=Namespace ${namespace} still exists in cluster
+    ...    msg=Namespace ${namespace} still exists in cluster (kubectl get returned rc=${result.rc})
+    ...    values=False
     Log    Namespace ${namespace} does not exist in cluster (verified)    INFO
 
 Job should exist in namespace

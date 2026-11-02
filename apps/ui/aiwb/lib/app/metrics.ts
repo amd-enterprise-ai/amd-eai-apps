@@ -2,8 +2,14 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { MetricScalarResponse, TimeSeriesResponse } from '@/types/metrics';
-import { APIRequestError, getErrorMessage } from '@amdenterpriseai/utils/app';
+import { APIRequestError } from '@amdenterpriseai/utils/app';
+
+import type { components } from '@/types/api';
+import { TimeSeriesResponse } from '@/types/metrics';
+
+import { apiClient, getApiClientErrorMessage } from '@/lib/api-client';
+
+type MetricScalarResponse = components['schemas']['MetricsScalarWithRange'];
 
 type MetricTimeRangeParams = {
   workloadId: string;
@@ -14,47 +20,69 @@ type MetricTimeRangeParams = {
 };
 
 export const getTimeseriesMetric = async (
-  params: MetricTimeRangeParams & { metric: string },
+  params: MetricTimeRangeParams & {
+    metric: components['schemas']['MetricName'];
+  },
 ): Promise<TimeSeriesResponse> => {
   const { workloadId, namespace, start, end, metric, podName } = params;
-  const urlParams = new URLSearchParams();
-  urlParams.append('start', start.toISOString());
-  urlParams.append('end', end.toISOString());
-  if (podName) urlParams.append('podName', podName);
-
-  const response = await fetch(
-    `/api/projects/${namespace}/inference/${workloadId}/metrics/${metric}?${urlParams.toString()}`,
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/inference/{id}/metrics/{metric}',
+    {
+      params: {
+        path: {
+          project: namespace,
+          id: workloadId,
+          metric,
+        },
+        query: {
+          start: start.toISOString(),
+          end: end.toISOString(),
+          ...(podName ? { podName } : {}),
+        },
+      },
+    },
   );
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error) {
     throw new APIRequestError(
-      `Failed to get workload metric: ${metric}: ${errorMessage}`,
+      `Failed to get workload metric: ${metric}: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-  return response.json();
+  // The endpoint types data as a metric union; the metric name fixes the member.
+  return data as TimeSeriesResponse;
 };
 
 export const getScalarMetric = async (
-  params: MetricTimeRangeParams & { metric: string },
+  params: MetricTimeRangeParams & {
+    metric: components['schemas']['MetricName'];
+  },
 ): Promise<MetricScalarResponse> => {
   const { workloadId, namespace, start, end, metric, podName } = params;
-  const urlParams = new URLSearchParams();
-  urlParams.append('start', start.toISOString());
-  urlParams.append('end', end.toISOString());
-  if (podName) urlParams.append('podName', podName);
-
-  const response = await fetch(
-    `/api/projects/${namespace}/inference/${workloadId}/metrics/${metric}?${urlParams.toString()}`,
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/inference/{id}/metrics/{metric}',
+    {
+      params: {
+        path: {
+          project: namespace,
+          id: workloadId,
+          metric,
+        },
+        query: {
+          start: start.toISOString(),
+          end: end.toISOString(),
+          ...(podName ? { podName } : {}),
+        },
+      },
+    },
   );
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error) {
     throw new APIRequestError(
-      `Failed to get workload metric: ${metric}: ${errorMessage}`,
+      `Failed to get workload metric: ${metric}: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-  return response.json();
+  // The endpoint types data as a metric union; the metric name fixes the member.
+  return data as MetricScalarResponse;
 };
 
 // Timeseries metric wrappers

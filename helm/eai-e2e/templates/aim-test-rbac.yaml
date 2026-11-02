@@ -1,0 +1,79 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# The E2E suites use kubectl to observe gateway lifecycle state and to author AIM CRs
+# for cases the APIs cannot express (a foreign managed-by label, fine-tuning's workload-id
+# attribution). Project members deliberately do not get the authoring access — POST
+# /artifacts confines sourceUri to the caller's own namespace and guards deletes of in-use
+# artifacts, and a direct CR write bypasses both. Scoped to the test identity.
+#
+# Kept in its own template so a test-only e2e-tests.yml run can reconcile just this RBAC
+# onto a standing release (rendered with --show-only) without touching the chart's
+# namespace/config/ExternalSecret resources that Bloom already provisioned.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: e2e-aim-test-author
+  labels:
+    {{- include "eai-e2e.labels" . | nindent 4 }}
+rules:
+  # kubectl apply reads the current object, then creates or patches it.
+  - apiGroups: ["aim.eai.amd.com"]
+    resources: ["aimartifacts"]
+    verbs: ["get", "create", "patch"]
+  # Model suites resolve profiles with `kubectl get aimprofiles -l ...`, which lists.
+  - apiGroups: ["aim.eai.amd.com"]
+    resources: ["aimprofiles"]
+    verbs: ["get", "list"]
+  # Fine-tuning setup discovers a Ready cluster model with the unnamespaced
+  # `kubectl get aimclustermodels -o json`. AIMClusterModel is cluster-scoped, so this
+  # belongs on the ClusterRole rather than a namespaced Role.
+  - apiGroups: ["aim.eai.amd.com"]
+    resources: ["aimclustermodels"]
+    verbs: ["get", "list"]
+  # Model suites author AIMModel CRs with kubectl apply (get+create+patch), and the
+  # custom-model copy suite deletes the source model afterwards. The precision suite also
+  # lists them by source-type label, to confirm the project really is empty before the next
+  # round reuses it — the models list endpoint reports an empty list when its own Kubernetes
+  # read fails, so it cannot answer that question.
+  - apiGroups: ["aim.eai.amd.com"]
+    resources: ["aimmodels"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  # kubectl patch --subresource=status reads the status subresource before writing it.
+  - apiGroups: ["aim.eai.amd.com"]
+    resources: ["aimmodels/status"]
+    verbs: ["get", "patch"]
+  # The adapter, custom-model and adapter-serving suites author AIMService CRs with kubectl
+  # (apply reads-then-creates/patches, plus get and delete). The custom-model precision suite
+  # also lists them, to confirm a round's deployment is really gone before the next round
+  # reuses the project — the services list endpoint reports an empty list when its own
+  # Kubernetes read fails, so it cannot answer that question. The app grants aimservices only
+  # to the AIWB backend, not this test user.
+  - apiGroups: ["aim.eai.amd.com"]
+    resources: ["aimservices"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  # Gateway lifecycle tests list generated routes after an AIM is undeployed.
+  - apiGroups: ["aigateway.envoyproxy.io"]
+    resources: ["aigatewayroutes"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: e2e-aim-test-author
+  labels:
+    {{- include "eai-e2e.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: e2e-aim-test-author
+subjects:
+  # Backwards compatibility, since the prefix was previously 'oidc'
+  - kind: User
+    name: {{ printf "oidc%s" (include "eai-e2e.username" .) | quote }}
+    apiGroup: rbac.authorization.k8s.io
+  # The Kubernetes cluster applies an OIDC prefix of 'oidc:', so we adjust the user to expect that
+  - kind: User
+    name: {{ printf "oidc:%s" (include "eai-e2e.username" .) | quote }}
+    apiGroup: rbac.authorization.k8s.io

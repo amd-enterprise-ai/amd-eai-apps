@@ -223,7 +223,7 @@ export const ClusterWorkloadsTable: React.FC<Props> = ({ clusterId }) => {
     ),
     [ClusterWorkloadsTableField.TYPE]: (item) => (
       <ChipDisplay
-        type={item.type ?? t(`common.error.misc.unknownEntity`)}
+        type={item.type ?? t(`common:error.misc.unknownEntity`)}
         variants={getWorkloadTypeVariants(workloadsT)}
       />
     ),
@@ -346,7 +346,7 @@ export const ClusterWorkloadsTable: React.FC<Props> = ({ clusterId }) => {
       <ServerSideDataTable
         filters={filters}
         handleDataRequest={handleWorkloadsTableParamsChange}
-        total={clusterWorkloadsMetrics?.total ?? 0}
+        total={clusterWorkloadsMetrics?.pagination?.total ?? 0}
         data={workloadsWithProjects}
         columns={columns}
         customRenderers={customRenderers}

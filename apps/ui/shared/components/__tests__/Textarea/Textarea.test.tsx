@@ -33,4 +33,33 @@ describe('Textarea adapter', () => {
     render(<Textarea aria-label="Description" isDisabled value="locked" />);
     expect(screen.getByRole('textbox')).toBeDisabled();
   });
+  it('renders endContent inside the input group', () => {
+    render(
+      <Textarea
+        aria-label="Description"
+        endContent={<button type="button">Copy</button>}
+        value="multiline"
+      />,
+    );
+    const copyButton = screen.getByRole('button', { name: 'Copy' });
+    const textarea = screen.getByRole('textbox');
+    expect(copyButton).toBeInTheDocument();
+    expect(textarea.closest('.input-group')).toContainElement(copyButton);
+  });
+  it('defaults to secondary variant on InputGroup', () => {
+    const { container } = render(
+      <Textarea aria-label="Description" data-testid="textarea" />,
+    );
+    expect(
+      container.querySelector('.input-group--secondary'),
+    ).toBeInTheDocument();
+  });
+  it('applies primary variant when requested', () => {
+    const { container } = render(
+      <Textarea aria-label="Description" variant="primary" />,
+    );
+    expect(
+      container.querySelector('.input-group--primary'),
+    ).toBeInTheDocument();
+  });
 });

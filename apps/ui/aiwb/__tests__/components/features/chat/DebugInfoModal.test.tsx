@@ -165,7 +165,7 @@ describe('DebugInfoModal Component', () => {
         </ProviderWrapper>,
       );
 
-      expect(screen.getByTestId('modal')).toHaveAttribute('data-size', '3xl');
+      expect(screen.getByTestId('modal')).toHaveAttribute('data-size', 'lg');
     });
 
     it('renders accordion with both sections', () => {

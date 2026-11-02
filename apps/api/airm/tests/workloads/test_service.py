@@ -647,6 +647,219 @@ async def test_register_auto_discovered_workload_component_no_workload(db_sessio
 
 
 @pytest.mark.asyncio
+# owner_first=False is the bug this fixes: a child names the workload and the later owner must
+# reclaim it. owner_first=True is a control: when the owner arrives first the name is already
+# correct, so the later child message must NOT clobber it.
+@pytest.mark.parametrize("owner_first", [False, True])
+@pytest.mark.parametrize(
+    ("child_name", "child_kind", "owner_name", "owner_kind"),
+    [
+        (
+            "test-longrun-abc123-76d9cff8c",
+            WorkloadComponentKind.REPLICA_SET,
+            "test-longrun-abc123",
+            WorkloadComponentKind.DEPLOYMENT,
+        ),
+        (
+            "test-longrun-abc123-76d9cff8c-x7k9p",
+            WorkloadComponentKind.POD,
+            "test-longrun-abc123",
+            WorkloadComponentKind.DEPLOYMENT,
+        ),
+        (
+            "test-longrun-abc123-b",
+            WorkloadComponentKind.REPLICA_SET,
+            "test-longrun-abc123",
+            WorkloadComponentKind.DEPLOYMENT,
+        ),
+        (
+            "test-longrun-abc123-76d9cff8c-x7k9p",
+            WorkloadComponentKind.POD,
+            "test-longrun-abc123-76d9cff8c",
+            WorkloadComponentKind.REPLICA_SET,
+        ),
+        # Job- and DaemonSet-owned Pods carry the same apiserver 5-char suffix as a ReplicaSet's Pod.
+        (
+            "test-longrun-abc123-x7k9p",
+            WorkloadComponentKind.POD,
+            "test-longrun-abc123",
+            WorkloadComponentKind.JOB,
+        ),
+        (
+            "test-longrun-abc123-x7k9p",
+            WorkloadComponentKind.POD,
+            "test-longrun-abc123",
+            WorkloadComponentKind.DAEMON_SET,
+        ),
+    ],
+)
+async def test_auto_discovered_workload_is_named_after_its_owner_whatever_arrives_first(
+    child_name: str,
+    child_kind: WorkloadComponentKind,
+    owner_name: str,
+    owner_kind: WorkloadComponentKind,
+    owner_first: bool,
+    db_session: AsyncSession,
+) -> None:
+    """An owner names the workload regardless of which component is discovered first.
+
+    The agent publishes an owner and its hash-suffixed children concurrently with one shared
+    component id, so without deterministic naming the workload keeps whichever name won the
+    race and users see a hash-suffixed child name instead of what they deployed.
+    """
+    env = await factory.create_basic_test_environment(db_session)
+
+    workload_id = uuid4()
+    component_id = uuid4()
+
+    def _message(name: str, kind: WorkloadComponentKind) -> AutoDiscoveredWorkloadComponentMessage:
+        return AutoDiscoveredWorkloadComponentMessage(
+            message_type="auto_discovered_workload_component",
+            workload_id=workload_id,
+            component_id=component_id,
+            project_id=env.project.id,
+            name=name,
+            submitter="test-submitter",
+            kind=kind,
+            api_version="apps/v1",
+            updated_at=datetime.now(UTC),
+        )
+
+    first_message = _message(owner_name, owner_kind) if owner_first else _message(child_name, child_kind)
+    await register_auto_discovered_workload_component(db_session, env.cluster, first_message)
+    workload = await get_workload_by_id_in_cluster(db_session, workload_id, env.cluster.id)
+    status_clock_before_second = workload.updated_at
+
+    second_message = _message(child_name, child_kind) if owner_first else _message(owner_name, owner_kind)
+    second_message.updated_at = status_clock_before_second + timedelta(seconds=2)
+    await register_auto_discovered_workload_component(db_session, env.cluster, second_message)
+
+    assert workload.display_name == owner_name
+    assert workload.updated_at == status_clock_before_second
+    assert workload.updated_by == ("test-submitter" if owner_first else "system")
+
+    status_message = WorkloadStatusMessage(
+        message_type="workload_status_update",
+        workload_id=workload_id,
+        status=WorkloadStatus.RUNNING,
+        updated_at=status_clock_before_second + timedelta(seconds=1),
+        status_reason=None,
+    )
+    await update_workload_status(db_session, env.cluster, status_message)
+    await db_session.refresh(workload)
+    assert workload.status == WorkloadStatus.RUNNING
+    assert workload.updated_at == status_message.updated_at
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("discovery_order", [(0, 1, 2), (0, 2, 1), (1, 0, 2)])
+async def test_auto_discovered_workload_uses_top_owner_across_three_discovery_levels(
+    discovery_order: tuple[int, int, int],
+    db_session: AsyncSession,
+) -> None:
+    """A workload resolves to its Deployment after child-first three-level discovery."""
+    env = await factory.create_basic_test_environment(db_session)
+    workload_id = uuid4()
+    component_id = uuid4()
+
+    components = (
+        ("test-longrun-abc123-76d9cff8c-x7k9p", WorkloadComponentKind.POD),
+        ("test-longrun-abc123-76d9cff8c", WorkloadComponentKind.REPLICA_SET),
+        ("test-longrun-abc123", WorkloadComponentKind.DEPLOYMENT),
+    )
+    for index in discovery_order:
+        name, kind = components[index]
+        await register_auto_discovered_workload_component(
+            db_session,
+            env.cluster,
+            AutoDiscoveredWorkloadComponentMessage(
+                message_type="auto_discovered_workload_component",
+                workload_id=workload_id,
+                component_id=component_id,
+                project_id=env.project.id,
+                name=name,
+                submitter="test-submitter",
+                kind=kind,
+                api_version="apps/v1",
+                updated_at=datetime.now(UTC),
+            ),
+        )
+
+    workload = await get_workload_by_id_in_cluster(db_session, workload_id, env.cluster.id)
+    assert workload.display_name == "test-longrun-abc123"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("display_name", "component_name", "component_kind", "prior_component_kind", "prior_component_name"),
+    [
+        # No display name yet: nothing to preserve or clobber.
+        (None, "totally-different", WorkloadComponentKind.POD, None, None),
+        # A submitter-chosen name unrelated to any component.
+        ("a-name-someone-chose", "totally-different", WorkloadComponentKind.POD, None, None),
+        # Prefix match, but "prod" has a vowel so it is not an apiserver-generated suffix: the
+        # shape guard vetoes the rename before any component is consulted.
+        ("myapp-prod", "myapp", WorkloadComponentKind.DEPLOYMENT, None, None),
+        # Generated-looking suffix but no component ever recorded that name: the lineage guard
+        # vetoes over an empty component set.
+        ("myapp-76d9cff8c", "myapp", WorkloadComponentKind.DEPLOYMENT, None, None),
+        # Generated-looking suffix and a Pod component exists, but its name is not a descendant
+        # of the display name, so lineage is still absent and the name is kept.
+        (
+            "myapp-76d9cff8c",
+            "myapp",
+            WorkloadComponentKind.DEPLOYMENT,
+            WorkloadComponentKind.POD,
+            "unrelated-workload-x7k9p",
+        ),
+        # A Pod message is not an owning kind, so it can never rename its owner.
+        ("myapp-76d9cff8c", "myapp", WorkloadComponentKind.POD, None, None),
+    ],
+)
+async def test_auto_discovered_workload_keeps_an_unrelated_display_name(
+    display_name: str | None,
+    component_name: str,
+    component_kind: WorkloadComponentKind,
+    prior_component_kind: WorkloadComponentKind | None,
+    prior_component_name: str | None,
+    db_session: AsyncSession,
+) -> None:
+    """A missing or submitter-chosen display name is left alone during component discovery."""
+    env = await factory.create_basic_test_environment(db_session)
+
+    workload_id = uuid4()
+    workload = await factory.create_workload(
+        db_session, env.cluster, env.project, id=workload_id, display_name=display_name
+    )
+    if prior_component_kind:
+        await factory.create_workload_component(
+            db_session,
+            workload,
+            name=prior_component_name,
+            kind=prior_component_kind,
+            api_version="apps/v1",
+        )
+    await register_auto_discovered_workload_component(
+        db_session,
+        env.cluster,
+        AutoDiscoveredWorkloadComponentMessage(
+            message_type="auto_discovered_workload_component",
+            workload_id=workload_id,
+            component_id=uuid4(),
+            project_id=env.project.id,
+            name=component_name,
+            submitter="test-submitter",
+            kind=component_kind,
+            api_version="apps/v1",
+            updated_at=datetime.now(UTC),
+        ),
+    )
+
+    workload = await get_workload_by_id_in_cluster(db_session, workload_id, env.cluster.id)
+    assert workload.display_name == display_name
+
+
+@pytest.mark.asyncio
 async def test_register_auto_discovered_workload_component_workload_exists(db_session: AsyncSession) -> None:
     env = await factory.create_basic_test_environment(db_session)
     workload = await factory.create_workload(db_session, env.cluster, env.project, display_name="Test Workload")

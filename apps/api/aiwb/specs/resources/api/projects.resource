@@ -33,7 +33,7 @@ List AIWB Projects
     ...    expected_status (int/str): Expected HTTP status code
     ...
     ...    Returns:
-    ...    response: API response containing ListResponse[str] with "data" key
+    ...    response: API response containing project summaries under the "data" key
     [Arguments]    ${expected_status}=any
     Create api session    aiwb
 

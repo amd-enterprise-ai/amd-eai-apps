@@ -292,7 +292,7 @@ export const Members: React.FC<Props> = ({ project }) => {
               <ActionButton
                 primary
                 aria-label={t(
-                  'settings.membersAndInvitedUsers.members.actions.add',
+                  'settings.membersAndInvitedUsers.members.actions.add.title',
                 )}
                 isDisabled={
                   candidateUsers.length === 0 &&

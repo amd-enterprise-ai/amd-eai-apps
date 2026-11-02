@@ -14,8 +14,8 @@ Documentation       Page object for AIRM UI users page.
 ${USERS_PATH}                   /users
 ${USERS_TABLE_SELECTOR}         css=[role="grid"]
 ${SEARCH_INPUT_SELECTOR}        css=input[placeholder="Search"]
-${TOAST_SUCCESS_SELECTOR}       css=.Toastify__toast--success
-${TOAST_ERROR_SELECTOR}         css=.Toastify__toast--error
+${TOAST_SUCCESS_SELECTOR}       css=.toast--success
+${TOAST_ERROR_SELECTOR}         css=.toast--danger
 
 
 *** Keywords ***
@@ -139,6 +139,28 @@ Click invite submit button
     VAR    ${btn}    css=[role="dialog"] button[type="submit"]:has-text("Send invite")
     Wait For Elements State    ${btn}    visible    timeout=5s
     Click    ${btn}
+
+Click invite form role selector trigger
+    [Documentation]    Opens the role dropdown in the invite user drawer (first select trigger).
+
+    VAR    ${trigger}    css=[role="dialog"] [data-slot="trigger"] >> nth=0
+    Wait For Elements State    ${trigger}    visible    timeout=10s
+    Click    ${trigger}
+
+Click invite form project selector trigger
+    [Documentation]    Opens the project dropdown in the invite user drawer (second select trigger).
+
+    VAR    ${trigger}    css=[role="dialog"] [data-slot="trigger"] >> nth=1
+    Wait For Elements State    ${trigger}    visible    timeout=10s
+    Click    ${trigger}
+
+Invite overlay option with text is clicked
+    [Documentation]    Clicks a listbox option in an open overlay by visible label text.
+    [Arguments]    ${text}
+
+    VAR    ${option}    css=[role="option"]:has-text("${text}")
+    Wait For Elements State    ${option}    visible    timeout=10s
+    Click    ${option}
 
 # =============================================================================
 # Invited users table
@@ -376,11 +398,11 @@ Click project save button
     Click    ${btn}
 
 # =============================================================================
-# Toast notifications (react-toastify)
+# Toast notifications
 # =============================================================================
 
 Wait for success toast
-    [Documentation]    Waits for a react-toastify success toast to appear.
+    [Documentation]    Waits for a success toast to appear.
     ...                The toast auto-closes after 5 seconds.
 
     Wait For Elements State    ${TOAST_SUCCESS_SELECTOR}    visible    timeout=10s

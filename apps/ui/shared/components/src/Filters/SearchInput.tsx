@@ -2,8 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { Input, type InputProps } from '../Input/InputPrimitive';
-import { IconSearch } from '@tabler/icons-react';
+import { SearchField as HeroUISearchField, cn } from '@heroui/react';
 import {
   useCallback,
   useEffect,
@@ -13,7 +12,6 @@ import {
 } from 'react';
 import React, { forwardRef } from 'react';
 import { debounce } from 'lodash';
-import ClearSingleFilterButton from './ClearSingleFilterButton';
 
 const sizeToClassName = {
   sm: 'w-54',
@@ -24,28 +22,21 @@ const sizeToClassName = {
 
 type SearchInputSize = keyof typeof sizeToClassName;
 
-interface SearchInputProps extends Omit<InputProps, 'size'> {
+interface SearchInputProps {
   placeholder?: string;
-  canClear?: boolean;
   defaultValue?: string;
   onValueChange?: (value: string) => void;
   delay?: number;
   disableDebounce?: boolean;
   size?: SearchInputSize;
+  variant?: 'primary' | 'secondary';
+  className?: string;
+  isDisabled?: boolean;
+  'aria-label'?: string;
 }
 
 /**
- * `SearchInput` is a React functional component that provides a customizable search input field.
- * It features debounced value changes to optimize performance, clearable input, and various size options.
- *
- * @param {SearchInputProps} props - The props for the component.
- * @param {string} [props.placeholder] - Placeholder text for the input.
- * @param {string} [props.defaultValue=''] - Default value for the input.
- * @param {'sm' | 'md' | 'lg' | 'full'} [props.size='full'] - Size of the input.
- * @param {(value: string) => void} [props.onValueChange] - Callback function triggered when the input value changes.
- * @param {number} [props.delay=500] - Delay in milliseconds for debouncing the onValueChange callback.
- * @param {boolean} [props.disableDebounce=false] - Disables debouncing if set to true.
- * @returns {JSX.Element} The rendered search input component.
+ * Debounced search field adapter over HeroUI `SearchField`.
  */
 const SearchInput = forwardRef<{ clear: () => void }, SearchInputProps>(
   (
@@ -54,29 +45,26 @@ const SearchInput = forwardRef<{ clear: () => void }, SearchInputProps>(
       defaultValue = '',
       onValueChange,
       size = 'sm',
+      variant,
       delay = 500,
       disableDebounce = false,
-      ...other
+      isDisabled,
+      className,
+      'aria-label': ariaLabel,
     },
     ref,
   ) => {
     const [internalValue, setInternalValue] = useState<string>(defaultValue);
-    const inputRef = React.useRef<HTMLInputElement>(null);
 
     useEffect(() => {
       if (defaultValue) setInternalValue(defaultValue);
     }, [defaultValue]);
 
-    // Imperative handle to allow parent to clear the input value
     useImperativeHandle(
       ref,
       () => ({
         clear: () => {
           setInternalValue('');
-          // Optionally also clear the actual input element
-          if (inputRef.current) {
-            inputRef.current.value = '';
-          }
         },
       }),
       [],
@@ -95,25 +83,26 @@ const SearchInput = forwardRef<{ clear: () => void }, SearchInputProps>(
       },
       [debouncedOnValueChange],
     );
+
     return (
-      <Input
-        ref={inputRef}
-        placeholder={placeholder}
-        size="md"
-        radius="md"
+      <HeroUISearchField
         value={internalValue}
-        onValueChange={handleValueChange}
-        classNames={{ inputWrapper: 'pr-8', base: sizeToClassName[size] }}
-        variant="bordered"
-        startContent={<IconSearch size={16} />}
-        isClearable={false}
-        endContent={
-          internalValue.length ? (
-            <ClearSingleFilterButton onPress={() => handleValueChange('')} />
-          ) : null
-        }
-        {...other}
-      />
+        onChange={handleValueChange}
+        fullWidth={size === 'full'}
+        variant={variant}
+        isDisabled={isDisabled}
+        aria-label={ariaLabel}
+        className={cn(sizeToClassName[size], className)}
+      >
+        <HeroUISearchField.Group className="w-full min-w-0">
+          <HeroUISearchField.SearchIcon />
+          <HeroUISearchField.Input
+            placeholder={placeholder}
+            className="min-w-0"
+          />
+          <HeroUISearchField.ClearButton />
+        </HeroUISearchField.Group>
+      </HeroUISearchField>
     );
   },
 );

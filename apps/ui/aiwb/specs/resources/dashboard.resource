@@ -74,6 +74,12 @@ Dashboard should show time range selector
     ${visible}=    Is time range selector visible
     Should Be True    ${visible}    msg=Time range selector should be visible
 
+The chart time range control should be labeled for selection
+    [Documentation]    Verifies the shared chart control uses a readable label.
+
+    ${label}=    Get chart time range control label
+    Should Be Equal    ${label}    Time range selection
+
 Dashboard should show workloads table
     [Documentation]    Verifies the workloads table grid is visible below the charts.
 

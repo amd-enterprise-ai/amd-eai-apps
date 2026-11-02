@@ -61,7 +61,9 @@ describe('ProjectBasicInfoForm', () => {
     expect(
       screen.getByDisplayValue(mockProject.description),
     ).toBeInTheDocument();
-    expect(screen.getByDisplayValue(mockCluster.name)).toBeInTheDocument();
+    expect(screen.getByTestId('cluster-select')).toHaveTextContent(
+      mockCluster.name,
+    );
   });
 
   it('edit description field calls update project API correctly', async () => {

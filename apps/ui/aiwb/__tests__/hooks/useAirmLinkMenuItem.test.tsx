@@ -20,8 +20,9 @@ vi.mock('@/contexts/ProjectContext', () => ({
   useProject: () => mockUseProject(),
 }));
 
-vi.mock('@heroui/react', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@heroui/react')>();
+vi.mock('@amdenterpriseai/components', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@amdenterpriseai/components')>();
   return {
     ...actual,
     DropdownSection: ({ children }: { children: React.ReactNode }) => (
@@ -29,24 +30,19 @@ vi.mock('@heroui/react', async (importOriginal) => {
     ),
     DropdownItem: ({
       children,
-      as: Component = 'div',
       href,
       target,
       rel,
     }: {
       children: React.ReactNode;
-      as?: React.ElementType;
       href?: string;
       target?: string;
       rel?: string;
-    }) => {
-      const safeProps = Component === 'a' ? { href, target, rel } : {};
-      return Component === 'a' ? (
-        <a {...safeProps}>{children}</a>
-      ) : (
-        <div>{children}</div>
-      );
-    },
+    }) => (
+      <a href={href} target={target} rel={rel}>
+        {children}
+      </a>
+    ),
   };
 });
 

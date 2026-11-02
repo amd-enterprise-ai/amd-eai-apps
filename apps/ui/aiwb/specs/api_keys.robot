@@ -109,9 +109,52 @@ Edit API key drawer shows linked model deployments
     ...                the user to reopen the drawer.
     [Tags]    ui    api-keys    edit    gpu
 
-    Given an AIM model is running with api key
+    Given a ready project with user access exists
+    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And an AIM model is running with api key
     And user is logged in
     And project "${TEST_PROJECT}[name]" is selected
     And user is on API keys page
     When user opens edit drawer for API key "${TEST_API_KEY}[displayName]"
     Then edit drawer should show linked deployment "${TEST_AIM_NAME}"
+
+Deselecting all model deployments in edit drawer clears API key access
+    [Documentation]    Verify that removing every linked model deployment from an API key
+    ...                through the edit drawer clears its access, both in the UI and via
+    ...                the underlying API bindings.
+    [Tags]    ui    api-keys    edit    gpu
+
+    Given a ready project with user access exists
+    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And an AIM model is running with api key
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    And user is on API keys page
+    And user opens edit drawer for API key "${TEST_API_KEY}[displayName]"
+    When user deselects model deployment "${TEST_AIM_NAME}" in edit drawer
+    And user saves API key edit
+    And user opens edit drawer for API key "${TEST_API_KEY}[displayName]"
+    Then edit drawer should show no linked deployments
+    And Api key should have no model bindings
+
+Deselecting one of several model deployments in edit drawer keeps the others linked
+    [Documentation]    Verify that removing one of several linked model deployments from an
+    ...                API key through the edit drawer keeps the remaining deployments linked,
+    ...                both in the UI and via the underlying API bindings.
+    [Tags]    ui    api-keys    edit    gpu
+
+    Given a ready project with user access exists
+    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And an AIM model is running with api key
+    And a second AIM model is running
+    And the API key is also linked to the second AIM model
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    And user is on API keys page
+    And user opens edit drawer for API key "${TEST_API_KEY}[displayName]"
+    When user deselects model deployment "${TEST_AIM_NAME}" in edit drawer
+    And user saves API key edit
+    And user opens edit drawer for API key "${TEST_API_KEY}[displayName]"
+    Then edit drawer should show linked deployment "${TEST_AIM_B_NAME}"
+    And edit drawer should not show linked deployment "${TEST_AIM_NAME}"
+    And Api key should be bound to AIM "${TEST_AIM_B_ID}"

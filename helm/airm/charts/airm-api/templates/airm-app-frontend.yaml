@@ -44,11 +44,11 @@ spec:
           env:
             - name: NEXTAUTH_URL
               value: "https://{{ .Values.gateway.airmui.prefixValue }}.{{ .Values.airm.appDomain }}"
-            - name: KEYCLOAK_ISSUER
+            - name: OIDC_ISSUER
               value: {{ template "airm-api.keycloakPublicUrl" . }}/realms/{{ .Values.airm.keycloak.realm }}
-            - name: KEYCLOAK_ID
+            - name: OIDC_CLIENT_ID
               value: "{{ .Values.airm.keycloak.clientId }}"
-            - name: KEYCLOAK_ISSUER_INTERNAL_URL
+            - name: OIDC_ISSUER_INTERNAL_URL
               value: "{{ .Values.airm.keycloak.internalUrl }}/realms/{{ .Values.airm.keycloak.realm }}/"
             - name: AIRM_API_SERVICE_URL
               value: "http://{{ .Release.Name }}-api.{{ .Release.Namespace }}"
@@ -57,7 +57,7 @@ spec:
                 secretKeyRef:
                   name: "{{ .Values.airm.frontend.secretName }}"
                   key: NEXTAUTH_SECRET
-            - name: KEYCLOAK_SECRET
+            - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: "{{ .Values.airm.keycloak.uiClientSecretName }}"

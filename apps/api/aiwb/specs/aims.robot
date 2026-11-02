@@ -7,11 +7,11 @@ Documentation       Test scenarios for AIWB API AIMs endpoints.
 ...                 Verifies AIM deployment, listing, undeployment and management operations.
 ...
 ...                 Suite Efficiency Design:
-...                 This suite uses Suite Setup/Teardown so the project is created once and
-...                 deleted once at the end, avoiding costly per-test project cleanup and the
-...                 ~8-10 minute namespace termination wait for GPU workloads. Each test still
-...                 declares its preconditions via Given steps for readability and standalone
-...                 execution - these are idempotent and reuse existing resources when present.
+...                 Most scenarios reuse one project, deleted at suite teardown, avoiding costly
+...                 per-test project cleanup and the ~8-10 minute namespace termination wait for
+...                 active workloads. The CPU/EPYC metrics scenario is intentionally isolated in a
+...                 fresh CPU-only project; its test teardown undeploys the AIM before suite teardown
+...                 deletes that project. Each test still declares its preconditions via Given steps.
 ...
 ...                 The AIM precondition keywords ("AIM is deployed", "AIM is deployed and
 ...                 running") are idempotent: they check if an AIM service already exists in the
@@ -125,7 +125,7 @@ AIM catalog returns profiles for a model
 User can browse the inference base model catalog page by page
     [Documentation]    The cluster's inference base model catalog is served in
     ...                pages so the UI can paginate as the catalog grows with
-    ...                custom AIM onboarding (see EAI-6620).
+    ...                custom AIM onboarding.
     [Tags]                  aims                    catalog                 pagination              skip-in-ci
 
     Given a ready project with user access exists
@@ -139,7 +139,7 @@ Deploy AIM creates workload
     [Tags]                  aims                    deploy                  smoke                   gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And an AIM exists in system
     ${deploy_data}=         Valid AIM deploy data is prepared
     When Deploy AIM request is sent    ${deploy_data}
@@ -153,8 +153,8 @@ Deploy AIM with runtime profile overrides persists on AIMService CR
     [Tags]                  aims                    deploy                  gpu                    kubectl
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
-    And an AIM exists in system
+    And the project has runtime-override quota available
+    And an AIM compatible with runtime profile overrides exists
     When Deploy AIM request is sent with runtime profile overrides
     Then response status should be 202
     And AIMService CR should have runtime profile overrides in kubernetes
@@ -170,23 +170,88 @@ Deploy-time profile overrides reach the catalog AIM inference pod
     [Tags]                  aims                    deploy                  profile                 gpu                    kubectl
     [Teardown]              Remove AIM deployment if present
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
-    And an AIM exists in system
+    And the project has runtime-override quota available
+    And an AIM compatible with runtime profile overrides exists
     When Deploy AIM request is sent with runtime profile overrides
     Then response status should be 202
     And AIMService CR should have runtime profile overrides in kubernetes
     And Deployed AIM reaches Running state
     And the running inference pod should request 2 accelerators
     And the running inference pod should run on "MI300X" accelerators
-    And the running inference pod should expose env "VLLM_LOGGING_LEVEL" set to "DEBUG"
+    And the running inference pod should use engine env "VLLM_LOGGING_LEVEL" set to "DEBUG"
     And the running inference pod should run with engine argument "8192"
+
+Set and read back the maximum LoRA adapter rank for a deployment
+    [Documentation]    Guards that a chosen rank ceiling survives the whole trip: it reaches the
+    ...    deployment the engine reconciles, and it reads back from the deployment details.
+    [Tags]                  aims                    deploy                  lora                    gpu                     kubectl
+    [Teardown]              Remove AIM deployment if present
+    Given a ready project with user access exists
+    And an AIM that can serve adapters exists in system
+    And the project has GPU quota for that AIM
+    When Deploy AIM request is sent with maximum LoRA adapter rank    ${16}
+    Then response status should be 202
+    And the deployment should honor the maximum LoRA adapter rank    ${16}
+    And the deployment details should report the maximum LoRA adapter rank    ${16}
+
+Deploy without a maximum LoRA adapter rank
+    [Documentation]    Guards against the platform filling in a ceiling nobody asked for, which
+    ...    would outlive any later change to the runtime's own default. Read off the deployment the
+    ...    engine reconciles, since an echo of the request cannot show a value added further down.
+    [Tags]                  aims                    deploy                  lora                    gpu                     kubectl
+    [Teardown]              Remove AIM deployment if present
+    Given a ready project with user access exists
+    And an AIM that can serve adapters exists in system
+    And the project has GPU quota for that AIM
+    When Deploy AIM request is sent without a maximum LoRA adapter rank
+    Then response status should be 202
+    And the deployment should leave the maximum LoRA adapter rank to the serving runtime
+
+Reject the maximum LoRA adapter rank given as an engine argument
+    [Documentation]    Guards against the engine flag being accepted as a second way to set the
+    ...    rank, which would leave two spellings with no defined winner.
+    [Tags]                  aims                    deploy                  lora
+    Given a ready project with user access exists
+    And an AIM exists in system
+    When Deploy AIM request is sent with the maximum LoRA adapter rank as an engine argument    ${32}
+    Then the deploy should be refused as a rank spelled as an engine argument
+
+Reject an unsupported maximum LoRA adapter rank
+    [Documentation]    Guards against a rank the serving runtime cannot honour reaching a
+    ...    deployment, where it would surface only once the model server refuses it.
+    [Tags]                  aims                    deploy                  lora
+    Given a ready project with user access exists
+    And an AIM exists in system
+    When Deploy AIM request is sent with an unsupported maximum LoRA adapter rank    ${33}
+    Then the deploy should be refused as an unsupported rank
+
+Reject a maximum LoRA adapter rank that is not a whole number
+    [Documentation]    Neither shape below is a whole number, yet each passes for one: the boolean
+    ...    equals the smallest supported rank, and a rank written with a fractional part of zero
+    ...    rounds onto a supported one. Either way the deployment would come up at a rank nobody
+    ...    asked for, so both are refused for the same reason and are one scenario over the shapes.
+    [Tags]                  aims                    deploy                  lora
+    [Setup]    Run Keywords    Given a ready project with user access exists
+    ...    AND    an AIM exists in system
+    [Template]    A maximum LoRA adapter rank that is not a whole number should be refused
+    ${True}
+    ${32.0}
+
+Reject a maximum LoRA adapter rank outside dynamic adapter serving
+    [Documentation]    Guards against a hand-picked ceiling on a deployment that derives its own
+    ...    from the adapters it declares, where the operator would never see it applied.
+    [Tags]                  aims                    deploy                  lora
+    Given a ready project with user access exists
+    And an AIM exists in system
+    When Deploy AIM request is sent with a maximum LoRA adapter rank outside dynamic adapter serving    ${32}
+    Then the deploy should be refused as a rank outside dynamic adapter serving
 
 Deployed AIM starts running
     [Documentation]    Verify that a deployed AIM workload reaches Running status
     [Tags]                  aims                    deploy                  status                  gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And AIM is deployed
     Then Deployed AIM reaches Running state
 
@@ -197,7 +262,7 @@ Deployed AIM has correct display name
     [Tags]                  aims                    deploy                  details                 gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2
+    And the project has GPU quota available
     And AIM is deployed and running
     Then AIM service should have display name
 
@@ -207,7 +272,7 @@ Deployed AIM service shows version info
     [Tags]                  aims                    deploy                  details                 gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2
+    And the project has GPU quota available
     And AIM is deployed and running
     Then AIM service should have version info
 
@@ -235,7 +300,7 @@ Deployed AIM is accessible externally
     [Tags]                  aims                    deploy                  external                gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And AIM is deployed and running
     Then AIM workload should be accessible externally
     And External endpoint should return available models
@@ -246,7 +311,7 @@ List AIMs shows deployed AIM with correct fields
     [Tags]                  aims                    list                    deployment-status       gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And AIM is deployed and running
     When List AIMs request is sent
     Then response status should be 200
@@ -260,7 +325,7 @@ View deployed AIM workload logs
     [Tags]                  aims                    workload                logs                    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And AIM is deployed and running
     When logs are requested from AIM workload
     Then response status should be 200
@@ -274,7 +339,7 @@ Logs for a still-starting AIM workload return an empty state rather than an erro
     [Tags]                  aims                    workload                logs                    gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And AIM is deployed
     When logs are requested from AIM workload
     Then response status should be 200
@@ -286,7 +351,7 @@ View deployed AIM workload details
     [Tags]                  aims                    workload                details                 gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And AIM is deployed and running
     When workload details are requested
     Then response status should be 200
@@ -299,7 +364,7 @@ List inference deployments filtered to chat-capable models
     [Tags]                  aims                    list                    inference                capability             gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And AIM is deployed and running
     When Inference deployments are listed for chat
     Then response status should be 200
@@ -320,9 +385,24 @@ Inference metric is available for a deployed AIM
     [Tags]                  aims                    inference                metrics                 gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And AIM is deployed and running
-    When A request metric is requested for the deployed AIM
+    When inference metrics are polled until the collector reports a value
+    Then Inference metric response should contain a value
+
+Inference metric is available for an AIM served on CPU/EPYC
+    [Documentation]    An AIM served on a CPU/EPYC node exposes inference metrics just like a
+    ...    GPU-served one. Serve an AIM on CPU/EPYC, then verify it is actually placed on CPU/EPYC
+    ...    hardware and that its metric endpoint returns a value.
+    [Tags]                  aims                    inference                metrics                 cpu                    kubectl                    requires-hf-token          skip-in-ci
+    [Teardown]              Remove AIM deployment if present
+
+    Given a fresh project with user access exists
+    And the project has CPU-only quota available
+    And a required HuggingFace token is available for AIM deployment
+    And an AIM served on CPU/EPYC is deployed and running
+    And the AIM should be served on CPU/EPYC hardware
+    When inference metrics are polled until the collector reports a value
     Then Inference metric response should contain a value
 
 Inference replicas are available for a deployed AIM
@@ -331,7 +411,7 @@ Inference replicas are available for a deployed AIM
     [Tags]                  aims                    inference                replicas                gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And AIM is deployed and running
     When Inference replicas are requested for the deployed AIM
     Then response status should be 200
@@ -344,7 +424,7 @@ Undeploy deployed AIM
     [Tags]                  aims                    undeploy                kubectl                 gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And AIM is deployed and running
     And AIM deployment should exist in kubernetes
     When Undeploy AIM request is sent
@@ -362,7 +442,7 @@ Undeployed AIM appears in historical inference list
     [Tags]                  aims                    list                    inference               history                 gpu
 
     Given a ready project with user access exists
-    And project quota is set to    gpu_count=2    cpu_milli_cores=8000    memory_bytes=68719476736
+    And the project has GPU quota available
     And AIM is deployed and running
     And AIM is undeployed
     When Historical inference deployments are listed

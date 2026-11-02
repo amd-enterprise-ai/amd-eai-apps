@@ -42,4 +42,26 @@ describe('useOverlayState', () => {
     });
     expect(result.current.isOpen).toBe(false);
   });
+
+  it('toggles via onOpenChange when invoked with a non-boolean (e.g. PressEvent)', () => {
+    const { result } = renderHook(() => useOverlayState());
+    act(() => {
+      // HeroUI v3 Button passes a PressEvent to onPress handlers wired to onOpenChange.
+      result.current.onOpenChange({ type: 'press' } as unknown as boolean);
+    });
+    expect(result.current.isOpen).toBe(true);
+    expect(typeof result.current.isOpen).toBe('boolean');
+  });
+
+  it('sets open state when onOpenChange receives a boolean', () => {
+    const { result } = renderHook(() => useOverlayState());
+    act(() => {
+      result.current.onOpenChange(true);
+    });
+    expect(result.current.isOpen).toBe(true);
+    act(() => {
+      result.current.onOpenChange(false);
+    });
+    expect(result.current.isOpen).toBe(false);
+  });
 });

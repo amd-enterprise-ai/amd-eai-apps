@@ -18,7 +18,7 @@ ${WORKLOADS_STATS_TITLE_SELECTOR}       text="Workloads in project"
 ${TOTAL_WORKLOADS_SELECTOR}             text="total workloads"
 ${GPU_DEVICE_USAGE_SELECTOR}            text="GPU Device Usage"
 ${GPU_VRAM_USAGE_SELECTOR}              text="GPU VRAM Usage"
-${TIME_RANGE_TABLIST_SELECTOR}          [role="tablist"][aria-label="Time range selection"]
+${TIME_RANGE_TABLIST_SELECTOR}          [role="tablist"]
 ${WORKLOADS_GRID_SELECTOR}              [role="grid"]
 ${PROJECT_SELECTOR_BUTTON}              [data-testid="project-select"]
 
@@ -83,6 +83,12 @@ Is time range selector visible
     ${visible}=    Run Keyword And Return Status
     ...    Wait For Elements State    css=${TIME_RANGE_TABLIST_SELECTOR}    visible    timeout=10s
     RETURN    ${visible}
+
+Get chart time range control label
+    [Documentation]    Returns the accessible label of the chart time range control.
+
+    ${label}=    Get Attribute    css=${TIME_RANGE_TABLIST_SELECTOR}    aria-label
+    RETURN    ${label}
 
 Is workloads grid visible
     [Documentation]    Returns whether the workloads table grid is visible.

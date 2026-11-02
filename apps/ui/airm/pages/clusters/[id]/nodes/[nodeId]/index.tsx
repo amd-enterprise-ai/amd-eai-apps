@@ -4,7 +4,7 @@
 
 import type { StatisticsCardProps } from '@amdenterpriseai/components';
 import {
-  Button,
+  ActionButton,
   HorizontalStatisticsCards,
   StatusDisplay,
 } from '@amdenterpriseai/components';
@@ -12,10 +12,10 @@ import { IconArrowLeft } from '@tabler/icons-react';
 import { useCallback, useMemo } from 'react';
 import { getServerSession } from 'next-auth';
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import { useRouter } from 'next/router';
 
 import { getCluster, getClusterNode } from '@/services/server';
+import { getPageTranslations } from '@/utils/i18n';
 import {
   displayFixedNumber,
   displayHumanReadableBytes,
@@ -97,15 +97,13 @@ const NodeDetailPage: React.FC<Props> & WithDocumentationLink = ({ node }) => {
     <div className="flex flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-2 min-w-0">
-          <Button
+          <ActionButton
+            secondary
             size="sm"
-            isIconOnly
-            variant="light"
             onPress={handleBack}
+            icon={<IconArrowLeft size={16} />}
             aria-label={t('common:actions.back.title')}
-          >
-            <IconArrowLeft size={16} />
-          </Button>
+          />
           <span className="text-base font-medium truncate">
             {node?.name} node
           </span>
@@ -179,8 +177,7 @@ export async function getServerSideProps(context: any) {
       getCluster(clusterId, accessToken),
     ]);
 
-    const translations = await serverSideTranslations(locale, [
-      'common',
+    const translations = await getPageTranslations(locale, [
       'clusters',
       'workloads',
     ]);

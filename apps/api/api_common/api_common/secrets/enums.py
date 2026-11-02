@@ -15,7 +15,7 @@ class SecretUseCase(StrEnum):
     GENERIC = "Generic"
 
     @classmethod
-    # TODO: Remove this once all labels are updated to use the correct prefix (SDA-3014)
+    # TODO: Remove this once all labels are updated to use the correct prefix
     def _missing_(cls, value: object) -> "SecretUseCase | None":
         if isinstance(value, str):
             for member in cls:

@@ -4,10 +4,11 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import yaml
 from fastapi import File, UploadFile
-from pydantic import Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
 from api_common.schemas import BaseEntityPublic, BaseModel
 
@@ -23,9 +24,14 @@ async def _parse_signature_file(signature: UploadFile | Path) -> dict:
                 signature_content = f.read()
         else:
             signature_content = (await signature.read()).decode()
-        return yaml.safe_load(signature_content)
+        parsed = yaml.safe_load(signature_content)
     except yaml.YAMLError as e:
         raise ValueError(f"Invalid YAML in signature file: {e}")
+    if parsed is None:
+        return {}
+    if not isinstance(parsed, dict):
+        raise ValueError(f"Signature file must contain a YAML mapping, got {type(parsed).__name__}")
+    return parsed
 
 
 async def _parse_chart_files(files: list[UploadFile | Path]) -> list[dict]:
@@ -48,6 +54,34 @@ async def _parse_chart_files(files: list[UploadFile | Path]) -> list[dict]:
             file_name = file.filename
         files_data.append({"path": file_name, "content": content})
     return files_data
+
+
+class ChartRequiredResources(BaseModel):
+    """Default resource hints surfaced when deploying a chart.
+
+    Extra keys from legacy chart metadata are tolerated so that charts
+    stored before this schema was introduced don't fail validation.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    gpu_count: int | None = None
+    gpu_memory: int | None = None
+    cpu_core_count: int | None = None
+    system_memory: int | None = None
+
+
+class ChartSignature(BaseModel):
+    """Parsed chart signature. Free-form YAML (stored as JSONB); only `image`
+    is consumed by the UI, so type that and tolerate any additional keys."""
+
+    model_config = ConfigDict(extra="allow")
+
+    image: str | None = Field(
+        default=None,
+        description="Container image the chart renders workloads with.",
+        examples=["registry.example.com/charts/jupyterlab:latest"],
+    )
 
 
 class ChartFile(BaseModel):
@@ -101,10 +135,10 @@ class ChartMetadata(BaseModel):
         description="URL of an icon/illustration shown in the catalog tile.",
         examples=["https://assets.example.com/charts/jupyterlab.png"],
     )
-    required_resources: dict | None = Field(
+    required_resources: ChartRequiredResources | None = Field(
         default=None,
-        description="Default resource hints surfaced to the user when deploying (free-form dict).",
-        examples=[{"gpu": 1, "memory_per_gpu": "32Gi", "cpu_per_gpu": 4}],
+        description="Default resource hints surfaced to the user when deploying.",
+        examples=[{"gpuCount": 1, "gpuMemory": 32, "cpuCoreCount": 4, "systemMemory": 64}],
     )
     external_url: str | None = Field(
         default=None,
@@ -114,7 +148,7 @@ class ChartMetadata(BaseModel):
 
     @field_validator("required_resources", mode="before")
     @classmethod
-    def parse_required_resources(cls, v):
+    def parse_required_resources(cls, v: Any) -> Any:
         """Parse required_resources from FastAPI multipart form data."""
         # Handle direct JSON string from form data
         if isinstance(v, str):
@@ -193,7 +227,7 @@ class ChartUpdate(ChartMetadata):
 class ChartResponse(BaseEntityPublic, ChartBase):
     """Response schema for charts."""
 
-    signature: dict
+    signature: ChartSignature
     files: list[ChartFile] = []
     usage_scope: WorkspaceUsageScope
 

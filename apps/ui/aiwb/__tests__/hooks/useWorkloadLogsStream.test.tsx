@@ -7,7 +7,6 @@ import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
 
 import { useWorkloadLogsStream } from '@/hooks/useWorkloadLogsStream';
 
-import { LogLevel } from '@/types/enums/workloads';
 import { LogEntry } from '@/types/workloads';
 
 /**
@@ -16,17 +15,17 @@ import { LogEntry } from '@/types/workloads';
 const mockWorkloadLogEntries: LogEntry[] = [
   {
     timestamp: '2023-01-01T00:00:00Z',
-    level: LogLevel.INFO,
+    level: 'info',
     message: 'First log entry',
   },
   {
     timestamp: '2023-01-01T00:00:01Z',
-    level: LogLevel.WARNING,
+    level: 'warning',
     message: 'Second log entry',
   },
   {
     timestamp: '2023-01-01T00:00:02Z',
-    level: LogLevel.ERROR,
+    level: 'error',
     message: 'Third log entry',
   },
 ];
@@ -121,8 +120,8 @@ describe('useWorkloadLogsStream', () => {
   describe('startStreaming', () => {
     it('should start streaming and accumulate log entries', async () => {
       const params = {
-        startDate: '2023-01-01',
-        level: LogLevel.ERROR,
+        startTime: '2023-01-01',
+        level: 'error' as const,
       };
 
       const { result } = renderHook(() =>
@@ -175,8 +174,8 @@ describe('useWorkloadLogsStream', () => {
 
     it('should build correct URL with parameters', () => {
       const params = {
-        startDate: '2023-01-01',
-        level: LogLevel.ERROR,
+        startTime: '2023-01-01',
+        level: 'error' as const,
       };
 
       const { result } = renderHook(() =>

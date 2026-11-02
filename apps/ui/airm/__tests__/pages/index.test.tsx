@@ -136,7 +136,7 @@ describe('Dashboard Page', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('data.refresh')).toBeInTheDocument();
+      expect(screen.getByText('actions.refresh.title')).toBeInTheDocument();
     });
 
     const tab24h = screen.getByText('timeRange.range.24h');
@@ -176,7 +176,7 @@ describe('Dashboard Page', () => {
     expect(tab7d).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByText('data.refresh')).toBeInTheDocument();
+      expect(screen.getByText('actions.refresh.title')).toBeInTheDocument();
     });
 
     await act(() => {
@@ -201,11 +201,11 @@ describe('Dashboard Page', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('data.refresh')).toBeInTheDocument();
+      expect(screen.getByText('actions.refresh.title')).toBeInTheDocument();
     });
 
     await act(() => {
-      fireEvent.click(screen.getByText('data.refresh'));
+      fireEvent.click(screen.getByText('actions.refresh.title'));
     });
 
     expect(fetchGPUDeviceUtilization).toHaveBeenCalled();

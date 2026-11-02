@@ -77,9 +77,11 @@ vi.mock('@/services/app', () => ({
   fetchClusterWorkloadsMetrics: vi.fn(() =>
     Promise.resolve({
       data: mockedData,
-      total: 2,
-      page: 1,
-      pageSize: 10,
+      pagination: {
+        total: 2,
+        page: 1,
+        pageSize: 10,
+      },
     }),
   ),
   getClusterProjects: vi.fn(() =>
@@ -274,13 +276,17 @@ describe('ClusterWorkloadsTable', () => {
       fireEvent.click(dropDowns[0]);
     });
 
-    // Click the delete button
-    await fireEvent.click(
-      screen.getByText('list.workloads.actions.delete.title'),
+    const deleteAction = await screen.findByText(
+      'list.workloads.actions.delete.title',
     );
+    await act(() => {
+      fireEvent.click(deleteAction);
+    });
 
-    // Confirm the deletion
-    await fireEvent.click(screen.getByText('actions.confirm.title'));
+    const confirmAction = await screen.findByText('actions.confirm.title');
+    await act(() => {
+      fireEvent.click(confirmAction);
+    });
 
     await waitFor(() => {
       expect(vi.mocked(deleteWorkload)).toHaveBeenCalled();

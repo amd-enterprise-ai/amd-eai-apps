@@ -105,4 +105,11 @@ def sanitize_label_value(value: str, max_length: int = 63) -> str:
     # Truncate to max length
     sanitized = sanitized[:max_length]
 
+    # Truncation can cut on a separator, invalidating the final character.
+    # Re-apply edge cleanup so start/end remain alphanumeric.
+    while sanitized and not sanitized[0].isalnum():
+        sanitized = sanitized[1:]
+    while sanitized and not sanitized[-1].isalnum():
+        sanitized = sanitized[:-1]
+
     return sanitized or "unknown"

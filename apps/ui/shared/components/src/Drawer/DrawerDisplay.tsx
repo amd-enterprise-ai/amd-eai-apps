@@ -9,8 +9,6 @@ import {
   DrawerHeader,
 } from './DrawerPrimitive';
 
-import { CloseButton } from '../Buttons';
-import { BACKDROP, CLASSES, MOTION_PROPS } from './constants';
 import { PropsWithChildren } from 'react';
 
 interface Props {
@@ -26,17 +24,10 @@ export const DrawerDisplay = ({
   children,
 }: PropsWithChildren<Props>) => {
   return (
-    <Drawer
-      isOpen={isOpen}
-      onOpenChange={onOpenChange}
-      motionProps={MOTION_PROPS}
-      backdrop={BACKDROP}
-      closeButton={<CloseButton />}
-      classNames={CLASSES}
-    >
+    <Drawer isOpen={isOpen} onOpenChange={onOpenChange}>
       <DrawerContent>
         <DrawerHeader>{title}</DrawerHeader>
-        <DrawerBody className="w-full">{children}</DrawerBody>
+        <DrawerBody>{children}</DrawerBody>
       </DrawerContent>
     </Drawer>
   );

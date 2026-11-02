@@ -4,14 +4,26 @@
 
 """Tests for workloads gateway layer - K8s interaction functions."""
 
-from unittest.mock import MagicMock, patch
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 from kubernetes.client import ApiException, V1DeleteOptions
 
-from app.workloads.constants import WORKLOAD_RESOURCES
-from app.workloads.gateway import delete_workload_resources
+from app.workloads.constants import (
+    TRAINING_OUTPUT_ANNOTATION,
+    WORKLOAD_ID_LABEL,
+    WORKLOAD_RESOURCES,
+    WORKLOAD_TYPE_LABEL,
+)
+from app.workloads.enums import TrainingOutput, WorkloadStatus, WorkloadType
+from app.workloads.gateway import (
+    _workload_from_k8s_resource,
+    delete_workload_resources,
+    get_finetuning_workloads_annotations,
+)
 
 
 def _get_propagation_policy(body: object) -> str | None:
@@ -21,6 +33,79 @@ def _get_propagation_policy(body: object) -> str | None:
     if isinstance(body, dict):
         return body.get("propagation_policy") or body.get("propagationPolicy")
     return None
+
+
+@pytest.mark.asyncio
+async def test_get_finetuning_workloads_annotations_maps_job_annotations() -> None:
+    workload_id = uuid4()
+    annotations = {
+        "example.com/owner": "team-a",
+        TRAINING_OUTPUT_ANNOTATION: TrainingOutput.LORA.value,
+    }
+    jobs = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                metadata=SimpleNamespace(
+                    name="fine-tuning-job",
+                    labels={WORKLOAD_ID_LABEL: str(workload_id)},
+                    annotations=annotations,
+                )
+            ),
+        ]
+    )
+    kube_client = MagicMock()
+    kube_client.batch_v1.list_namespaced_job = AsyncMock(return_value=jobs)
+
+    with patch("app.workloads.gateway.get_kube_client", return_value=kube_client):
+        annotations_by_workload = await get_finetuning_workloads_annotations(
+            "test-namespace",
+            [workload_id, workload_id],
+        )
+
+    assert annotations_by_workload == {workload_id: annotations}
+    kube_client.batch_v1.list_namespaced_job.assert_awaited_once_with(
+        namespace="test-namespace",
+        label_selector=(
+            f"{WORKLOAD_TYPE_LABEL}={WorkloadType.FINE_TUNING.value},{WORKLOAD_ID_LABEL} in ({workload_id})"
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_finetuning_workloads_annotations_degrades_when_kubernetes_fails() -> None:
+    kube_client = MagicMock()
+    kube_client.batch_v1.list_namespaced_job = AsyncMock(side_effect=RuntimeError("unavailable"))
+
+    with patch("app.workloads.gateway.get_kube_client", return_value=kube_client):
+        assert await get_finetuning_workloads_annotations("test-namespace", [uuid4()]) == {}
+
+
+@pytest.mark.asyncio
+async def test_get_finetuning_workloads_annotations_skips_kubernetes_without_ids() -> None:
+    with patch("app.workloads.gateway.get_kube_client") as mock_get_kube_client:
+        assert await get_finetuning_workloads_annotations("test-namespace", []) == {}
+
+    mock_get_kube_client.assert_not_called()
+
+
+def test_workload_from_k8s_resource_reads_annotations() -> None:
+    workload_id = uuid4()
+    annotations = {TRAINING_OUTPUT_ANNOTATION: TrainingOutput.MERGED.value}
+    resource = SimpleNamespace(
+        metadata=SimpleNamespace(
+            name="fine-tuning-job",
+            creation_timestamp=datetime.now(UTC),
+            labels={
+                WORKLOAD_ID_LABEL: str(workload_id),
+            },
+            annotations=annotations,
+        )
+    )
+
+    workload = _workload_from_k8s_resource(resource, WorkloadStatus.RUNNING, "test-namespace")
+
+    assert workload.id == workload_id
+    assert workload.annotations == annotations
 
 
 @pytest.mark.asyncio

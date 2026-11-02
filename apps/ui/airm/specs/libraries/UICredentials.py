@@ -88,10 +88,18 @@ class UICredentials:
         """Get the team-member password for browser login."""
         return self._team_member.get_password()
 
+    def team_member_is_applicable(self) -> bool:
+        """Return True if this run can authenticate as a team member at all."""
+        return self._team_member.is_applicable()
+
+    def team_member_not_applicable_reason(self) -> str:
+        """Human-readable reason this run cannot carry a team-member password."""
+        return self._team_member.not_applicable_reason()
+
     def team_member_is_provisioned(self) -> bool:
         """Return True if the team-member account exists on the target environment."""
         return self._team_member.is_provisioned()
 
-    def team_member_skip_reason(self) -> str:
-        """Human-readable reason suitable for a Robot Framework Skip message."""
+    def team_member_unavailable_reason(self) -> str:
+        """Human-readable reason naming the account the suite cannot authenticate as."""
         return self._team_member.not_provisioned_reason()

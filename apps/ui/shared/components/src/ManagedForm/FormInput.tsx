@@ -26,8 +26,6 @@ export const FormInput = <T extends FieldValues>({
 
   return (
     <Input
-      labelPlacement="outside"
-      variant="bordered"
       {...props}
       {...registration}
       className={cn(className, {

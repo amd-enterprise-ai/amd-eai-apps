@@ -91,7 +91,7 @@ async def upload_dataset(
         namespace=project,
         minio_client=minio_client,
     )
-    return DatasetResponse.model_validate(dataset)
+    return DatasetResponse.model_validate(dataset).model_copy(update={"size_bytes": jsonl.size})
 
 
 @router.get(
@@ -118,6 +118,7 @@ async def upload_dataset(
 async def get_datasets(
     query: QueryParam[ListDatasetsQuery],
     session: AsyncSession = Depends(get_session),
+    minio_client: MinioClient = Depends(get_minio_client),
     project: str = Depends(ensure_access_to_project),
 ) -> DatasetsList:
     paginated = await list_paginated_datasets(
@@ -127,9 +128,10 @@ async def get_datasets(
         name=query.name,
         page=query.page,
         page_size=query.page_size,
+        minio_client=minio_client,
     )
     return DatasetsList(
-        data=[DatasetResponse.model_validate(dataset) for dataset in paginated.items],
+        data=paginated.items,
         pagination=PaginationMetadata(
             page=paginated.page,
             page_size=paginated.page_size,
@@ -145,8 +147,9 @@ async def get_datasets(
     summary="Get a dataset in a project",
     description=dedent("""
         Get metadata for a single dataset by id (name, description, type,
-        and S3 path). Does not return the dataset contents — use the
-        download endpoint to fetch the JSONL bytes.
+        S3 path, and file size in bytes). The file size is null when object
+        storage metadata is unavailable. Does not return the dataset contents
+        — use the download endpoint to fetch the JSONL bytes.
 
         Requires project access.
     """),
@@ -158,10 +161,10 @@ async def get_datasets(
 async def get_dataset(
     dataset_id: UUID,
     session: AsyncSession = Depends(get_session),
+    minio_client: MinioClient = Depends(get_minio_client),
     project: str = Depends(ensure_access_to_project),
 ) -> DatasetResponse:
-    dataset = await get_dataset_by_id(session, dataset_id, project)
-    return DatasetResponse.model_validate(dataset)
+    return await get_dataset_by_id(session, dataset_id, project, minio_client)
 
 
 @router.get(

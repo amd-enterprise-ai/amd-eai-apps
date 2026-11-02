@@ -12,7 +12,8 @@
 # Override any argument by specifying it AFTER --argumentfile:
 #   robot --argumentfile arguments.txt --loglevel TRACE .
 #   robot --argumentfile arguments.txt --outputdir /tmp/results .
-#   robot --argumentfile arguments.txt --test-timeout 30m .
+#
+# Set a suite default with Test Timeout; override one test with [Timeout].
 
 # Python path - required to find test libraries
 --pythonpath

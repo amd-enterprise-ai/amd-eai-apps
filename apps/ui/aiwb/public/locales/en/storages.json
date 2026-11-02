@@ -39,13 +39,13 @@
         "title": "Scope"
       },
       "assignedTo": {
-        "title": "Assigned To"
+        "title": "Assigned to"
       },
       "createdAt": {
-        "title": "Created At"
+        "title": "Created at"
       },
       "createdBy": {
-        "title": "Created By"
+        "title": "Created by"
       },
       "actions": {
         "title": ""
@@ -116,11 +116,11 @@
           }
         },
         "accessKeyName": {
-          "label": "Access Key Name",
+          "label": "Access key name",
           "description": "This field is optional and default access key name in secret is '{{defaultAccessKeyName}}'"
         },
         "secretKeyName": {
-          "label": "Secret Key Name",
+          "label": "Secret key name",
           "description": "This field is optional and default secret key name in secret is '{{defaultSecretKeyName}}'"
         },
         "bucketUrl": {
@@ -140,7 +140,7 @@
           }
         },
         "projectIds": {
-          "label": "Assign To",
+          "label": "Assign to",
           "placeholder": "Select project(s)"
         }
       },
@@ -236,14 +236,14 @@
   },
   "storageStatus": {
     "Unassigned": "-",
-    "PartiallySynced": "Partially Synced",
+    "PartiallySynced": "Partially synced",
     "Pending": "Pending",
     "Synced": "Synced",
-    "SyncedError": "Sync Failed",
+    "SyncedError": "Sync failed",
     "Failed": "Failed",
     "Deleting": "Deleting",
     "Deleted": "Deleted",
-    "DeleteFailed": "Delete Failed"
+    "DeleteFailed": "Delete failed"
   },
   "storageScope": {
     "Organization": "Organization",

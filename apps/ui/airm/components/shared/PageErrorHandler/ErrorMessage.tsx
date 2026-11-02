@@ -66,7 +66,7 @@ export function ErrorMessage({
                   isErrorExpanded ? 'max-h-24 opacity-100' : 'max-h-0 opacity-0'
                 }`}
               >
-                <div className="text-default-700 text-sm mt-3 rounded-md break-all">
+                <div className="text-foreground text-sm mt-3 rounded-md break-all">
                   {t('error.label')}: {message}
                 </div>
               </div>

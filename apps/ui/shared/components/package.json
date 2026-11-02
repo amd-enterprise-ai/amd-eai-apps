@@ -26,11 +26,12 @@
     "@amdenterpriseai/utils": "workspace:*"
   },
   "peerDependencies": {
-    "@heroui/react": "*",
+    "@heroui/react": "3.2.0",
     "@tabler/icons-react": "*",
     "i18next": "*",
     "next-i18next": "*",
     "react": "*",
+    "react-aria": "*",
     "react-dom": "*"
   },
   "devDependencies": {

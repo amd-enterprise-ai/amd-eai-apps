@@ -119,10 +119,10 @@ vi.mock('@/components/shared/RequestSoftware/RequestSoftware', () => ({
   RequestSoftware: () => <div data-testid="request-software" />,
 }));
 
-// Mock NestedDropdown to make dropdown testable
+// Mock ActionsDropdown to make dropdown testable
 vi.mock('@amdenterpriseai/components', async (importOriginal) => ({
   ...(await importOriginal()),
-  NestedDropdown: ({ children, actions }: any) => (
+  ActionsDropdown: ({ children, actions }: any) => (
     <div data-testid="nested-dropdown">
       {children}
       <div data-testid="dropdown-content">

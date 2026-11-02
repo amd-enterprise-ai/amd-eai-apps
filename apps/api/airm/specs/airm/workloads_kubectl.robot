@@ -67,10 +67,12 @@ Submit workload that fails
 Submit long-running workload and terminate it
     [Documentation]    Verify that workload termination works correctly.
     ...    Tests Deployment creation and termination.
+    ...
+    ...    Runs in a fresh project so unrelated workloads cannot interrupt the lifecycle being tested.
     [Tags]    workload    lifecycle    termination    kubectl
 
     # Project Setup and Provisioning
-    Given a ready project with user access exists
+    Given a fresh project with user access exists
 
     # Workload Preparation
     ${config}=    A long-running workload is prepared
@@ -83,11 +85,19 @@ Submit long-running workload and terminate it
     And Pod should exist for Deployment
     And Deployment Pod should transition to "Running"
 
+    # AIRM Auto-Discovery Verification — must run while the workload still exists. The agent
+    # discovers workloads by watching the Deployment/ReplicaSet/Pod objects, so terminating
+    # first deletes the very objects discovery reads and the lookup can never succeed.
+    And workload should exist in AIRM
+
     # Termination Test
     When workload is terminated
 
-    # AIRM Auto-Discovery Verification
-    And workload should exist in AIRM
+    # AIRM soft-deletes, so a terminated workload stays visible and its termination is
+    # observable as Deleting or Deleted — either is a correct outcome at this point. The
+    # deletion-status check reads the workload (HTTP 200), so it also confirms it still exists.
+    Then workload should report a deletion status via API
+    And workload should be displayed under the deployed name
 
 Delete workload and verify cleanup
     [Documentation]    Verify that workload deletion works correctly.
@@ -106,8 +116,13 @@ Delete workload and verify cleanup
     # Kubernetes Resource Verification
     Then Job should exist in project namespace
 
+    # AIRM Auto-Discovery Verification — while the workload still exists. Discovery reads the
+    # Job/Pod objects, so asserting it after the uninstall relies on the deleted objects
+    # lingering long enough to be seen, which is timing, not behaviour.
+    And workload should exist in AIRM
+
     # Deletion Test
     When workload is deleted via kubectl
 
-    # AIRM Auto-Discovery Verification
-    And workload should exist in AIRM
+    # AIRM soft-deletes, so the removal is observable as Deleting or Deleted.
+    Then workload should report a deletion status via API

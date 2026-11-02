@@ -4,14 +4,22 @@
 
 """Repository management functionality."""
 
+import re
 import shutil
 from pathlib import Path
 from typing import Any
 
 import git
 from loguru import logger
+from rich.markup import escape
 
 from .. import config
+
+_COMMIT_HASH_PATTERN = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+class WorkloadsPinError(Exception):
+    """The pinned ai-workloads commit could not be determined or checked out."""
 
 
 def _reset_repo_to_clean_state(repo: git.Repo) -> None:
@@ -21,19 +29,40 @@ def _reset_repo_to_clean_state(repo: git.Repo) -> None:
 
 
 def _get_patched_version() -> str:
-    """Get the target commit hash from PATCHED_VERSION file."""
+    """Get the target commit hash from the PATCHED_VERSION file.
+
+    There is deliberately no fallback: any real ref used as a default is
+    indistinguishable from a valid pin, so downstream patching and image builds
+    would silently run against the wrong tree.
+    """
     patched_version_file = Path(config.PACKAGE_DIR) / "PATCHED_VERSION"
-    if patched_version_file.exists():
-        return patched_version_file.read_text().splitlines()[-1].strip()
-    logger.warning("PATCHED_VERSION file not found, falling back to main branch")
-    return config.MAIN_BRANCH  # Fallback to main branch if file doesn't exist
+    try:
+        # The encoding is pinned rather than taken from the locale so that whether a
+        # pin file decodes at all does not depend on the environment the CLI runs in.
+        content = patched_version_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        # UnicodeDecodeError is a ValueError, not an OSError, so it needs naming
+        # explicitly or a corrupted pin file escapes this function unwrapped and
+        # collapses the whole of get_repo_status() instead of one status line.
+        raise WorkloadsPinError(f"Could not read PATCHED_VERSION file {patched_version_file}: {e}") from e
+
+    hashes = [line.strip() for line in content.splitlines() if line.strip() and not line.strip().startswith("#")]
+    if not hashes:
+        raise WorkloadsPinError(f"PATCHED_VERSION file {patched_version_file} contains no commit hash")
+
+    commit = hashes[-1]
+    if not _COMMIT_HASH_PATTERN.match(commit):
+        raise WorkloadsPinError(f"PATCHED_VERSION file {patched_version_file} contains '{commit}', not a commit hash")
+    return commit
 
 
 def initialize(force: bool = False) -> dict[str, Any]:
-    """Ensure the repository exists and is in a clean state.
+    """Ensure the repository exists and is checked out at the pinned commit.
 
-    If the repository doesn't exist, it will be cloned from the remote.
-    If it exists, it will be reset to a clean state on the configured branch.
+    The repository is cloned if it is missing and reset if it already exists, then
+    moved to the commit recorded in PATCHED_VERSION. A pin that cannot be read,
+    parsed or checked out reports success=False rather than settling for another
+    commit, because the vendored patches are only meaningful against the pin.
     """
     workloads_dir = Path(config.WORKLOADS_DIR)
 
@@ -53,9 +82,8 @@ def initialize(force: bool = False) -> dict[str, Any]:
         try:
             logger.info(f"Checking out commit {checkout_commit}")
             repo.git.checkout(checkout_commit)
-        except git.GitCommandError:
-            logger.warning(f"Target commit {checkout_commit} not found, falling back to {config.MAIN_BRANCH}")
-            repo.git.checkout(config.MAIN_BRANCH)
+        except git.GitCommandError as e:
+            raise WorkloadsPinError(f"Pinned workloads commit {checkout_commit} could not be checked out") from e
 
         return {
             "success": True,
@@ -98,14 +126,14 @@ def update_repo() -> dict[str, Any]:
         patched_version_file = Path(config.PACKAGE_DIR) / "PATCHED_VERSION"
         if patched_version_file.exists():
             # Keep copyright header if it exists
-            lines = patched_version_file.read_text().splitlines()
+            lines = patched_version_file.read_text(encoding="utf-8").splitlines()
             copyright_header = "\n".join(line for line in lines if line.startswith("#"))
             if copyright_header:
-                patched_version_file.write_text(f"{copyright_header}\n\n{new_commit}\n")
+                patched_version_file.write_text(f"{copyright_header}\n\n{new_commit}\n", encoding="utf-8")
             else:
-                patched_version_file.write_text(new_commit + "\n")
+                patched_version_file.write_text(new_commit + "\n", encoding="utf-8")
         else:
-            patched_version_file.write_text(new_commit + "\n")
+            patched_version_file.write_text(new_commit + "\n", encoding="utf-8")
         logger.info(f"Updated PATCHED_VERSION to {new_commit}")
 
         # Get commit log if updated
@@ -169,11 +197,18 @@ def get_repo_status() -> dict[str, Any]:
             is_detached = True
 
         current_commit = repo.head.commit.hexsha
-        patched_version = _get_patched_version()
-        if current_commit != patched_version:
-            version_status = f" [bold yellow]- does not match latest patched version {patched_version[:8]}. Update PATCHED_VERSION file[/]"
+        try:
+            patched_version = _get_patched_version()
+        except WorkloadsPinError as e:
+            # The message quotes PATCHED_VERSION's contents, so it must be escaped:
+            # an unescaped "[/]" in that file makes rich raise MarkupError when the
+            # caller prints this line, losing the status output entirely.
+            version_status = f" [bold yellow]- {escape(str(e))}[/]"
         else:
-            version_status = " [bold green]- matches latest patched version[/bold green]"
+            if current_commit != patched_version:
+                version_status = f" [bold yellow]- does not match latest patched version {patched_version[:8]}. Update PATCHED_VERSION file[/]"
+            else:
+                version_status = " [bold green]- matches latest patched version[/bold green]"
 
         return {
             "branch": branch_name,

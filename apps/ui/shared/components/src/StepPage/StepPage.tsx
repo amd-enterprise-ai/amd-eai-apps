@@ -50,7 +50,7 @@ export const StepPage = forwardRef<StepPageHandle, Props>(
     },
     ref,
   ) => {
-    const { t } = useTranslation('common');
+    const { t } = useTranslation('sharedComponents');
     const [currentStep, setCurrentStep] = useState<number>(initialStep);
 
     const clampStep = useCallback(

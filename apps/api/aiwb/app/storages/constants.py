@@ -1,0 +1,16 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+import re
+
+from ..config import AIWB_METADATA_PREFIX, EAI_APPS_METADATA_PREFIX
+
+STORAGE_CONFIGMAP_KIND = "ConfigMap"
+STORAGE_NAME_PREFIX = "wb-storage-"
+STORAGE_NAME_MAX_LENGTH = 63
+STORAGE_NAME_DISPLAY_HASH_LENGTH = 10
+STORAGE_NAME_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+STORAGE_CONFIGMAP_LABEL = f"{EAI_APPS_METADATA_PREFIX}/storage"
+STORAGE_TYPE_LABEL = f"{EAI_APPS_METADATA_PREFIX}/storage-type"
+STORAGE_DISPLAY_NAME_ANNOTATION = f"{AIWB_METADATA_PREFIX}/storage-display-name"

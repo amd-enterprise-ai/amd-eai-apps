@@ -15,6 +15,9 @@ from app.aims.constants import (
     AIM_API_VERSION,
     AIM_MODEL_LABEL,
     AIM_PROFILE_PLURAL,
+    AIM_PROFILE_ROLE_BASE,
+    AIM_PROFILE_ROLE_LABEL,
+    AIM_PROFILE_SOURCE_MODEL_LABEL,
 )
 from app.custom_models.constants import (
     AIM_DEPLOYMENT_IMAGE_REF_ANNOTATION,
@@ -22,6 +25,7 @@ from app.custom_models.constants import (
 from app.custom_models.gateway import (
     find_aim_profile_for_model,
     list_aim_profiles,
+    list_base_role_profiles,
     patch_aim_profile,
     wait_for_aim_profile,
 )
@@ -174,6 +178,85 @@ async def test_list_aim_profiles_returns_empty_on_404(
     profiles = await list_aim_profiles(kube_client, "ns")
 
     assert profiles == []
+
+
+@pytest.mark.asyncio
+async def test_list_aim_profiles_strict_maps_api_failure_to_external_service_error(
+    kube_client: MagicMock,
+) -> None:
+    """Read endpoints request strict behavior so upstream failures become 502s."""
+    kube_client.custom_objects.list_namespaced_custom_object.side_effect = ApiException(
+        status=500, reason="server error"
+    )
+
+    with pytest.raises(ExternalServiceError, match="Failed to list AIMProfiles"):
+        await list_aim_profiles(kube_client, "ns", model_name="model", strict=True)
+
+
+@pytest.mark.asyncio
+async def test_list_aim_profiles_strict_maps_parse_failure_to_external_service_error(
+    kube_client: MagicMock,
+) -> None:
+    """A malformed upstream item must not silently produce a partial 200 response."""
+    kube_client.custom_objects.list_namespaced_custom_object.return_value = {"items": [{"metadata": {}}]}
+
+    with pytest.raises(ExternalServiceError, match="Failed to parse AIMProfile"):
+        await list_aim_profiles(kube_client, "ns", model_name="model", strict=True)
+
+
+@pytest.mark.asyncio
+async def test_list_base_role_profiles_strict_maps_api_failure_to_external_service_error(
+    kube_client: MagicMock,
+) -> None:
+    """The create path requests strict so a K8s failure becomes a 502, not an empty list (then a misleading 400)."""
+    kube_client.custom_objects.list_namespaced_custom_object.side_effect = ApiException(
+        status=500, reason="server error"
+    )
+
+    with pytest.raises(ExternalServiceError, match="Failed to list base-role AIMProfiles"):
+        await list_base_role_profiles(kube_client, "ns", strict=True)
+
+
+@pytest.mark.asyncio
+async def test_list_base_role_profiles_non_strict_swallows_failure(
+    kube_client: MagicMock,
+) -> None:
+    """The onboard wizard leaves strict off, so an upstream failure degrades to static defaults."""
+    kube_client.custom_objects.list_namespaced_custom_object.side_effect = ApiException(
+        status=500, reason="server error"
+    )
+
+    assert await list_base_role_profiles(kube_client, "ns") == []
+
+
+@pytest.mark.asyncio
+async def test_list_base_role_profiles_scopes_to_one_producing_model(
+    kube_client: MagicMock,
+) -> None:
+    """A namespace holds one base model per image family, so the role label alone
+    spans them all. Callers asking what a specific base image offers must narrow
+    on the producing model or they read a sibling family's runtime matrix."""
+    kube_client.custom_objects.list_namespaced_custom_object.return_value = {"items": []}
+
+    await list_base_role_profiles(kube_client, "ns", model_name="aim-audio-base")
+
+    selector = kube_client.custom_objects.list_namespaced_custom_object.await_args.kwargs["label_selector"]
+    assert (
+        selector == f"{AIM_PROFILE_ROLE_LABEL}={AIM_PROFILE_ROLE_BASE},{AIM_PROFILE_SOURCE_MODEL_LABEL}=aim-audio-base"
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_base_role_profiles_spans_every_model_without_a_name(
+    kube_client: MagicMock,
+) -> None:
+    """Callers asking what the namespace offers overall still get every family."""
+    kube_client.custom_objects.list_namespaced_custom_object.return_value = {"items": []}
+
+    await list_base_role_profiles(kube_client, "ns")
+
+    selector = kube_client.custom_objects.list_namespaced_custom_object.await_args.kwargs["label_selector"]
+    assert selector == f"{AIM_PROFILE_ROLE_LABEL}={AIM_PROFILE_ROLE_BASE}"
 
 
 @pytest.mark.asyncio

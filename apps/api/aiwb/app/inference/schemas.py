@@ -33,7 +33,7 @@ class InferenceDeployRequest(AIMDeployRequest):
 
 
 class InferencePatchRequest(AIMServicePatchRequest):
-    """Patch an inference deployment (scaling policy)."""
+    """Patch an inference deployment: its adapter set, its scaling policy, or both."""
 
 
 class InferenceDeploymentResponse(AIMServiceResponse):
@@ -41,7 +41,7 @@ class InferenceDeploymentResponse(AIMServiceResponse):
 
     Inherits every field of ``AIMServiceResponse`` — including the computed
     ``endpoints`` map. ``endpoints.internal`` is the in-cluster URL the AIWB
-    UI uses for the chat bypass described in EAI-6310.
+    UI uses for direct-to-AIM chat.
     """
 
 
@@ -127,11 +127,13 @@ class ListInferenceDeploymentsQuery(PaginationConditions):
     capability: InferenceCapability | None = Field(
         default=None,
         description=(
-            "Filter deployments by capability. Currently only `chat` is "
-            "supported and returns deployments whose model supports chat "
-            "completions and whose serving stack is fully ready."
+            "Filter deployments by capability, derived from the model's catalog "
+            "tags. `chat` returns chat-completion deployments; `transcription` "
+            "returns speech-to-text (Whisper-style) catalog deployments. "
+            "Custom-onboarded (namespace) models are currently classified as "
+            "chat only. Only fully-ready deployments are returned."
         ),
-        examples=["chat"],
+        examples=["chat", "transcription"],
     )
     status_filter: list[AIMServiceStatus] | None = Field(
         default=None,

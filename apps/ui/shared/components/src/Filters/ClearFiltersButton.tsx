@@ -14,7 +14,7 @@ const ClearFiltersButton: React.FC<ClearFiltersButtonProps> = ({
   isDisabled,
   onPress,
 }) => {
-  const { t } = useTranslation('common');
+  const { t } = useTranslation('sharedComponents');
 
   return (
     <ActionButton

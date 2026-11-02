@@ -19,6 +19,9 @@ const generateMockUsers = (count: number): Users => {
     lastName: `LastName ${i + 1}`,
     email: `user${i + 1}@amd.com`,
     role: UserRole.PLATFORM_ADMIN,
+    createdAt: new Date(
+      Date.now() - (i + 1) * 24 * 60 * 60 * 1000,
+    ).toISOString(),
     lastActiveAt:
       i === 0
         ? undefined

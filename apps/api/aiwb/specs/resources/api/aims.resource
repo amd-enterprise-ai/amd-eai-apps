@@ -49,11 +49,13 @@ List AIMs
     ...    accelerator_type (str or list, optional): Accelerator family to filter by
     ...        (cpu or gpu). Pass a list to repeat ``acceleratorType`` for OR semantics
     ...        on the wire, e.g. ['cpu','gpu'].
+    ...    page (int, optional): Page number to request
+    ...    page_size (int, optional): Items per page (max 100)
     ...
     ...    Return:
     ...    response: API response containing list of AIMs
     [Arguments]             ${expected_status}=any    ${status_filter}=${None}    ${accelerator_type}=${None}
-    ...                     ${page_size}=${None}
+    ...                     ${page}=${None}    ${page_size}=${None}
     Create api session    aiwb
     ${endpoint}=            Inference models endpoint
     # When accelerator_type is a list we need repeating params, which requires the
@@ -69,6 +71,10 @@ List AIMs
             ${pair}=                Evaluate                ("acceleratorType", "${value}")
             Append To List          ${tuples}               ${pair}
         END
+        IF    $page != $None
+            ${pair}=                Evaluate                ("page", "${page}")
+            Append To List          ${tuples}               ${pair}
+        END
         IF    $page_size != $None
             ${pair}=                Evaluate                ("pageSize", "${page_size}")
             Append To List          ${tuples}               ${pair}
@@ -77,13 +83,16 @@ List AIMs
         RETURN                  ${response}
     END
     VAR    ${params}    ${None}
-    IF    $status_filter != $None or $accelerator_type != $None or $page_size != $None
+    IF    $status_filter != $None or $accelerator_type != $None or $page != $None or $page_size != $None
         ${params}=              Create Dictionary
         IF    $status_filter != $None
             Set To Dictionary       ${params}               statusFilter=${status_filter}
         END
         IF    $accelerator_type != $None
             Set To Dictionary       ${params}               acceleratorType=${accelerator_type}
+        END
+        IF    $page != $None
+            Set To Dictionary       ${params}               page=${page}
         END
         IF    $page_size != $None
             Set To Dictionary       ${params}               pageSize=${page_size}
@@ -136,15 +145,18 @@ List AIM Services
     ...                      list to deployments matching a specific capability.
     ...    status_filter (str|list): Optional status value or list of status values
     ...                              to filter by (sent as repeated statusFilter query).
+    ...    page (int, optional): Page number (default 1)
+    ...    page_size (int, optional): Page size (default 10, max 100)
     ...
     ...    Return:
     ...    response: API response containing list of inference deployments
     [Arguments]             ${namespace}            ${expected_status}=any
-    ...                     ${capability}=${None}    ${status_filter}=${None}
+    ...                     ${capability}=${None}    ${status_filter}=${None}    ${page_size}=${None}
+    ...                     ${page}=${None}
     Create api session    aiwb
     ${endpoint}=            Project inference endpoint    ${namespace}
     VAR    ${params}    ${None}
-    ${has_filter}=          Evaluate    $capability is not None or $status_filter is not None
+    ${has_filter}=          Evaluate    $capability is not None or $status_filter is not None or $page_size is not None or $page is not None
     IF    ${has_filter}
         ${params}=              Create Dictionary
         IF    $capability is not None
@@ -152,6 +164,12 @@ List AIM Services
         END
         IF    $status_filter is not None
             Set To Dictionary       ${params}    statusFilter=${status_filter}
+        END
+        IF    $page is not None
+            Set To Dictionary       ${params}    page=${page}
+        END
+        IF    $page_size is not None
+            Set To Dictionary       ${params}    pageSize=${page_size}
         END
     END
     ${response}=            Safe Get Request        ${endpoint}             params=${params}        expected_status=${expected_status}
@@ -231,6 +249,24 @@ Update AIM Service Scaling Policy
     Create api session    aiwb
     ${endpoint}=            Project inference endpoint    ${namespace}
     ${response}=            Safe Patch Request      ${endpoint}/${service_id}                       json=${scaling_data}                            expected_status=${expected_status}
+    RETURN                  ${response}
+
+Update AIM Service Adapters
+    [Documentation]    Replace the adapters an inference deployment serves. The list is the
+    ...    complete desired set, so an empty list detaches every adapter. Pass ``scaling`` to
+    ...    change the scaling policy in the same request.
+    ...
+    ...    Return:
+    ...    response: API response containing the updated inference deployment details
+    [Arguments]             ${service_id}           ${adapters}             ${namespace}            ${scaling}=${None}
+    ...                     ${expected_status}=any
+    Create api session    aiwb
+    ${endpoint}=            Project inference endpoint    ${namespace}
+    ${body}=                Create Dictionary       adapters=${adapters}
+    IF                      $scaling is not None
+        Set To Dictionary   ${body}                 &{scaling}
+    END
+    ${response}=            Safe Patch Request      ${endpoint}/${service_id}                       json=${body}                                    expected_status=${expected_status}
     RETURN                  ${response}
 
 List Fine-Tuned AIM Profiles

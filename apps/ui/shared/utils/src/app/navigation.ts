@@ -6,12 +6,12 @@ import {
   IconChartBar,
   IconCheckupList,
   IconCpu,
-  IconDatabase,
   IconFolderRoot,
   IconKey,
   IconLayoutDashboard,
   IconMessage,
   IconServer,
+  IconWheel,
   IconShieldLock,
   IconUsers,
 } from '@tabler/icons-react';
@@ -73,14 +73,42 @@ export const aiWorkbenchMenuItems: SidebarItem[] = [
     icon: React.createElement(IconMessage, { size: 16, stroke: 2 }),
   },
   {
-    href: '/datasets',
-    stringKey: 'pages.datasets.title',
-    icon: React.createElement(IconDatabase, { size: 16, stroke: 2 }),
-  },
-  {
     href: '/models',
     stringKey: 'pages.models.title',
     icon: React.createElement(IconCpu, { size: 16, stroke: 2 }),
+    subItems: [
+      {
+        href: '/models/aim-catalog',
+        stringKey: 'pages.aimCatalog.title',
+      },
+      {
+        href: '/models/custom-models',
+        stringKey: 'pages.customModels.title',
+      },
+      {
+        href: '/models/deployed-models',
+        stringKey: 'pages.deployedModels.title',
+      },
+    ],
+  },
+  {
+    href: '/fine-tuning',
+    stringKey: 'pages.fineTuning.title',
+    icon: React.createElement(IconWheel, { size: 16, stroke: 2 }),
+    subItems: [
+      {
+        href: '/fine-tuning/datasets',
+        stringKey: 'pages.datasets.title',
+      },
+      {
+        href: '/fine-tuning/models',
+        stringKey: 'pages.fineTuneModels.title',
+      },
+      {
+        href: '/fine-tuning/loras',
+        stringKey: 'pages.loras.title',
+      },
+    ],
   },
   {
     href: '/secrets',

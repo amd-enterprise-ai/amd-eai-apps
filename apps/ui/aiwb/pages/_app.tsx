@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { HeroUIProvider } from '@heroui/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SessionProvider } from 'next-auth/react';
 
@@ -22,7 +21,6 @@ import { PageErrorHandler } from '@/components/shared/PageErrorHandler/PageError
 import { ProjectProvider, useProject } from '@/contexts/ProjectContext';
 
 import '@/styles/globals.css';
-import '@/styles/toastify.css';
 import { aiWorkbenchMenuItems } from '@amdenterpriseai/utils/app';
 import { WithDocumentationLink } from '@amdenterpriseai/utils/app';
 import {
@@ -39,46 +37,44 @@ function AppContent({
 }) {
   const router = useRouter();
   const additionalMenuItems = useAirmLinkMenuItem();
-  const { clusterAuthEnabled } = useProject();
+  const { apiKeysManagementEnabled } = useProject();
   const project = router.query.project as string | undefined;
   const isRootPage = !project;
 
   const menuItems = useMemo(
     () =>
-      clusterAuthEnabled
+      apiKeysManagementEnabled
         ? aiWorkbenchMenuItems
         : aiWorkbenchMenuItems.filter((item) => item.href !== '/api-keys'),
-    [clusterAuthEnabled],
+    [apiKeysManagementEnabled],
   );
 
   return (
-    <HeroUIProvider disableRipple>
-      <NextThemesProvider
-        disableTransitionOnChange
-        attribute="class"
-        defaultTheme="dark"
+    <NextThemesProvider
+      disableTransitionOnChange
+      attribute="class"
+      defaultTheme="dark"
+    >
+      <SystemToastContainer />
+      <AppLayout
+        pageBreadcrumb={
+          pageProps?.pageBreadcrumb as AppProps['pageProps']['pageBreadcrumb']
+        }
+        menuItems={menuItems}
+        toolbarEndContent={<ProjectSelect />}
+        appTitle="sections.aiWorkbench.title"
+        documentationHref={Component.documentationLink}
+        additionalMenuItems={additionalMenuItems}
+        projectPrefix={project}
       >
-        <SystemToastContainer />
-        <AppLayout
-          pageBreadcrumb={
-            pageProps?.pageBreadcrumb as AppProps['pageProps']['pageBreadcrumb']
-          }
-          menuItems={menuItems}
-          toolbarEndContent={<ProjectSelect />}
-          appTitle="sections.aiWorkbench.title"
-          documentationHref={Component.documentationLink}
-          additionalMenuItems={additionalMenuItems}
-          projectPrefix={project}
+        <PageErrorHandler
+          projectRequired={!isRootPage}
+          noActiveProjectComponent={<ProjectSelectPrompt />}
         >
-          <PageErrorHandler
-            projectRequired={!isRootPage}
-            noActiveProjectComponent={<ProjectSelectPrompt />}
-          >
-            <Component {...pageProps} />
-          </PageErrorHandler>
-        </AppLayout>
-      </NextThemesProvider>
-    </HeroUIProvider>
+          <Component {...pageProps} />
+        </PageErrorHandler>
+      </AppLayout>
+    </NextThemesProvider>
   );
 }
 

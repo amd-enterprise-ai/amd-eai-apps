@@ -257,7 +257,7 @@ describe('storages page', async () => {
     act(() => {
       fireEvent.click(
         screen.getByRole('button', {
-          name: 'data.refresh',
+          name: 'actions.refresh.title',
         }),
       );
     });
@@ -362,9 +362,9 @@ describe('storages page', async () => {
 
       expect(serverSideTranslations).toHaveBeenCalledWith('en', [
         'common',
+        'sharedComponents',
         'storages',
         'secrets',
-        'sharedComponents',
       ]);
       expect(result).toEqual({
         props: {

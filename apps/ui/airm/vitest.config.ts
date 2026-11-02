@@ -8,6 +8,16 @@ import path from 'path';
 import { defineConfig as defineViteConfig, mergeConfig } from 'vite';
 import { defineConfig as defineVitestConfig } from 'vitest/config';
 
+// Vitest only defaults NODE_ENV to 'test' when it is unset, so a value inherited from the
+// developer's shell wins silently. Under a production value React's CJS entrypoint loads a build
+// with no `act` export, and every @testing-library render fails — locally only, which makes the
+// suite disagree with CI in a way that reads as a regression. Only 'production' trips this, so
+// the sibling UI packages are equally safe pinning 'development' via a `process.env.NODE_ENV` key
+// in their vite `define` block, which vitest hoists into the real process.env. That path works
+// but leans on an undocumented vitest internal; assigning here states the intent directly.
+// The cast is required because Next.js declares NODE_ENV read-only on NodeJS.ProcessEnv.
+(process.env as { NODE_ENV?: string }).NODE_ENV = 'test';
+
 const viteConfig = defineViteConfig({
   plugins: [react()],
 });
@@ -28,6 +38,13 @@ const vitestConfig = defineVitestConfig({
     alias: {
       '\\.(gif|ttf|eot|svg|png)$': '<rootDir>/__mocks__/fileMock.js',
     },
+    // maxWorkers trades suite wall-time against contention on the shared self-hosted
+    // runners. Vitest otherwise sizes its pool from availableParallelism, so every
+    // co-located job slot on one machine claims nearly all of its cores. 25% takes a
+    // 16-core runner from ~15 workers to ~4, so a fully occupied machine is ~4x
+    // oversubscribed rather than ~15x, at the cost of a slower suite when the machine is
+    // idle. Revisit if the slot count per machine or the runner hardware changes.
+    ...(process.env.CI ? { maxWorkers: '25%' } : {}),
     pool: 'threads',
     coverage: {
       provider: 'v8',

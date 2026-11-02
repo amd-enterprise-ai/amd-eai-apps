@@ -14,9 +14,9 @@ import { useOverlayState } from '@amdenterpriseai/hooks';
 import { GetServerSideProps } from 'next';
 import { getServerSession } from 'next-auth';
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import { getUsers, getInvitedUsers } from '@/services/server';
+import { getPageTranslations } from '@/utils/i18n';
 
 import { authOptions } from '@amdenterpriseai/utils/server';
 
@@ -47,8 +47,7 @@ const UsersPage: React.FC<Props> & WithDocumentationLink = ({
     <div className="inline-flex flex-col w-full h-full max-h-full">
       <Tabs
         aria-label="Users tabs"
-        variant="underlined"
-        color="primary"
+        variant="secondary"
         classNames={{
           panel: !isInviteEnabled && 'py-0',
           tabList: isInviteEnabled ? 'mt-8' : 'hidden',
@@ -95,11 +94,7 @@ export const getServerSideProps: GetServerSideProps<Props> = async (
 
     return {
       props: {
-        ...(await serverSideTranslations(context.locale ?? 'en', [
-          'common',
-          'users',
-          'sharedComponents',
-        ])),
+        ...(await getPageTranslations(context.locale ?? 'en', ['users'])),
         invitedUsers: invitedUsersResponse,
         users: usersData,
       },

@@ -31,14 +31,17 @@ Create secret via AIWB API
     Then AIWB secret "test-secret" should exist
 
 List secrets for namespace
-    [Documentation]    Verify listing secrets returns all AIWB-managed secrets
+    [Documentation]    Verify listing secrets returns the secrets this test created.
+    ...    A newly provisioned project may already contain platform-managed baseline secrets,
+    ...    so assert presence by display name instead of an exact total.
     [Tags]    secret    smoke    list
 
-    Given a ready project with user access exists
+    Given a fresh project with user access exists
     And a secret "secret-one" is created via AIWB
     And a secret "secret-two" is created via AIWB
     When AIWB secrets are listed
-    Then AIWB secret list should contain "2" secrets
+    Then the secret list should include display name for "secret-one"
+    And the secret list should include display name for "secret-two"
 
 User can browse project secrets page by page
     [Documentation]    Secrets in a project are served in pages rather than as
@@ -66,6 +69,23 @@ Get secret details
     Given a ready project with user access exists
     And a secret "detail-test" with use case "S3" is created via AIWB
     Then AIWB secret "detail-test" should exist
+
+Create S3 secret via AIWB API
+    [Documentation]    Verify an S3 secret with valid credentials can be created via AIWB
+    [Tags]    secret    smoke    create    s3
+
+    Given a ready project with user access exists
+    When a secret "s3-creds" with use case "S3" is created via AIWB
+    Then AIWB secret "s3-creds" should exist
+
+S3 secret without credentials is rejected
+    [Documentation]    Verify an S3 secret missing recognized access/secret keys is rejected
+    [Tags]    secret    smoke    create    s3
+
+    Given a ready project with user access exists
+    When an S3 secret "no-creds" without credentials is submitted via AIWB
+    Then the response should fail with a validation error
+    And AIWB secret "no-creds" should not exist
 
 Delete secret via AIWB API
     [Documentation]    Verify deleting a secret removes it

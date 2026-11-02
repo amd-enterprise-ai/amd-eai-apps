@@ -14,10 +14,10 @@ that carry inference-specific orchestration:
   ``statusFilter=Deleted``, this function additionally merges in
   DB-persisted historical records (the live K8s catalog never returns
   ``Deleted``; that status is API-only).
-- ``update_inference_scaling_policy`` enforces the "all-three-or-none"
-  scaling-trio rule and raises ``ValidationException`` so the FastAPI
-  exception handler maps it to a 400 — keeping HTTP concerns out of the
-  service layer.
+- ``update_inference_deployment`` decides which spec mutations a PATCH
+  asks for and dispatches to ``aims.service``, refusing only an empty
+  body. It raises ``ValidationException`` so the FastAPI exception handler
+  maps it to a 400 — keeping HTTP concerns out of the service layer.
 
 Pass-through router calls (deploy/get/undeploy/metric/catalog) continue to
 hit ``aims.service`` directly — wrapping them here would add dead
@@ -40,6 +40,7 @@ from ..aims.schemas import AIMServiceResponse
 from ..config import SUBMITTER_ANNOTATION
 from ..dispatch.crds import K8sMetadata
 from ..dispatch.kube_client import KubernetesClient
+from ..minio import MinioClient
 from ..workloads.constants import WORKLOAD_ID_LABEL
 from .enums import InferenceCapability
 from .schemas import InferencePatchRequest
@@ -106,13 +107,17 @@ async def list_inference_deployments(
         [s for s in status_filter if s is not AIMServiceStatus.DELETED] if status_filter else None
     )
 
-    if capability is InferenceCapability.CHAT:
+    if status_filter and not live_status_filter:
+        # Filter is ["Deleted"] alone — nothing live can match, even with a capability filter.
+        live_services = []
+    elif capability is InferenceCapability.CHAT:
         live_services = await aims_service.list_chattable_aim_services(kube_client, project)
         if live_status_filter:
             live_services = [s for s in live_services if s.status.status in live_status_filter]
-    elif status_filter and not live_status_filter:
-        # Filter is ["Deleted"] alone — nothing live can match.
-        live_services = []
+    elif capability is InferenceCapability.TRANSCRIPTION:
+        live_services = await aims_service.list_transcribable_aim_services(kube_client, project)
+        if live_status_filter:
+            live_services = [s for s in live_services if s.status.status in live_status_filter]
     else:
         live_services = await aims_service.list_aim_services(kube_client, project, status_filter=live_status_filter)
 
@@ -129,24 +134,33 @@ async def list_inference_deployments(
     return paginate_list(services, page=page, page_size=page_size)
 
 
-async def update_inference_scaling_policy(
+async def update_inference_deployment(
     kube_client: KubernetesClient,
     project: str,
     id: UUID,
     patch_request: InferencePatchRequest,
+    minio_client: MinioClient | None = None,
 ) -> AIMServiceResponse:
-    if patch_request.auto_scaling is None:
-        raise ValidationException("All scaling fields must be provided: minReplicas, maxReplicas, autoScaling.")
-    # ScalingPolicyMixin's validator guarantees min/max replicas are set whenever
-    # auto_scaling is. cast() narrows the type without runtime overhead and
-    # survives `python -O` (unlike `assert`).
-    min_replicas = cast(int, patch_request.min_replicas)
-    max_replicas = cast(int, patch_request.max_replicas)
-    return await aims_service.update_aim_scaling_policy(
+    # ScalingPolicyMixin's validator has already rejected a partial trio, so autoScaling being set
+    # is the same thing as the scaling policy having been asked for.
+    if patch_request.auto_scaling is None and patch_request.adapters is None:
+        raise ValidationException(
+            "Nothing to update: supply adapters, or all scaling fields (minReplicas, maxReplicas, autoScaling)."
+        )
+    scaling = None
+    if patch_request.auto_scaling is not None:
+        # cast() narrows the types without runtime overhead, and survives `python -O` (unlike
+        # `assert`); the model validators have already established each value is set.
+        scaling = aims_service.ScalingPolicy(
+            min_replicas=cast(int, patch_request.min_replicas),
+            max_replicas=cast(int, patch_request.max_replicas),
+            auto_scaling=patch_request.auto_scaling,
+        )
+    return await aims_service.update_aim_service_spec(
         kube_client=kube_client,
         namespace=project,
         id=id,
-        min_replicas=min_replicas,
-        max_replicas=max_replicas,
-        auto_scaling=patch_request.auto_scaling,
+        adapters=patch_request.adapters,
+        scaling=scaling,
+        minio_client=minio_client,
     )

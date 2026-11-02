@@ -7,7 +7,6 @@ import { useQuery } from '@tanstack/react-query';
 
 import { getServerSession } from 'next-auth';
 import { useTranslation } from 'next-i18next';
-import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import { useRouter } from 'next/router';
 
 import {
@@ -19,6 +18,7 @@ import { getCluster } from '@/services/server';
 import { getProject } from '@/services/server';
 
 import { getProjectDashboardUrl, getProjectEditUrl } from '@/utils/projects';
+import { getPageTranslations } from '@/utils/i18n';
 import {
   DOCS_RESOURCE_MANAGER_BASE,
   WithDocumentationLink,
@@ -142,16 +142,12 @@ const ProjectEditPage: React.FC<Props> & WithDocumentationLink = ({
         </div>
 
         <Tabs
-          placement={'top'}
           aria-label={t('tab.title')}
-          variant="underlined"
+          variant="secondary"
           classNames={{
             tabWrapper: 'w-full mt-8',
             panel: 'overflow-y-scroll h-full w-full mt-4',
-            tabList: 'overflow-hidden',
-            tab: 'overflow-hidden',
           }}
-          color="primary"
         >
           <Tab key="quota" title={t('tab.quota.title')}>
             <ReducedWidthLayout padded={false}>
@@ -242,13 +238,11 @@ export async function getServerSideProps(context: any) {
       storages = await getStorages(session?.accessToken as string);
     }
 
-    const translations = await serverSideTranslations(locale, [
-      'common',
+    const translations = await getPageTranslations(locale, [
       'projects',
       'users',
       'secrets',
       'storages',
-      'sharedComponents',
     ]);
 
     const breadcrumb = [
@@ -271,6 +265,7 @@ export async function getServerSideProps(context: any) {
 
     return {
       props: {
+        session: session ? JSON.parse(JSON.stringify(session)) : null,
         ...translations,
         cluster: clusterResponse,
         project,

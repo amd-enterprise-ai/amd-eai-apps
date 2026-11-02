@@ -3,4 +3,4 @@
 // SPDX-License-Identifier: MIT
 
 export { Tab, Tabs } from './Tabs';
-export type { TabItemProps, TabsProps } from './Tabs';
+export type { TabProps, TabsProps } from './Tabs';

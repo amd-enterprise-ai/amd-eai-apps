@@ -11,6 +11,7 @@ export const ACTIONS_COLUMN_KEY = 'actions';
 export const ACTIONS_COLUMN = {
   key: ACTIONS_COLUMN_KEY,
   width: 1,
+  className: 'text-right vertical-align-middle w-4',
   sortable: false,
 } as TableColumn<typeof ACTIONS_COLUMN_KEY>;
 

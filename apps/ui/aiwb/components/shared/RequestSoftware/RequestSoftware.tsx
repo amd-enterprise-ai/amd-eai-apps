@@ -51,11 +51,7 @@ export const RequestSoftware: React.FC<RequestSoftwareProps> = ({
     body: [...bodyLines, '', '--- System info ---', ...getSystemInfo()],
   });
   return (
-    <Card
-      className="border-foreground/10 border overflow-hidden"
-      shadow="none"
-      data-testid={`request-${variant}`}
-    >
+    <Card className="overflow-hidden p-0" data-testid={`request-${variant}`}>
       <CardBody className="flex flex-row gap-8 p-8 px-12 items-center justify-between overflow-hidden">
         <div className="relative z-10 flex flex-col gap-1">
           <h4>{t(`requestSoftware.${variant}.title`)}</h4>
@@ -65,7 +61,6 @@ export const RequestSoftware: React.FC<RequestSoftwareProps> = ({
         </div>
         <div className="relative">
           <ActionButton
-            as="a"
             href={mailtoHref}
             className="relative z-10"
             primary

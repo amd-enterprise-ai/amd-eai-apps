@@ -29,6 +29,67 @@ def normalize_json_post_payload(post_data: Any) -> dict[str, Any]:
     raise ValueError(msg)
 
 
+@keyword("Resolve S3 storage Kubernetes name")
+def resolve_s3_storage_kubernetes_name(namespace: str, display_name: str) -> str:
+    """Return the storage ConfigMap name for a project-visible display name."""
+    try:
+        result = subprocess.run(
+            [
+                "kubectl",
+                "get",
+                "configmap",
+                "-n",
+                namespace,
+                "-o",
+                "json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_KUBECTL_TIMEOUT,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("kubectl not found on PATH — cannot resolve S3 storage ConfigMap name") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"kubectl get configmap timed out after {_KUBECTL_TIMEOUT}s while resolving storage '{display_name}'"
+        ) from exc
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            "kubectl get configmap failed while resolving storage "
+            f"'{display_name}' in namespace '{namespace}': {result.stderr}"
+        )
+
+    payload = json.loads(result.stdout or "{}")
+    items = payload.get("items", [])
+    matches: list[str] = []
+    for item in items:
+        metadata = item.get("metadata") or {}
+        data = item.get("data") or {}
+        labels = metadata.get("labels") or {}
+        annotations = metadata.get("annotations") or {}
+        storage_type = data.get("TYPE") or data.get("type") or labels.get("airm.silogen.ai/storage-type")
+        if storage_type != "S3":
+            continue
+        if annotations.get("aiwb.apps.eai.amd.com/storage-display-name") != display_name:
+            continue
+        name = metadata.get("name")
+        if isinstance(name, str) and name:
+            matches.append(name)
+
+    if not matches:
+        raise RuntimeError(
+            f"No S3 storage ConfigMap found for display name '{display_name}' in namespace '{namespace}'."
+        )
+    if len(matches) > 1:
+        raise RuntimeError(
+            "Expected exactly one S3 storage ConfigMap for display name "
+            f"'{display_name}' in namespace '{namespace}', found {len(matches)}."
+        )
+    return matches[0]
+
+
 def _sanitize_label_value(value: str, max_length: int = 63) -> str:
     """Mirror the backend's ``sanitize_label_value`` so the seeded CR's model-name
     label matches what real onboarding stamps (``sanitize_label_value(display_name)``).

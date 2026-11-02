@@ -22,9 +22,72 @@ from app.workloads.service import (
     delete_workload_components,
     get_workload_metrics_paginated,
     get_workload_stats_counts,
+    resolve_workload_datasets,
+    resolve_workloads_datasets,
 )
 from tests import factory
 from tests.factory import DEFAULT_TEST_MANIFEST, create_aim_service_db, create_workload, make_aim_service_k8s
+
+
+@pytest.mark.asyncio
+async def test_resolve_workload_datasets_keeps_deleted_dataset_snapshot(db_session: AsyncSession) -> None:
+    available = await factory.create_dataset(
+        db_session,
+        name="Available dataset",
+        path="available.jsonl",
+    )
+    deleted = await factory.create_dataset(
+        db_session,
+        name="Deleted dataset",
+        path="deleted.jsonl",
+    )
+    workload = await factory.create_workload(db_session)
+    workload.dataset_refs = [
+        {"id": str(available.id), "name": available.name},
+        {"id": str(deleted.id), "name": deleted.name},
+    ]
+    await db_session.delete(deleted)
+    await db_session.flush()
+
+    result = await resolve_workload_datasets(db_session, workload.id)
+
+    assert [dataset.model_dump() for dataset in result] == [
+        {"id": available.id, "name": "Available dataset", "available": True},
+        {"id": deleted.id, "name": "Deleted dataset", "available": False},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resolve_workload_datasets_returns_empty_without_refs(db_session: AsyncSession) -> None:
+    workload = await factory.create_workload(db_session)
+
+    result = await resolve_workload_datasets(db_session, workload.id)
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_workloads_datasets_populates_each_workload(db_session: AsyncSession) -> None:
+    datasets = [
+        await factory.create_dataset(
+            db_session,
+            name=f"Dataset {index}",
+            path=f"dataset-{index}.jsonl",
+        )
+        for index in range(2)
+    ]
+    workloads = [await factory.create_workload(db_session) for _ in range(2)]
+    for workload, dataset in zip(workloads, datasets, strict=True):
+        workload.dataset_refs = [{"id": str(dataset.id), "name": dataset.name}]
+
+    result = await resolve_workloads_datasets(db_session, workloads)
+
+    assert {
+        workload_id: [dataset.model_dump() for dataset in resolved] for workload_id, resolved in result.items()
+    } == {
+        workload.id: [{"id": dataset.id, "name": dataset.name, "available": True}]
+        for workload, dataset in zip(workloads, datasets, strict=True)
+    }
 
 
 @pytest.mark.asyncio
@@ -145,7 +208,7 @@ async def test_delete_workload_components_logs_deletion(db_session: AsyncSession
 
 
 # =========================================================================
-# Tests migrated from tests/projects/test_service.py (EAI-6505)
+# Tests migrated from tests/projects/test_service.py
 # =========================================================================
 
 

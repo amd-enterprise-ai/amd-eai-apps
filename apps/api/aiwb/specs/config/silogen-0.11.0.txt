@@ -10,7 +10,7 @@
 #   huggingface/model-name    — match by HuggingFace model ID (tests latest deployed version)
 #
 # To list available model images and versions on your cluster:
-#   silodev curl http://aiwb-api.aiwb/v1/inference/models 2>/dev/null \
+#   curl http://aiwb-api.aiwb/v1/inference/models 2>/dev/null \
 #     | jq '.data[] | "\(.docker_image)  # \(.model_name)"'
 
 # 1 GPU models

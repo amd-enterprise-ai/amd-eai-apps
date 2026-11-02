@@ -41,7 +41,7 @@ class TemporaryUserManager:
     def __init__(self):
         self._auth = KubeconfigAuth()
         self._created_user_ids: list[str] = []
-        # Match the VERIFY_SSL convention from testing/resources/api/endpoints.resource.
+        # Match the shared VERIFY_SSL convention.
         # Dev/test clusters use self-signed certs, so default to disabled.
         self._verify_ssl = os.environ.get("VERIFY_SSL", "false").lower() in ("true", "1", "yes")
 

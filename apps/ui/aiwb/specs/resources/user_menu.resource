@@ -8,7 +8,6 @@ Documentation       BDD keywords for the global user menu.
 ...                 suitable for Given-When-Then test cases.
 ...
 ...                 Layer: Feature (tests import this, NOT page resources directly)
-Resource            common/session.resource
 Resource            pages/user_menu_page.resource
 
 
@@ -25,6 +24,12 @@ User opens the user menu
 # =============================================================================
 # Then keywords (verification)
 # =============================================================================
+
+The user menu should be labeled for actions
+    [Documentation]    Verifies the shared menu label renders as user-facing text.
+
+    ${accessible_name}=    Get user menu accessible name
+    Should Be Equal As Strings    ${accessible_name}    Actions
 
 Report issue menu entry should link to support mailto
     [Documentation]    Verifies the "Report issue" entry in the user menu exposes a

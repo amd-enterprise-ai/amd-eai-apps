@@ -65,7 +65,7 @@ export const Basic: Story = () => {
         renderFields={renderSecretFields}
       />
       {lastSubmit && (
-        <pre className="text-tiny p-3 bg-default-100 rounded-lg overflow-auto">
+        <pre className="text-xs p-3 bg-default rounded-lg overflow-auto">
           {JSON.stringify(lastSubmit, null, 2)}
         </pre>
       )}

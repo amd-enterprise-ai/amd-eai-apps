@@ -6,52 +6,27 @@ import {
   PlotPoint,
   TimeRangePeriod,
   TimeSeriesData,
-  WorkloadType,
 } from '@amdenterpriseai/types';
-import { CatalogItem, CatalogItemDeployment } from '@/types/catalog';
-import { WorkloadStatus } from '@/types/enums/workloads';
-import { PaginatedList } from '@/types/pagination';
-import {
-  Workload,
-  WorkloadLogParams,
-  WorkloadLogResponse,
-} from '@/types/workloads';
-import { APIRequestError, getErrorMessage } from '@amdenterpriseai/utils/app';
+import { apiClient, getApiClientErrorMessage } from '@/lib/api-client';
+import { WorkspaceDeploymentPayload } from '@/types/workspaces';
+import type { components, operations } from '@/types/api';
+import { APIRequestError } from '@amdenterpriseai/utils/app';
 
 import { fetchAllPages } from './pagination';
 
-export type WorkloadsResponse = PaginatedList<Workload>;
+type WorkloadMetricResult =
+  | components['schemas']['MetricsTimeseries']
+  | components['schemas']['MetricsScalar']
+  | components['schemas']['MetricsScalarWithRange'];
 
-export interface WorkloadFilters {
-  type?: WorkloadType[];
-  status?: WorkloadStatus[];
-}
+/** Workload as returned by the API (single source of truth for list/read). */
+type WorkloadResponse = components['schemas']['WorkloadResponse'];
 
-const buildWorkloadsUrl = (
-  projectId: string,
-  page: number,
-  pageSize: number | undefined,
-  filters: WorkloadFilters | undefined,
-): string => {
-  const urlParams = new URLSearchParams();
-  if (filters?.type) {
-    filters.type.forEach((t) => {
-      urlParams.append('workloadType', t);
-    });
-  }
-  if (filters?.status) {
-    filters.status.forEach((s) => {
-      urlParams.append('statusFilter', s);
-    });
-  }
-  urlParams.append('page', String(page));
-  // Omit pageSize when not specified so the backend applies its own default
-  // — the FE shouldn't mirror the backend's pagination defaults.
-  if (pageSize !== undefined) {
-    urlParams.append('pageSize', String(pageSize));
-  }
-  return `/api/projects/${projectId}/workloads?${urlParams.toString()}`;
-};
+export type WorkloadsResponse = components['schemas']['WorkloadsList'];
+
+type ListWorkloadsQuery = NonNullable<
+  operations['list_project_workloads_v1_projects__project__workloads_get']['parameters']['query']
+>;
 
 /**
  * Fetches a single page of workloads for a project.
@@ -64,34 +39,42 @@ export const listWorkloadsPage = async (
   projectId: string,
   page: number = 1,
   pageSize?: number,
-  filters?: WorkloadFilters,
+  filters?: Pick<ListWorkloadsQuery, 'workloadType' | 'statusFilter'>,
 ): Promise<WorkloadsResponse> => {
   if (!projectId) {
     throw new APIRequestError('No project selected', 422);
   }
-  const response = await fetch(
-    buildWorkloadsUrl(projectId, page, pageSize, filters),
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/workloads',
     {
-      method: 'GET',
+      params: {
+        path: { project: projectId },
+        query: {
+          page,
+          // Omit pageSize when not specified so the backend applies its own
+          // default — the FE shouldn't mirror the backend's pagination defaults.
+          ...(pageSize !== undefined ? { pageSize } : {}),
+          workloadType: filters?.workloadType,
+          statusFilter: filters?.statusFilter,
+        },
+      },
     },
   );
 
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to list workloads: ${errorMessage}`,
+      `Failed to list workloads: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 
-  return await response.json();
+  return data;
 };
 
 /**
  * Lists every workload for a project by walking all pages.
  *
- * Thin wrapper around fetchAllPages — see `apps/ui/aiwb/AGENTS.md`
- * "Paginated list loaders". Intended for callers that need an exhaustive
+ * Thin wrapper around fetchAllPages. Intended for callers that need an exhaustive
  * list (e.g., joining workloads against AIM services or models).
  *
  * Errors propagate to the caller so React Query can surface them; see
@@ -100,12 +83,12 @@ export const listWorkloadsPage = async (
  */
 export const listAllWorkloads = async (
   projectId: string,
-  filters?: WorkloadFilters,
-): Promise<Workload[]> => {
+  filters?: Pick<ListWorkloadsQuery, 'workloadType' | 'statusFilter'>,
+): Promise<WorkloadResponse[]> => {
   if (!projectId) {
     throw new APIRequestError('No project selected', 422);
   }
-  return fetchAllPages<Workload>((page, pageSize) =>
+  return fetchAllPages<WorkloadResponse>((page, pageSize) =>
     listWorkloadsPage(projectId, page, pageSize, filters),
   );
 };
@@ -113,28 +96,26 @@ export const listAllWorkloads = async (
 export const getWorkload = async (
   workloadId: string,
   projectId?: string,
-): Promise<Workload> => {
+): Promise<WorkloadResponse> => {
   if (!projectId) {
     throw new APIRequestError('No project selected', 422);
   }
 
-  const response = await fetch(
-    `/api/projects/${projectId}/workloads/${workloadId}`,
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/workloads/{workload_id}',
     {
-      method: 'GET',
+      params: { path: { project: projectId, workload_id: workloadId } },
     },
   );
 
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to get workload: ${errorMessage}`,
+      `Failed to get workload: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 
-  const json = await response.json();
-  return json;
+  return data;
 };
 
 export const getWorkloadMetrics = async (
@@ -142,105 +123,93 @@ export const getWorkloadMetrics = async (
   projectId: string,
   start: Date,
   end: Date,
-  metric: string,
-): Promise<any> => {
+  metric: components['schemas']['MetricName'],
+): Promise<WorkloadMetricResult> => {
   if (!projectId) {
     throw new APIRequestError('No project selected', 422);
   }
-
-  const urlParams = new URLSearchParams();
-  urlParams.append('start', start.toISOString());
-  urlParams.append('end', end.toISOString());
-
-  const response = await fetch(
-    `/api/projects/${projectId}/workloads/${workloadId}/metrics/${metric}?${urlParams.toString()}`,
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/workloads/{workload_id}/metrics/{metric}',
     {
-      method: 'GET',
+      params: {
+        path: {
+          project: projectId,
+          workload_id: workloadId,
+          metric,
+        },
+        query: { start: start.toISOString(), end: end.toISOString() },
+      },
     },
   );
-
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to get workload metrics: ${errorMessage}`,
+      `Failed to get workload metrics: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-
-  const json = await response.json();
-  return json;
+  return data;
 };
 
 export const deleteWorkspace = async (
   projectId: string,
   workloadId: string,
 ) => {
-  const response = await fetch(
-    `/api/projects/${projectId}/workspaces/${workloadId}`,
-    {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    },
+  const { error, response } = await apiClient.DELETE(
+    '/api/projects/{project}/workspaces/{workload_id}',
+    { params: { path: { project: projectId, workload_id: workloadId } } },
   );
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error) {
     throw new APIRequestError(
-      `Failed to terminate workspace: ${errorMessage}`,
+      `Failed to terminate workspace: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 };
 
+type WorkloadLogParams = NonNullable<
+  operations['get_workload_logs_endpoint_v1_projects__project__workloads__workload_id__logs_get']['parameters']['query']
+>;
+
 export const getWorkloadLogs = async (
   projectId: string,
   workloadId: string,
-  params: WorkloadLogParams = {},
-): Promise<WorkloadLogResponse> => {
-  const urlParams = new URLSearchParams();
-
-  // Workload logs endpoint requires 'start' and 'end' parameters (ISO format)
-  // Default to last 24 hours if not provided
-  const end = params.endDate ? new Date(params.endDate) : new Date();
-  const start = params.startDate
-    ? new Date(params.startDate)
-    : new Date(end.getTime() - 24 * 60 * 60 * 1000);
-
-  urlParams.append('start', start.toISOString());
-  urlParams.append('end', end.toISOString());
-
-  if (params.pageToken) {
-    // Ensure the pageToken has timezone info
-    let pageToken = params.pageToken;
-    // If it doesn't end with 'Z' or contain timezone offset (+/-), assume UTC and add 'Z'
-    if (!pageToken.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(pageToken)) {
-      pageToken = pageToken + 'Z';
-    }
-    urlParams.append('pageToken', pageToken);
+  params: WorkloadLogParams,
+): Promise<components['schemas']['WorkloadLogsResponse']> => {
+  let pageToken = params.pageToken;
+  // Ensure the pageToken carries timezone info: if it doesn't end with 'Z' or
+  // contain a timezone offset (+/-), assume UTC and append 'Z'.
+  if (
+    pageToken &&
+    !pageToken.endsWith('Z') &&
+    !/[+-]\d{2}:\d{2}$/.test(pageToken)
+  ) {
+    pageToken = pageToken + 'Z';
   }
-  if (params.level) urlParams.append('level', params.level);
-  if (params.limit) urlParams.append('limit', params.limit.toString());
-  if (params.direction) urlParams.append('direction', params.direction);
-  if (params.logType) urlParams.append('logType', params.logType);
-  const response = await fetch(
-    `/api/projects/${projectId}/workloads/${workloadId}/logs?${urlParams.toString()}`,
+  // openapi-fetch omits undefined query params, so pass optionals through directly.
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/workloads/{workload_id}/logs',
     {
-      method: 'GET',
+      params: {
+        path: { project: projectId, workload_id: workloadId },
+        query: {
+          start: params.start,
+          end: params.end,
+          pageToken,
+          level: params.level,
+          limit: params.limit,
+          direction: params.direction,
+          logType: params.logType,
+        },
+      },
     },
   );
-
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to get workload logs: ${errorMessage}`,
+      `Failed to get workload logs: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-
-  const json = await response.json();
-  // Return logs response directly (individual resource endpoint, not wrapped)
-  return json;
+  return data;
 };
 
 /**
@@ -268,7 +237,7 @@ export const transformTimeSeriesDataToChartData = (
             typeof meta === 'object' && meta !== null && 'name' in meta
               ? (meta as { name: string }).name
               : String(meta);
-          acc[categoryName] = matchingData ? matchingData.value : 0;
+          acc[categoryName] = matchingData ? (matchingData.value ?? null) : 0;
           return acc;
         },
         { date: timestamp },
@@ -301,10 +270,8 @@ export const getTickGap = (
 
 export const deployWorkspace = async (
   projectId: string,
-  payload: CatalogItemDeployment,
-): Promise<{
-  id: string;
-}> => {
+  payload: WorkspaceDeploymentPayload,
+): Promise<components['schemas']['WorkloadResponse']> => {
   const {
     template,
     displayName,
@@ -314,77 +281,28 @@ export const deployWorkspace = async (
     image,
     imagePullSecrets,
   } = payload;
-
-  const params = new URLSearchParams();
-  if (displayName) {
-    params.set('displayName', displayName);
-  }
-  const query = params.toString();
-  const url = `/api/projects/${projectId}/workspaces${query ? `?${query}` : ''}`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  const { data, error, response } = await apiClient.POST(
+    '/api/projects/{project}/workspaces',
+    {
+      params: {
+        path: { project: projectId },
+        query: displayName ? { displayName } : {},
+      },
+      body: {
+        workspaceType: template,
+        gpus,
+        memoryPerGpu,
+        cpuPerGpu,
+        image,
+        imagePullSecrets,
+      },
     },
-    body: JSON.stringify({
-      workspaceType: template,
-      gpus,
-      memoryPerGpu,
-      cpuPerGpu,
-      image,
-      imagePullSecrets,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  );
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to deploy catalog item: ${errorMessage}`,
+      `Failed to deploy catalog item: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
-
-  return await response.json();
-};
-
-export const getCatalogItems = async (
-  type?: WorkloadType,
-): Promise<CatalogItem[]> => {
-  const urlParams = new URLSearchParams();
-  if (type) {
-    urlParams.append('type', type);
-  }
-
-  const url = `/api/charts${urlParams.toString() ? `?${urlParams.toString()}` : ''}`;
-
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
-    throw new APIRequestError(
-      `Failed to fetch catalog items: ${errorMessage}`,
-      response.status,
-    );
-  }
-
-  const catalogResponse = await response.json();
-
-  return catalogResponse.data;
-};
-
-export const getCatalogItemById = async (id: string): Promise<CatalogItem> => {
-  const url = `/api/charts/${id}`;
-
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
-    throw new APIRequestError(
-      `Failed to fetch catalog item: ${errorMessage}`,
-      response.status,
-    );
-  }
-
-  return await response.json();
+  return data;
 };

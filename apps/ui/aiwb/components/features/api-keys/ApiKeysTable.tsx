@@ -18,9 +18,8 @@ import { deleteApiKey, fetchProjectApiKeys } from '@/lib/app/api-keys';
 import { getFilteredData } from '@amdenterpriseai/utils/app';
 import { APIRequestError } from '@amdenterpriseai/utils/app';
 
-import { ApiKey } from '@/types/api-keys';
+import type { components } from '@/types/api';
 import { TableColumns } from '@amdenterpriseai/types';
-import { ApiKeysTableField } from '@/types/enums/api-keys-table-fields';
 import { FilterComponentType } from '@amdenterpriseai/types';
 import { SortDirection } from '@amdenterpriseai/types';
 import { ClientSideDataFilter } from '@amdenterpriseai/types';
@@ -33,6 +32,18 @@ import {
   DateDisplay,
   NoDataDisplay,
 } from '@amdenterpriseai/components';
+
+const ApiKeysTableField = {
+  NAME: 'name',
+  SECRET_KEY: 'secretKey',
+  CREATED_AT: 'createdAt',
+  CREATED_BY: 'createdBy',
+} as const;
+
+type ApiKeysTableField =
+  (typeof ApiKeysTableField)[keyof typeof ApiKeysTableField];
+
+type ApiKey = components['schemas']['ApiKeyResponse'];
 
 interface Props {
   projectId: string;

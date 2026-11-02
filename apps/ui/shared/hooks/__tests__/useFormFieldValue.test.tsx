@@ -2,7 +2,13 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { act, renderHook } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+} from '@testing-library/react';
 import { useForm } from 'react-hook-form';
 
 import { useFormFieldValue } from '@amdenterpriseai/hooks';
@@ -105,27 +111,20 @@ describe('useFormFieldValue', () => {
     });
   });
 
-  it('should not update currentValue when updating through updateFormValue to prevent infinite loops', async () => {
+  it('should clear isUpdatingRef once an updateFormValue call has settled', async () => {
     const { result } = renderHook(() => {
       const form = useForm<TestFormData>({ defaultValues });
       return { form, hook: useFormFieldValue(form, 'numberField') };
     });
 
-    const initialValue = result.current.hook.currentValue;
-
-    // Mock the watch subscription to track how many times it's called
-    const watchSpy = vi.spyOn(result.current.form, 'watch');
-
     act(() => {
       result.current.hook.updateFormValue(50);
     });
 
-    // Wait for the promise to resolve and flag to reset
     await act(async () => {
       await Promise.resolve();
     });
 
-    // Verify that the isUpdatingRef flag is managed correctly
     expect(result.current.hook.isUpdatingRef.current).toBe(false);
     expect(result.current.form.getValues('numberField')).toBe(50);
   });
@@ -181,25 +180,56 @@ describe('useFormFieldValue', () => {
     expect(result.current.hook.currentValue).toBe('now defined');
   });
 
-  it('should clean up subscription when unmounted', () => {
-    // Mock the unsubscribe function before rendering
-    const unsubscribeSpy = vi.fn();
-    const mockSubscription = { unsubscribe: unsubscribeSpy };
-
-    const { result, unmount } = renderHook(() => {
+  it('should update currentValue when form.reset is called', () => {
+    const { result } = renderHook(() => {
       const form = useForm<TestFormData>({ defaultValues });
-
-      // Mock the watch method to return our mock subscription
-      vi.spyOn(form, 'watch').mockReturnValue(mockSubscription);
-
-      return { form, hook: useFormFieldValue(form, 'stringField') };
+      return { form, hook: useFormFieldValue(form, 'numberField') };
     });
 
-    // Unmount the hook
-    unmount();
+    expect(result.current.hook.currentValue).toBe(10);
 
-    // Verify that unsubscribe was called
-    expect(unsubscribeSpy).toHaveBeenCalled();
+    act(() => {
+      result.current.form.reset({ ...defaultValues, numberField: 75 });
+    });
+
+    expect(result.current.hook.currentValue).toBe(75);
+  });
+
+  it('should reflect the reset value for a registered field when the form uses shouldUnregister', () => {
+    // ManagedForm configures `shouldUnregister: true`. Under that option react-hook-form
+    // publishes the reset notification while the field is momentarily unregistered, so
+    // reading the value back off the form during that notification yields `undefined`.
+    // The hook must still settle on the value the form was reset to; consumers such as
+    // FormSlider substitute their own fallback (minValue, i.e. 0) for `undefined` and
+    // would otherwise silently render the wrong value after a reset.
+    const ResetProbe = () => {
+      const form = useForm<TestFormData>({
+        defaultValues,
+        shouldUnregister: true,
+      });
+      const { currentValue } = useFormFieldValue(form, 'numberField');
+
+      return (
+        <form>
+          <input {...form.register('numberField')} />
+          <output data-testid="mirrored-value">{String(currentValue)}</output>
+          <button
+            type="button"
+            onClick={() => form.reset({ ...defaultValues, numberField: 75 })}
+          >
+            Reset
+          </button>
+        </form>
+      );
+    };
+
+    render(<ResetProbe />);
+
+    expect(screen.getByTestId('mirrored-value')).toHaveTextContent('10');
+
+    fireEvent.click(screen.getByText('Reset'));
+
+    expect(screen.getByTestId('mirrored-value')).toHaveTextContent('75');
   });
 
   it('should maintain stable updateFormValue function reference', () => {

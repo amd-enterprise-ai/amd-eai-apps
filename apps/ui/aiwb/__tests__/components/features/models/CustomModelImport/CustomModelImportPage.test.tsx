@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { Mock, vi } from 'vitest';
 
@@ -20,7 +21,10 @@ import {
 } from '@/lib/app/custom-models';
 import { onboardModel, previewModelSource } from '@/lib/app/model-import';
 import { fetchProjectSecrets } from '@/lib/app/secrets';
-import type { CustomModel } from '@/types/custom-models';
+import { fetchProjectStorages } from '@/lib/app/storages';
+import type { components } from '@/types/api';
+
+type CustomModelResponse = components['schemas']['CustomModelResponse'];
 
 import CustomModelImportPage from '@/components/features/models/CustomModelImport';
 
@@ -46,7 +50,12 @@ vi.mock('@/lib/app/custom-models', async (importOriginal) => ({
 vi.mock('@/lib/app/secrets', async (importOriginal) => ({
   ...(await importOriginal()),
   fetchProjectSecrets: vi.fn(),
-  createProjectSecret: vi.fn(),
+}));
+
+vi.mock('@/lib/app/storages', async (importOriginal) => ({
+  ...(await importOriginal()),
+  fetchProjectStorages: vi.fn(),
+  createProjectStorage: vi.fn(),
 }));
 
 vi.mock('@amdenterpriseai/hooks', async (importOriginal) => ({
@@ -76,9 +85,12 @@ const catalogFixture = {
   ],
   accelerators: [
     {
+      acceleratorType: 'gpu',
+      acceleratorVendor: 'amd',
       deviceId: '74a1',
       productName: 'AMD Instinct MI300X',
       allocatableCount: 8,
+      acceleratorModel: 'MI300X',
     },
   ],
   runtimeOptions: null,
@@ -89,6 +101,7 @@ const catalogFixture = {
 };
 
 const previewResponse = {
+  sourceType: 'huggingFace' as const,
   repoId: 'meta-llama/Llama-3',
   revision: 'main',
   sha: 'abc123',
@@ -127,8 +140,7 @@ const aggregatedCustomModel = (displayName: string, resourceName: string) =>
       artifactPhase: null,
       artifactLastError: null,
     },
-    status: null,
-    profile: null,
+    profiles: [],
   });
 
 describe('CustomModelImportPage', () => {
@@ -203,8 +215,8 @@ describe('CustomModelImportPage', () => {
     await clickNextOnSource();
     await waitFor(() => {
       expect(previewModelSource).toHaveBeenCalledWith('project1', {
+        sourceType: 'huggingFace',
         source: 'meta-llama/Llama-3',
-        hfTokenSecretName: undefined,
       });
     });
     await screen.findByPlaceholderText(DISPLAY_NAME_PLACEHOLDER);
@@ -310,6 +322,75 @@ describe('CustomModelImportPage', () => {
       expect(
         screen.queryByTestId('custom-model-import-duplicate-name-warning'),
       ).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Tags help tooltip', () => {
+    const goToInformationStep = async () => {
+      await enterSource('meta-llama/Llama-3');
+      await clickNextOnSource();
+      await screen.findByTestId('custom-model-import-display-name');
+    };
+
+    it('renders a help tooltip trigger next to the Tags field', async () => {
+      await act(async () => {
+        renderPage();
+      });
+      await goToInformationStep();
+      const trigger = screen.getByTestId('custom-model-import-tags-tooltip');
+      expect(trigger).toBeInTheDocument();
+      // The accessible label carries the tooltip copy so screen readers can
+      // announce the guidance even without opening the tooltip.
+      expect(trigger).toHaveAttribute('aria-label', 'fields.tags.tooltip');
+    });
+
+    it('reveals the tooltip content on keyboard focus', async () => {
+      await act(async () => {
+        renderPage();
+      });
+      await goToInformationStep();
+      // The icon itself is not focusable; Tooltip wraps it in a trigger that
+      // carries the button role, so keyboard users reach the guidance by tab.
+      const trigger = screen.getByRole('button', {
+        name: 'fields.tags.tooltip',
+      });
+      await act(async () => {
+        trigger.focus();
+      });
+      expect(trigger).toHaveFocus();
+      expect(await screen.findByRole('tooltip')).toHaveTextContent(
+        'fields.tags.tooltip',
+      );
+    });
+
+    it('allows onboarding with empty tags without warning or error', async () => {
+      await act(async () => {
+        renderPage();
+      });
+      await enterSource('meta-llama/Llama-3');
+      await clickNextOnSource();
+      const displayNameInput = await screen.findByTestId(
+        'custom-model-import-display-name',
+      );
+      await act(async () => {
+        fireEvent.change(displayNameInput, {
+          target: { value: 'test-custom-model' },
+        });
+      });
+      const tagsInput = screen.getByPlaceholderText('fields.tags.placeholder');
+      await act(async () => {
+        fireEvent.change(tagsInput, { target: { value: '' } });
+        fireEvent.blur(tagsInput);
+      });
+      await act(async () => {
+        fireEvent.click(
+          screen.getByTestId('custom-model-import-next-information'),
+        );
+      });
+      // Empty tags must not block progression to the runtime step.
+      expect(
+        await screen.findByTestId('custom-model-import-submit'),
+      ).toBeInTheDocument();
     });
   });
 
@@ -483,12 +564,228 @@ describe('CustomModelImportPage', () => {
     expect(onboardModel).not.toHaveBeenCalled();
   });
 
+  describe('S3 source', () => {
+    const S3_SOURCE_PLACEHOLDER = 'fields.source.s3Placeholder';
+    const S3_SECRET = {
+      metadata: { name: 's3-creds', namespace: 'project1' },
+      displayName: 'Team bucket credentials',
+      useCase: 'S3',
+    };
+
+    const S3_STORAGE = {
+      name: 's3-creds',
+      type: 'S3',
+      secretName: 's3-creds',
+      spec: {},
+    };
+
+    const s3PreviewResponse = {
+      ...previewResponse,
+      sourceType: 's3' as const,
+      repoId: 's3://my-bucket/models/llama',
+      revision: 's3',
+      sha: 's3',
+      displayName: 'llama',
+      description: '',
+      tags: [],
+    };
+
+    const chooseSourceType = async (label: string) => {
+      await act(async () => {
+        fireEvent.click(screen.getByRole('radio', { name: label }));
+      });
+    };
+
+    const chooseS3 = () => chooseSourceType('sourceTypes.s3.label');
+
+    const enterS3Source = async (value: string) => {
+      await act(async () => {
+        fireEvent.change(screen.getByPlaceholderText(S3_SOURCE_PLACEHOLDER), {
+          target: { value },
+        });
+      });
+    };
+
+    const selectS3Storage = async () => {
+      const trigger = within(
+        screen.getByTestId('project-s3-storage-selector'),
+      ).getByRole('button');
+      await waitFor(() => {
+        expect(trigger).toBeEnabled();
+      });
+      await act(async () => {
+        fireEvent.click(trigger);
+      });
+      const option = await screen.findByRole('option', {
+        name: S3_STORAGE.name,
+      });
+      await act(async () => {
+        fireEvent.click(option);
+      });
+    };
+
+    beforeEach(() => {
+      (fetchProjectSecrets as Mock).mockResolvedValue({ data: [S3_SECRET] });
+      (fetchProjectStorages as Mock).mockResolvedValue({ data: [S3_STORAGE] });
+      (previewModelSource as Mock).mockResolvedValue(s3PreviewResponse);
+    });
+
+    it('previews with the S3 secret and no Hugging Face token', async () => {
+      await act(async () => {
+        renderPage();
+      });
+      await chooseS3();
+      await enterS3Source('s3://my-bucket/models/llama');
+      await selectS3Storage();
+      await clickNextOnSource();
+
+      await waitFor(() => {
+        expect(previewModelSource).toHaveBeenCalledWith('project1', {
+          sourceType: 's3',
+          source: 's3://my-bucket/models/llama',
+          s3StorageName: 's3-creds',
+        });
+      });
+      await screen.findByPlaceholderText(DISPLAY_NAME_PLACEHOLDER);
+    });
+
+    it('blocks preview until the source is a bucket URI with a prefix', async () => {
+      await act(async () => {
+        renderPage();
+      });
+      await chooseS3();
+      await selectS3Storage();
+      await enterS3Source('s3://my-bucket');
+      await clickNextOnSource();
+      expect(previewModelSource).not.toHaveBeenCalled();
+
+      await enterS3Source('s3://my-bucket/models/llama');
+      await clickNextOnSource();
+      await waitFor(() => {
+        expect(previewModelSource).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('blocks preview until a storage configuration is entered', async () => {
+      await act(async () => {
+        renderPage();
+      });
+      await chooseS3();
+      await enterS3Source('s3://my-bucket/models/llama');
+      await clickNextOnSource();
+      expect(previewModelSource).not.toHaveBeenCalled();
+
+      await selectS3Storage();
+      await clickNextOnSource();
+      await waitFor(() => {
+        expect(previewModelSource).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('onboards with the S3 source type and credential', async () => {
+      await act(async () => {
+        renderPage();
+      });
+      await chooseS3();
+      await enterS3Source('s3://my-bucket/models/llama');
+      await selectS3Storage();
+      await clickNextOnSource();
+
+      const displayNameInput = await screen.findByPlaceholderText(
+        DISPLAY_NAME_PLACEHOLDER,
+      );
+      await act(async () => {
+        fireEvent.change(displayNameInput, { target: { value: 'llama-s3' } });
+      });
+      await act(async () => {
+        fireEvent.click(
+          screen.getByTestId('custom-model-import-next-information'),
+        );
+      });
+      await screen.findByTestId('custom-model-import-submit');
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('custom-model-import-submit'));
+      });
+
+      await waitFor(() => {
+        expect(onboardModel).toHaveBeenCalledTimes(1);
+      });
+      const body = (onboardModel as Mock).mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect(body).toMatchObject({
+        sourceType: 's3',
+        s3StorageName: 's3-creds',
+        repoId: 's3://my-bucket/models/llama',
+        revision: 's3',
+        sha: 's3',
+      });
+      expect(body).not.toHaveProperty('hfTokenSecretName');
+    });
+
+    it('clears the previous source and credential when switching source type', async () => {
+      await act(async () => {
+        renderPage();
+      });
+      await enterSource('meta-llama/Llama-3');
+      await chooseS3();
+
+      expect(screen.getByPlaceholderText(S3_SOURCE_PLACEHOLDER)).toHaveValue(
+        '',
+      );
+      await enterS3Source('s3://my-bucket/models/llama');
+      await selectS3Storage();
+
+      await chooseSourceType('sourceTypes.huggingFace.label');
+      expect(screen.getByPlaceholderText(SOURCE_PLACEHOLDER)).toHaveValue('');
+
+      await enterSource('meta-llama/Llama-3');
+      await clickNextOnSource();
+      await waitFor(() => {
+        expect(previewModelSource).toHaveBeenCalledWith('project1', {
+          sourceType: 'huggingFace',
+          source: 'meta-llama/Llama-3',
+        });
+      });
+    });
+
+    it('surfaces preview warnings without blocking the next step', async () => {
+      (previewModelSource as Mock).mockResolvedValue({
+        ...s3PreviewResponse,
+        warnings: ['No tokenizer files found under the prefix.'],
+      });
+      await act(async () => {
+        renderPage();
+      });
+      await chooseS3();
+      await enterS3Source('s3://my-bucket/models/llama');
+      await selectS3Storage();
+      await clickNextOnSource();
+
+      const warnings = await screen.findByTestId(
+        'custom-model-import-preview-warnings',
+      );
+      expect(warnings).toHaveTextContent(
+        'No tokenizer files found under the prefix.',
+      );
+      await act(async () => {
+        fireEvent.click(
+          screen.getByTestId('custom-model-import-next-information'),
+        );
+      });
+      expect(
+        await screen.findByTestId('custom-model-import-submit'),
+      ).toBeInTheDocument();
+    });
+  });
+
   describe('edit mode', () => {
     const MODEL_ID = 'gemma3-1b-it-import-d41ec23c';
 
     const buildEditModel = (
-      overrides: Partial<CustomModel> = {},
-    ): CustomModel => ({
+      overrides: Partial<CustomModelResponse> = {},
+    ): CustomModelResponse => ({
       metadata: {
         name: MODEL_ID,
         namespace: 'project1',
@@ -522,12 +819,12 @@ describe('CustomModelImportPage', () => {
         artifactPhase: null,
         artifactLastError: null,
       },
-      status: null,
-      profile: {},
+      status: undefined,
+      profiles: [],
       ...overrides,
     });
 
-    const renderEditPage = (model: CustomModel = buildEditModel()) => {
+    const renderEditPage = (model: CustomModelResponse = buildEditModel()) => {
       (getCustomModel as Mock).mockResolvedValue(model);
       (patchCustomModel as Mock).mockResolvedValue(undefined);
       return render(<CustomModelImportPage mode="edit" modelId={MODEL_ID} />, {
@@ -660,6 +957,41 @@ describe('CustomModelImportPage', () => {
       expect(body).toEqual({ displayName: 'gemma-3-1b-it-v2' });
     });
 
+    it('allows a metadata-only save even when the runtime matrix is unusable', async () => {
+      // The base emitted profiles but none resolves, so the runtime step is
+      // blocked. A rename resolves no base profile and sends no runtime data, so
+      // Save must stay enabled for a display-name-only edit.
+      (useRuntimeProfileCatalog as Mock).mockReturnValue({
+        ...catalogFixture,
+        runtimeOptions: {
+          acceleratorModels: ['MI300X'],
+          precisions: ['fp16'],
+          acceleratorCounts: [1],
+          optimizationClasses: [],
+          metrics: ['latency'],
+          combinations: [],
+          profilesAvailable: true,
+        },
+      });
+      await act(async () => {
+        renderEditPage();
+      });
+      await goToInformation();
+      await editDisplayName('gemma-3-1b-it-v2');
+      await goToRuntime();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('custom-model-import-submit'));
+      });
+      await waitFor(() => {
+        expect(patchCustomModel).toHaveBeenCalledTimes(1);
+      });
+      const body = (patchCustomModel as Mock).mock.calls[0][2] as Record<
+        string,
+        unknown
+      >;
+      expect(body).toEqual({ displayName: 'gemma-3-1b-it-v2' });
+    });
+
     it('sends a runtime-profile PATCH when only the runtime changes', async () => {
       await act(async () => {
         renderEditPage();
@@ -684,6 +1016,44 @@ describe('CustomModelImportPage', () => {
         imageFamilyId: 'aim-base',
         engineArgs: { 'attention-backend': 'TRITON_ATTN' },
       });
+    });
+
+    it('prefills precision from the annotation, not the pruned overrides fallback', async () => {
+      // The AIMModel CRD prunes overrides.precision, so it is absent here; the
+      // durable annotation carries the chosen 'fp8'. Without the annotation read
+      // the prefill would fall back to 'bf16'. Changing engine args makes the
+      // runtime dirty so the full profile (including the prefilled precision)
+      // reaches the PATCH body.
+      const withPrecisionAnnotation = buildEditModel({
+        metadata: {
+          name: MODEL_ID,
+          namespace: 'project1',
+          labels: { 'aiwb.apps.eai.amd.com/model-source-type': 'custom' },
+          annotations: {
+            'aiwb.apps.eai.amd.com/model-display-name': 'gemma-3-1b-it',
+            'aiwb.apps.eai.amd.com/canonical-repo-id': 'google/gemma-3-1b-it',
+            'airm.silogen.ai/revision': 'main',
+            'aiwb.apps.eai.amd.com/precision': 'fp8',
+          },
+          creationTimestamp: '2026-06-08T21:00:00Z',
+        },
+      });
+      await act(async () => {
+        renderEditPage(withPrecisionAnnotation);
+      });
+      await goToInformation();
+      await goToRuntime();
+      await setEngineArgs('attention-backend: TRITON_ATTN');
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('custom-model-import-submit'));
+      });
+      await waitFor(() => {
+        expect(patchCustomModel).toHaveBeenCalledTimes(1);
+      });
+      const body = (patchCustomModel as Mock).mock.calls[0][2] as {
+        customProfile?: { precision?: string };
+      };
+      expect(body.customProfile?.precision).toBe('fp8');
     });
 
     it('sends a combined PATCH when metadata and runtime both change', async () => {
@@ -741,7 +1111,7 @@ describe('CustomModelImportPage', () => {
           artifactPhase: 'Progressing',
           artifactLastError: null,
         },
-        profile: null,
+        profiles: [],
       });
       await act(async () => {
         renderEditPage(notReady);

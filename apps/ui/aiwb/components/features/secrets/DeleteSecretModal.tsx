@@ -59,7 +59,7 @@ export default function DeleteSecretModal({
     <ConfirmationModal
       confirmationButtonColor="danger"
       description={t('form.deleteProjectSecret.description', {
-        name: secret.metadata.name,
+        name: secret.displayName ?? secret.metadata.name,
       })}
       title={t('form.deleteProjectSecret.title')}
       isOpen={isOpen}

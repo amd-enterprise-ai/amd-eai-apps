@@ -123,13 +123,10 @@ describe('DeleteApiKeyModal', () => {
   });
 
   describe('API Key Details', () => {
-    it('works with API key without expiration', async () => {
-      const apiKeyWithoutExpiration = generateMockApiKey({
-        expiresAt: undefined,
-      });
+    it('works with a minimal API key', async () => {
       const props = {
         ...defaultProps,
-        apiKey: apiKeyWithoutExpiration,
+        apiKey: generateMockApiKey(),
       };
 
       await act(async () => {

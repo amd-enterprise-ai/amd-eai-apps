@@ -5,30 +5,27 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getLocaleDirectories, getTranslationFiles } = require('./i18n-locales');
 
 // Use the calling app's working directory as the root.
 // When run via `pnpm i18n:types` from an app directory, process.cwd() is that app's root.
 const appRoot = process.cwd();
-const localesDir = path.resolve(appRoot, 'public/locales/en');
 const outputFile = path.resolve(appRoot, 'types/react-i18next.d.ts');
 
 console.log('🔍 Scanning translation files...');
 
-if (!fs.existsSync(localesDir)) {
-  console.error('❌ Locales directory not found:', localesDir);
+let translationFiles;
+try {
+  translationFiles = getTranslationFiles(getLocaleDirectories(appRoot));
+} catch (error) {
+  console.error('❌', error instanceof Error ? error.message : error);
   console.error(
     '   Run this script from the app root directory (e.g., apps/ui/aiwb).',
   );
   process.exit(1);
 }
-
-const files = fs
-  .readdirSync(localesDir)
-  .filter((file) => file.endsWith('.json'))
-  .sort();
-
-if (files.length === 0) {
-  console.error('❌ No translation files found in', localesDir);
+if (translationFiles.length === 0) {
+  console.error('❌ No translation files found.');
   process.exit(1);
 }
 
@@ -45,7 +42,7 @@ function loadJsonFile(filePath, file) {
     raw = fs.readFileSync(filePath, 'utf-8');
   } catch (err) {
     console.error('❌ Failed to read translation file:', filePath);
-    console.error('   Original error:', err && err.message ? err.message : err);
+    console.error('   Original error:', err?.message ? err.message : err);
     process.exit(1);
   }
   try {
@@ -55,7 +52,7 @@ function loadJsonFile(filePath, file) {
     console.error('   File name:', file);
     console.error(
       '   Ensure the JSON is valid. Original error:',
-      err && err.message ? err.message : err,
+      err?.message ? err.message : err,
     );
     process.exit(1);
   }
@@ -105,9 +102,7 @@ function generateNestedType(obj, indent) {
   return lines.join('\n');
 }
 
-const namespaceData = files.map((file) => {
-  const namespace = file.replace('.json', '');
-  const filePath = path.join(localesDir, file);
+const namespaceData = translationFiles.map(({ file, filePath, namespace }) => {
   const content = loadJsonFile(filePath, file);
   const keys = extractKeys(content);
   console.log(`   ✓ ${file} (${keys.length} keys)`);

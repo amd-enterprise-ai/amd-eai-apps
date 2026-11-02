@@ -106,7 +106,7 @@ rules:
   # Response Status Codes
   # =============================================================================
 
-  # POST create operations should return 200 OK (per SDA-2626 standardization)
+  # POST create operations should return 200 OK
   # Uses positive matching: only applies to operations with operationId starting with "create_" or "submit_"
   # This is future-proof - new create endpoints just need to follow the naming convention
   post-create-status-200:
@@ -118,7 +118,7 @@ rules:
         function: truthy
       - field: responses.201
         function: falsy
-    message: "POST create operations should return 200 OK (not 201 Created) per SDA-2626 standardization. Include the created resource in the response body. This applies to endpoints with operationId starting with 'create_' or 'submit_'."
+    message: "POST create operations should return 200 OK (not 201 Created). Include the created resource in the response body. This applies to endpoints with operationId starting with 'create_' or 'submit_'."
 
   # =============================================================================
   # Response Format Consistency

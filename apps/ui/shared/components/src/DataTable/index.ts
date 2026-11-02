@@ -4,7 +4,20 @@
 
 export type { TableVariant } from './BaseDataTable';
 export { default as BaseDataTable } from './BaseDataTable';
-export * from './TablePrimitive';
+export type {
+  SortDescriptor,
+  TableSortableColumnHeaderProps,
+} from '@heroui/react';
+export {
+  Table,
+  TableBody,
+  TableCell,
+  TableCollection,
+  TableColumn,
+  TableHeader,
+  TableRow,
+  TableSortableColumnHeader as SortableColumnHeader,
+} from '@heroui/react';
 export { default as ClientSidePagination } from './TablePagination';
 export * from './ServerSideDataTable';
 export * from './ClientSideDataTable';

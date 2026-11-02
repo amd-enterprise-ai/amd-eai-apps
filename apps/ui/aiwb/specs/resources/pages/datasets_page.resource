@@ -9,7 +9,7 @@ Documentation       Page object for the AIWB Datasets page.
 
 
 *** Variables ***
-${DATASETS_PATH}                    /datasets
+${DATASETS_PATH}                    /fine-tuning/datasets
 
 # Page elements
 ${DATASETS_PAGE_TABLE}              css=table
@@ -29,7 +29,7 @@ ${UPLOAD_SUCCESS_TOAST}             text="Dataset successfully uploaded"
 # Download indicator elements
 ${DOWNLOAD_INDICATOR_PREPARING}     text="Preparing download"
 ${DOWNLOAD_INDICATOR_DONE}          text="Download ready"
-${DOWNLOAD_INDICATOR_DISMISS}       css=button[aria-label="Dismiss"]
+${DOWNLOAD_INDICATOR_DISMISS}       css=[data-slot="toast"]:has-text("Preparing download") >> css=button[aria-label="Close"]
 
 # Pagination elements (HeroUI Pagination component default ARIA).
 # Verified against @heroui/pagination dist/use-pagination.js — defaults are
@@ -56,6 +56,11 @@ Navigate to datasets via sidebar
     VAR    ${sidebar_link}    css=a[href="/${project}${DATASETS_PATH}"]
     Wait For Elements State    ${sidebar_link}    visible    timeout=5s
     Click    ${sidebar_link}
+    Wait for datasets page
+
+Wait for datasets page
+    [Documentation]    Waits for the Datasets table to become visible.
+
     Wait For Elements State    ${DATASETS_PAGE_TABLE}    visible    timeout=15s
 
 Click download action on dataset row
@@ -161,6 +166,15 @@ Dataset row should contain metadata
     VAR    ${row}    css=table tbody tr:has-text("${dataset_name}")
     Wait For Elements State    ${row}    visible    timeout=15s
     Get Text    ${row}    contains    ${dataset_type}
+
+Get dataset row text
+    [Documentation]    Returns the text content of the named dataset row.
+    [Arguments]    ${dataset_name}
+
+    VAR    ${row}    css=table tbody tr:has-text("${dataset_name}")
+    Wait For Elements State    ${row}    visible    timeout=15s
+    ${text}=    Get Text    ${row}
+    RETURN    ${text}
 
 Dataset table row count should equal
     [Documentation]    Verifies the dataset table renders exactly ${expected} data rows.

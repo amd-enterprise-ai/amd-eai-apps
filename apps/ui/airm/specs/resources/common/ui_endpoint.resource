@@ -13,7 +13,7 @@ Library             String
 
 
 *** Variables ***
-# Override via environment variable: AIRM_UI_URL=https://airmui.app-dev.silogen.ai
+# Override via environment variable: AIRM_UI_URL=https://airmui.example.com
 ${AIRM_UI_URL}      ${EMPTY}
 
 
@@ -45,14 +45,14 @@ Derive UI URL from kubectl context
     [Documentation]    Derives the AIRM UI URL from the current kubectl context.
     ...                Extracts the cluster domain from the API server URL and constructs
     ...                the UI endpoint using the naming convention: airmui.<cluster-domain>.
-    ...                Example: https://k8s.app-dev.silogen.ai:6443 -> https://airmui.app-dev.silogen.ai
+    ...                Example: https://k8s.example.com:6443 -> https://airmui.example.com
 
     ${result}=    Run Process    kubectl    config    view    --minify    -o    jsonpath\={.clusters[0].cluster.server}
     IF    ${result.rc} != 0
         Fail    Failed to get cluster server from kubectl config: ${result.stderr}
     END
 
-    # Extract cluster domain: https://k8s.app-dev.silogen.ai:6443 -> app-dev.silogen.ai
+    # Extract cluster domain: https://k8s.example.com:6443 -> example.com
     ${server}=    Strip String    ${result.stdout}
     IF    "${server}" == "${EMPTY}"
         Fail    kubectl context returned an empty cluster server URL. Set AIRM_UI_URL explicitly or update the current kubeconfig context.

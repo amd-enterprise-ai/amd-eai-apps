@@ -174,7 +174,6 @@ async def test_create_chart_duplicate_name_same_organization(db_session: AsyncSe
     duplicate_schema = make_chart_create_schema(name="Duplicate Chart")
     with pytest.raises(ConflictException):
         await create_chart(db_session, duplicate_schema, creator)
-        await db_session.commit()  # Explicit commit to trigger constraint
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,7 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
+from api_common.collections import PaginationMetadata
 from api_common.exceptions import ConflictException, NotFoundException, ValidationException
 from api_common.secrets import SecretUseCase
 from app import app  # type: ignore
@@ -409,7 +410,7 @@ async def test_create_project_invalid_input() -> None:
             "/v1/projects", json={"name": "project 1", "description": "Description 1", "cluster_id": str(uuid4())}
         )
 
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 @pytest.mark.asyncio
@@ -650,7 +651,7 @@ async def test_update_project_invalid_input() -> None:
                 },
             },
         )
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
         # Test 2: Description too long (max_length=1024)
         response = client.put(
@@ -665,11 +666,11 @@ async def test_update_project_invalid_input() -> None:
                 },
             },
         )
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
         # Test 3: Missing required quota field
         response = client.put(f"/v1/projects/{valid_project_id}", json={"description": "Valid description"})
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
         # Test 4: Extra forbidden field
         response = client.put(
@@ -685,7 +686,7 @@ async def test_update_project_invalid_input() -> None:
                 "forbiddenField": "should not be allowed",
             },
         )
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 @pytest.mark.asyncio
@@ -1456,9 +1457,7 @@ async def test_get_project_workload_metrics_success(mock_get_metrics: MagicMock,
                 updated_by="tester",
             )
         ],
-        total=1,
-        page=1,
-        page_size=10,
+        pagination=PaginationMetadata(page=1, page_size=10, total=1),
     )
 
     with TestClient(app) as client:
@@ -1469,6 +1468,9 @@ async def test_get_project_workload_metrics_success(mock_get_metrics: MagicMock,
     assert "data" in data
     assert len(data["data"]) == 1
     assert data["data"][0]["displayName"] == "Mock Workload"
+    assert data["pagination"]["page"] == 1
+    assert data["pagination"]["pageSize"] == 10
+    assert data["pagination"]["total"] == 1
 
 
 @pytest.mark.asyncio

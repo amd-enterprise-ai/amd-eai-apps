@@ -86,36 +86,38 @@ vi.mock('@heroui/react', async () => {
     cn: (...args: any[]) => {
       return original.cn(...args);
     },
-    Chip: ({
-      children,
-      size,
-      color,
-      variant,
-      startContent,
-      classNames,
-    }: any) => (
-      <div
-        data-testid="mock-chip"
-        data-size={size}
-        data-color={color}
-        data-variant={variant}
-        className={classNames?.base}
-      >
-        {startContent && (
-          <div data-testid="chip-start-content">{startContent}</div>
-        )}
-        {children}
-      </div>
+    Chip: Object.assign(
+      ({ children, size, color, variant, className }: any) => (
+        <div
+          data-testid="mock-chip"
+          data-size={size}
+          data-color={color}
+          data-variant={variant}
+          className={className}
+        >
+          {children}
+        </div>
+      ),
+      {
+        Label: ({ children, className }: any) => (
+          <span className={className}>{children}</span>
+        ),
+      },
     ),
 
-    Popover: ({ children }: any) => (
-      <div data-testid="mock-popover">{children}</div>
-    ),
-    PopoverTrigger: ({ children }: any) => (
-      <div data-testid="mock-popover-trigger">{children}</div>
-    ),
-    PopoverContent: ({ children }: any) => (
-      <div data-testid="mock-popover-content">{children}</div>
+    Popover: Object.assign(
+      ({ children }: any) => <div data-testid="mock-popover">{children}</div>,
+      {
+        Trigger: ({ children }: any) => (
+          <div data-testid="mock-popover-trigger">{children}</div>
+        ),
+        Content: ({ children }: any) => (
+          <div data-testid="mock-popover-content">{children}</div>
+        ),
+        Dialog: ({ children }: any) => (
+          <div data-testid="mock-popover-dialog">{children}</div>
+        ),
+      },
     ),
     Spinner: ({ size, color, className }: any) => (
       <div
@@ -195,9 +197,11 @@ describe('ChipDisplay', () => {
     const chip = screen.getByTestId('mock-chip');
     expect(chip).toBeInTheDocument();
     expect(chip).toHaveAttribute('data-color', 'success');
-    expect(chip).toHaveAttribute('data-variant', 'flat');
+    // v3 Chip renames the v2 `flat` variant to `soft`; the adapter maps it.
+    expect(chip).toHaveAttribute('data-variant', 'soft');
     expect(chip).toHaveTextContent('Success');
-    expect(screen.getByTestId('chip-start-content')).toBeInTheDocument();
+    // The variant's icon is passed through as the chip's start content.
+    expect(screen.getByTestId('mock-icon')).toBeInTheDocument();
   });
 
   it('renders chip without icon when not provided', () => {
@@ -334,7 +338,7 @@ describe('NoDataDisplay', () => {
 
     const mdash = screen.getByText('—');
     expect(mdash).toBeInTheDocument();
-    expect(mdash).toHaveClass('text-default-300');
+    expect(mdash).toHaveClass('text-muted');
   });
 });
 

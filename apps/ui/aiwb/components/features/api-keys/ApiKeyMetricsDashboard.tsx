@@ -16,16 +16,20 @@ import { useRouter } from 'next/router';
 
 import {
   AvailableChartColorsKeys,
+  CustomComparatorConfig,
+  TableColumns,
   TimeRangePeriod,
 } from '@amdenterpriseai/types';
 import type { TimeRange } from '@amdenterpriseai/types';
 import {
+  ActionButton,
   BarChart,
   Button,
   Card,
   CardBody,
   CardHeader,
   ChartTimeSelector,
+  ClientSideDataTable,
   DateDisplay,
   NoDataDisplay,
   Select,
@@ -33,12 +37,6 @@ import {
   StatisticsCard,
   StatusDisplay,
   Tab,
-  Table,
-  TableBody,
-  TableCell,
-  TableColumn,
-  TableHeader,
-  TableRow,
   Tabs,
   Tooltip,
 } from '@amdenterpriseai/components';
@@ -56,7 +54,7 @@ import {
 } from '@/lib/app/api-keys';
 import {
   aimParser,
-  mapAIMServiceStatusToWorkloadStatus,
+  getAIMServiceStatusVariants,
   resolveAIMServiceDisplay,
 } from '@/lib/app/aims';
 import { useInferenceModelsByName } from '@/hooks/useInferenceModelsByName';
@@ -67,55 +65,65 @@ import {
 } from '@/components/shared/ModelProfileSummary';
 import { listAllInferenceDeployments } from '@/lib/app/inference';
 import { listAllProjectFineTunedModels } from '@/lib/app/models';
-import type { ApiKeyMetricsDataPoint } from '@/types/api-keys';
-import { FINE_TUNED_LABEL, NAMESPACE_AIM_MODEL_LABEL } from '@/types/aims';
-import type { AIMModel, AIMService } from '@/types/aims';
-import { getWorkloadStatusVariants } from '@/utils/workloads';
+import type { components } from '@/types/api';
+import {
+  AIM_MODEL_WORKLOAD_ID_LABEL,
+  FINE_TUNED_LABEL,
+  NAMESPACE_AIM_MODEL_LABEL,
+} from '@/types/aims';
+import type {
+  AIMService,
+  AIMServiceStatus,
+  ModelProfileSummaryFields,
+} from '@/types/aims';
 import { SUBMITTER_ANNOTATION_KEY } from '@/components/features/secrets/constants';
 import CreateApiKey from '@/components/features/api-keys/CreateApiKey';
 import DeleteApiKeyModal from '@/components/features/api-keys/DeleteApiKeyModal';
 
+const LinkedDeploymentsTableField = {
+  NAME: 'name',
+  STATUS: 'status',
+  REPLICAS: 'replicas',
+  CREATED_BY: 'createdBy',
+  CREATED_AT: 'createdAt',
+} as const;
+
+type LinkedDeploymentsTableField =
+  (typeof LinkedDeploymentsTableField)[keyof typeof LinkedDeploymentsTableField];
+
 const INITIAL_TIME_PERIOD = TimeRangePeriod['24H'];
 
+// Timeseries points come back as bare `{ [key]: number | string }` maps from
+// the generated schema; each carries a `date` plus one entry per service id.
+type MetricsResponse = components['schemas']['ApiKeyMetricsResponse'];
+type AIMModelResource = components['schemas']['AIMModelResource'];
+type MetricsDataPoint = MetricsResponse['requestsOverTime']['total'][number];
+
 export function computeFilteredStats(
-  metrics: {
-    stats: {
-      totalRequests: number;
-      successfulRequests: number;
-      failedRequests: number;
-      totalTokens: number;
-      linkedDeployments: number;
-    };
-    services: string[];
-    requestsOverTime: {
-      successful: ApiKeyMetricsDataPoint[];
-      failed: ApiKeyMetricsDataPoint[];
-    };
-    tokensOverTime: { total: ApiKeyMetricsDataPoint[] };
-  },
+  metrics: MetricsResponse,
   selectedService: string,
-): typeof metrics.stats {
+): MetricsResponse['stats'] {
   if (selectedService === 'all') return metrics.stats;
   if (metrics.services.length === 1) return metrics.stats;
 
-  const allSum = (data: ApiKeyMetricsDataPoint[]): number =>
+  const allSum = (data: MetricsDataPoint[]): number =>
     data.reduce(
       (acc, point) =>
         acc +
         metrics.services.reduce((s, svc) => {
-          const v = (point as Record<string, number | string>)[svc];
+          const v = point[svc];
           return s + (typeof v === 'number' ? v : 0);
         }, 0),
       0,
     );
 
-  const svcSum = (data: ApiKeyMetricsDataPoint[]): number =>
+  const svcSum = (data: MetricsDataPoint[]): number =>
     data.reduce((acc, point) => {
-      const v = (point as Record<string, number | string>)[selectedService];
+      const v = point[selectedService];
       return acc + (typeof v === 'number' ? v : 0);
     }, 0);
 
-  const share = (data: ApiKeyMetricsDataPoint[]): number => {
+  const share = (data: MetricsDataPoint[]): number => {
     const total = allSum(data);
     return total > 0 ? svcSum(data) / total : 0;
   };
@@ -166,16 +174,64 @@ const formatCount = (val: number): string => {
   return val.toString();
 };
 
-const getAimServiceId = (d: AIMService): string => {
-  try {
-    const hostname = new URL(d.endpoints.internal).hostname;
-    const inferenceServiceName = hostname
-      .split('.')[0]
-      .replace(/-predictor$/, '');
-    return `${d.metadata.namespace}-${inferenceServiceName}`;
-  } catch {
-    return d.metadata.name;
-  }
+// The gateway attributes token metrics by the model's workload-id (the x-ai-eg-backend
+// UUID captured as the aim_service_id metric label) — the same id used for GPU/vLLM
+// metrics and the /inference/{id} API. So join the metric series to a deployment by that
+// same workload-id label, not a derived <ns>-<isname> string. The displayed name still
+// comes from resolveAIMServiceDisplay; this only sets the lookup key.
+const getAimServiceId = (d: AIMService): string =>
+  d.metadata.labels?.[AIM_MODEL_WORKLOAD_ID_LABEL] ?? d.metadata.name;
+
+type LinkedDeploymentRow = {
+  id: string;
+  name: string;
+  status: AIMServiceStatus | undefined;
+  replicas: number;
+  createdBy: string;
+  createdAt?: string;
+  profile: ModelProfileSummaryFields | null;
+};
+
+const linkedDeploymentColumns: TableColumns<LinkedDeploymentsTableField> = [
+  { key: LinkedDeploymentsTableField.NAME, sortable: true },
+  { key: LinkedDeploymentsTableField.STATUS, sortable: true },
+  { key: LinkedDeploymentsTableField.REPLICAS, sortable: true },
+  { key: LinkedDeploymentsTableField.CREATED_BY, sortable: true },
+  { key: LinkedDeploymentsTableField.CREATED_AT, sortable: true },
+];
+
+const aimServiceStatusRank: Record<AIMServiceStatus, number> = {
+  Pending: 0,
+  Starting: 1,
+  Running: 2,
+  Degraded: 3,
+  Failed: 4,
+  Deleted: 5,
+};
+
+const rankAimServiceStatus = (status: AIMServiceStatus | undefined): number =>
+  status ? aimServiceStatusRank[status] : Number.MAX_SAFE_INTEGER;
+
+const linkedDeploymentComparators: CustomComparatorConfig<
+  LinkedDeploymentRow,
+  LinkedDeploymentsTableField
+> = {
+  [LinkedDeploymentsTableField.STATUS]: (a, b) =>
+    rankAimServiceStatus(a.status) - rankAimServiceStatus(b.status),
+  [LinkedDeploymentsTableField.CREATED_AT]: (a, b) =>
+    new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime(),
+};
+
+const getDeploymentLabel = (
+  d: AIMService,
+  parsedAIMs: ReturnType<typeof aimParser>[],
+): string => {
+  const displayInfo = resolveAIMServiceDisplay(d, parsedAIMs);
+  const isFineTuned = d.metadata.labels?.[FINE_TUNED_LABEL] === 'true';
+  const label = isFineTuned
+    ? displayInfo.title
+    : `${displayInfo.canonicalName}${displayInfo.imageVersion ? ` (${displayInfo.imageVersion})` : ''}`.trim();
+  return label || getAimServiceId(d);
 };
 
 type RequestsFilter = 'total' | 'successful' | 'failed';
@@ -189,7 +245,6 @@ export const ApiKeyMetricsDashboard: React.FC<Props> = ({
   apiKeyName,
 }) => {
   const { t } = useTranslation('api-keys');
-  const { t: tWorkloads } = useTranslation('workloads');
   const { t: tModels } = useTranslation('models');
   const router = useRouter();
   const { projectPath } = useProject();
@@ -269,10 +324,11 @@ export const ApiKeyMetricsDashboard: React.FC<Props> = ({
     });
 
   const linkedDeployments = useMemo(() => {
-    const groupSet = new Set(apiKeyDetails?.groups ?? []);
-    return allDeployments.filter(
-      (d) => d.clusterAuthGroupId && groupSet.has(d.clusterAuthGroupId),
-    );
+    const workloadIdSet = new Set(apiKeyDetails?.groups ?? []);
+    return allDeployments.filter((d) => {
+      const workloadId = d.metadata.labels?.[AIM_MODEL_WORKLOAD_ID_LABEL];
+      return workloadId != null && workloadIdSet.has(workloadId);
+    });
   }, [allDeployments, apiKeyDetails?.groups]);
 
   const clusterAimNames = useMemo(
@@ -283,7 +339,7 @@ export const ApiKeyMetricsDashboard: React.FC<Props> = ({
             d.metadata.labels?.[FINE_TUNED_LABEL] !== 'true' &&
             d.metadata.labels?.[NAMESPACE_AIM_MODEL_LABEL] !== 'true',
         )
-        .map((d) => d.spec.model?.name)
+        .map((d) => d.spec?.model?.name)
         .filter((name): name is string => !!name),
     [linkedDeployments],
   );
@@ -297,7 +353,7 @@ export const ApiKeyMetricsDashboard: React.FC<Props> = ({
   );
 
   const { data: fineTunedModelCrs = [], isLoading: isFineTunedModelsLoading } =
-    useQuery<AIMModel[]>({
+    useQuery<AIMModelResource[]>({
       queryKey: ['project', projectId, 'fine-tuned-models'],
       queryFn: () => listAllProjectFineTunedModels(projectId),
       enabled: !!projectId,
@@ -321,11 +377,62 @@ export const ApiKeyMetricsDashboard: React.FC<Props> = ({
       isFineTunedModelsLoading,
     ],
   );
+  const resolvedProfiles = useMemo(
+    () => linkedDeployments.map(({ status }) => status?.resolvedProfile),
+    [linkedDeployments],
+  );
 
   const { specByName: profileSpecByName } = useProfileSpecsForServices({
     aimIds,
     project: projectId,
+    resolvedProfiles,
   });
+
+  const linkedDeploymentRows = useMemo((): LinkedDeploymentRow[] => {
+    return linkedDeployments.map((d) => ({
+      id: d.metadata.name,
+      name: getDeploymentLabel(d, parsedAIMs),
+      status: d.status?.status,
+      replicas: d.status?.runtime?.currentReplicas ?? d.spec?.replicas ?? 0,
+      createdBy: d.metadata.annotations?.[SUBMITTER_ANNOTATION_KEY] ?? '—',
+      createdAt: d.metadata.creationTimestamp ?? undefined,
+      profile: toProfileSummaryFields(d, profileSpecByName),
+    }));
+  }, [linkedDeployments, parsedAIMs, profileSpecByName]);
+
+  const linkedDeploymentRenderers = useMemo(
+    (): Partial<
+      Record<
+        LinkedDeploymentsTableField,
+        (item: LinkedDeploymentRow) => React.ReactNode | string
+      >
+    > => ({
+      [LinkedDeploymentsTableField.NAME]: (item) => (
+        <div className="flex flex-col gap-1">
+          <span>{item.name}</span>
+          <ModelProfileSummary profile={item.profile} t={tModels} />
+        </div>
+      ),
+      [LinkedDeploymentsTableField.STATUS]: (item) => {
+        if (!item.status) {
+          return <NoDataDisplay />;
+        }
+        return (
+          <StatusDisplay
+            type={item.status}
+            variants={getAIMServiceStatusVariants(tModels)}
+          />
+        );
+      },
+      [LinkedDeploymentsTableField.CREATED_AT]: (item) => {
+        if (item.createdAt) {
+          return <DateDisplay date={item.createdAt} />;
+        }
+        return <NoDataDisplay />;
+      },
+    }),
+    [tModels],
+  );
 
   const serviceIdToLabel = useMemo(() => {
     const map = new Map<string, string>();
@@ -372,23 +479,22 @@ export const ApiKeyMetricsDashboard: React.FC<Props> = ({
   }, [selectedService, allServiceIds]);
 
   const filterChartData = useCallback(
-    (base: ApiKeyMetricsDataPoint[]): ApiKeyMetricsDataPoint[] => {
+    (base: MetricsDataPoint[]): MetricsDataPoint[] => {
       if (selectedService === 'all') return base;
       return base.map(({ date, ...rest }) => ({
         date,
-        [selectedService]:
-          (rest as Record<string, number>)[selectedService] ?? 0,
+        [selectedService]: rest[selectedService] ?? 0,
       }));
     },
     [selectedService],
   );
 
   const remapKeys = useCallback(
-    (data: ApiKeyMetricsDataPoint[]): ApiKeyMetricsDataPoint[] =>
+    (data: MetricsDataPoint[]): MetricsDataPoint[] =>
       data.map(({ date, ...rest }) => {
-        const result: ApiKeyMetricsDataPoint = { date };
+        const result: MetricsDataPoint = { date };
         for (const [key, val] of Object.entries(rest)) {
-          result[serviceIdToLabel.get(key) ?? key] = val as number;
+          result[serviceIdToLabel.get(key) ?? key] = val;
         }
         return result;
       }),
@@ -426,18 +532,16 @@ export const ApiKeyMetricsDashboard: React.FC<Props> = ({
     <div className="flex flex-col gap-4 w-full pt-4 pb-12">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <Button
-          isIconOnly
-          variant="light"
+        <ActionButton
+          secondary
           size="sm"
           onPress={() => router.push(projectPath('/api-keys'))}
+          icon={<IconArrowLeft size={16} />}
           aria-label={t('details.back')}
-        >
-          <IconArrowLeft size={16} />
-        </Button>
+        />
         <span
           data-testid="metrics-header-key-name"
-          className="font-semibold text-default-800"
+          className="font-semibold text-foreground"
         >
           {displayName}
         </span>
@@ -464,12 +568,11 @@ export const ApiKeyMetricsDashboard: React.FC<Props> = ({
 
       {/* Usage metrics controls */}
       <div className="flex items-center gap-3">
-        <span className="font-medium text-default-700">
+        <span className="font-medium text-foreground">
           {t('details.usageMetrics')}
         </span>
         <div className="ml-auto flex items-center gap-3">
           <Select
-            size="sm"
             className="w-52"
             aria-label={t('details.filters.inferenceService')}
             placeholder={t('details.filters.inferenceService')}
@@ -487,7 +590,9 @@ export const ApiKeyMetricsDashboard: React.FC<Props> = ({
               if (key) setSelectedService(key);
             }}
           >
-            {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+            {(item: { key: string; label: string }) => (
+              <SelectItem key={item.key}>{item.label}</SelectItem>
+            )}
           </Select>
           <ChartTimeSelector
             initialTimePeriod={INITIAL_TIME_PERIOD}
@@ -544,11 +649,7 @@ export const ApiKeyMetricsDashboard: React.FC<Props> = ({
       </div>
 
       {/* Inference requests chart */}
-      <Card
-        classNames={{
-          base: 'shadow-sm border-1 border-default-200 rounded-sm dark:bg-default-100 overflow-visible',
-        }}
-      >
+      <Card className="overflow-visible">
         <CardHeader>
           <div className="flex items-center flex-grow gap-2">
             <span>{t('details.charts.inferenceRequests.title')}</span>
@@ -556,14 +657,10 @@ export const ApiKeyMetricsDashboard: React.FC<Props> = ({
               content={t('details.charts.inferenceRequests.tooltip')}
               className="max-w-[300px]"
             >
-              <IconInfoCircle
-                className="text-default-400 cursor-pointer"
-                size={16}
-              />
+              <IconInfoCircle className="text-muted cursor-pointer" size={16} />
             </Tooltip>
             <div className="ml-auto">
               <Tabs
-                size="sm"
                 selectedKey={requestsFilter}
                 onSelectionChange={(key) =>
                   setRequestsFilter(key as RequestsFilter)
@@ -592,11 +689,7 @@ export const ApiKeyMetricsDashboard: React.FC<Props> = ({
       </Card>
 
       {/* Token consumption chart */}
-      <Card
-        classNames={{
-          base: 'shadow-sm border-1 border-default-200 rounded-sm dark:bg-default-100 overflow-visible',
-        }}
-      >
+      <Card className="overflow-visible">
         <CardHeader>
           <div className="flex items-center flex-grow gap-2">
             <span>{t('details.charts.tokenConsumption.title')}</span>
@@ -604,14 +697,10 @@ export const ApiKeyMetricsDashboard: React.FC<Props> = ({
               content={t('details.charts.tokenConsumption.tooltip')}
               className="max-w-[300px]"
             >
-              <IconInfoCircle
-                className="text-default-400 cursor-pointer"
-                size={16}
-              />
+              <IconInfoCircle className="text-muted cursor-pointer" size={16} />
             </Tooltip>
             <div className="ml-auto">
               <Tabs
-                size="sm"
                 selectedKey={tokensFilter}
                 onSelectionChange={(key) =>
                   setTokensFilter(key as TokensFilter)
@@ -643,96 +732,24 @@ export const ApiKeyMetricsDashboard: React.FC<Props> = ({
       </Card>
 
       {/* Linked Deployments */}
-      <Card
-        classNames={{
-          base: 'shadow-none rounded-sm bg-transparent',
-        }}
-      >
+      <Card>
         <CardHeader className="px-0">
-          <span className="text-base leading-6 font-medium text-default-700">
+          <span className="text-base leading-6 font-medium text-foreground">
             {t('details.linkedDeployments.title')}
           </span>
         </CardHeader>
         <CardBody className="p-0">
-          <Table
-            aria-label={t('details.linkedDeployments.title')}
-            classNames={{
-              wrapper: 'shadow-sm px-0 py-0 rounded-lg',
-              td: 'border-b border-default-100',
-              tr: '[&:last-child>td]:border-b-0',
-            }}
-          >
-            <TableHeader>
-              <TableColumn>
-                <div className="uppercase text-default-500 text-xs">
-                  {t('details.linkedDeployments.headers.name')}
-                </div>
-              </TableColumn>
-              <TableColumn>
-                <div className="uppercase text-default-500 text-xs">
-                  {t('details.linkedDeployments.headers.status')}
-                </div>
-              </TableColumn>
-              <TableColumn>
-                <div className="uppercase text-default-500 text-xs">
-                  {t('details.linkedDeployments.headers.replicas')}
-                </div>
-              </TableColumn>
-              <TableColumn>
-                <div className="uppercase text-default-500 text-xs">
-                  {t('details.linkedDeployments.headers.createdBy')}
-                </div>
-              </TableColumn>
-              <TableColumn>
-                <div className="uppercase text-default-500 text-xs">
-                  {t('details.linkedDeployments.headers.createdAt')}
-                </div>
-              </TableColumn>
-            </TableHeader>
-            <TableBody emptyContent={t('details.linkedDeployments.empty')}>
-              {linkedDeployments.map((d) => {
-                const displayInfo = resolveAIMServiceDisplay(d, parsedAIMs);
-                const isFineTuned =
-                  d.metadata.labels?.[FINE_TUNED_LABEL] === 'true';
-                const deploymentLabel = isFineTuned
-                  ? displayInfo.title
-                  : `${displayInfo.canonicalName}${displayInfo.imageVersion ? ` (${displayInfo.imageVersion})` : ''}`.trim();
-                const profile = toProfileSummaryFields(d, profileSpecByName);
-                return (
-                  <TableRow key={d.metadata.name}>
-                    <TableCell>
-                      <div className="flex flex-col gap-1">
-                        <span>{deploymentLabel || getAimServiceId(d)}</span>
-                        <ModelProfileSummary profile={profile} t={tModels} />
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <StatusDisplay
-                        type={mapAIMServiceStatusToWorkloadStatus(
-                          d.status.status,
-                        )}
-                        variants={getWorkloadStatusVariants(tWorkloads)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {d.status.runtime?.currentReplicas ?? d.spec.replicas}
-                    </TableCell>
-                    <TableCell>
-                      {d.metadata.annotations?.[SUBMITTER_ANNOTATION_KEY] ??
-                        '—'}
-                    </TableCell>
-                    <TableCell>
-                      {d.metadata.creationTimestamp ? (
-                        <DateDisplay date={d.metadata.creationTimestamp} />
-                      ) : (
-                        <NoDataDisplay />
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+          <ClientSideDataTable
+            data={linkedDeploymentRows}
+            columns={linkedDeploymentColumns}
+            customRenderers={linkedDeploymentRenderers}
+            customComparator={linkedDeploymentComparators}
+            defaultSortByField={LinkedDeploymentsTableField.NAME}
+            translation={t}
+            translationKeyPrefix="linkedDeployments"
+            idKey="id"
+            isLoading={isLoadingDeployments}
+          />
         </CardBody>
       </Card>
 

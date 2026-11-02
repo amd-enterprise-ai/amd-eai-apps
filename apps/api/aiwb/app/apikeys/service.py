@@ -4,20 +4,17 @@
 
 import asyncio
 import re
-from datetime import UTC, datetime
+import secrets
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-import httpx
 from loguru import logger
 from prometheus_api_client import PrometheusConnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_common.collections import PaginatedResult, paginate_list
-from api_common.exceptions import ExternalServiceError, NotFoundException
+from api_common.exceptions import ConflictException, ExternalServiceError, NotFoundException
 
-from ..aims.constants import CLUSTER_AUTH_GROUP_ANNOTATION
-from ..aims.service import get_aim_service
-from ..cluster_auth.client import ClusterAuthClient
 from ..config import AI_GW_REQUEST_DURATION_METRIC, AI_GW_TOKEN_USAGE_METRIC
 from ..dispatch.kube_client import KubernetesClient
 from ..metrics.constants import PROMETHEUS_NAN_STRING
@@ -27,7 +24,15 @@ from ..metrics.utils import (
     get_aggregation_lookback_for_metrics,
     get_step_for_range_query,
 )
-from .repository import create_api_key, delete_api_key, get_api_key_by_id, get_api_keys_for_namespace
+from ..openbao.client import OpenBaoClient
+from . import external_secret_store as es_store
+from .repository import (
+    count_api_keys,
+    create_api_key,
+    delete_api_key,
+    get_api_key_by_id,
+    get_api_keys_for_namespace,
+)
 from .schemas import (
     ApiKeyCreate,
     ApiKeyDetails,
@@ -39,177 +44,7 @@ from .schemas import (
     ApiKeyTokensTimeseries,
     ApiKeyUpdate,
     ApiKeyWithFullKey,
-    GroupResponse,
 )
-
-
-async def _bind_api_key_to_aim_groups(
-    kube_client: KubernetesClient,
-    namespace: str,
-    cluster_auth_key_id: str,
-    aim_ids: list[str],
-    cluster_auth_client: ClusterAuthClient,
-) -> None:
-    """
-    Bind an API key to cluster-auth groups associated with deployed AIMs.
-
-    Fetches AIMService resources from Kubernetes and extracts their cluster-auth
-    group IDs from the "cluster-auth/allowed-group" annotation, then binds the
-    API key to those groups.
-
-    Args:
-        kube_client: Kubernetes client instance
-        namespace: Kubernetes namespace where AIMs are deployed
-        cluster_auth_key_id: The cluster-auth key ID to bind
-        aim_ids: List of AIM service IDs (UUIDs as strings)
-        cluster_auth_client: Cluster-auth client instance
-    """
-    logger.info(f"Binding API key {cluster_auth_key_id} to {len(aim_ids)} AIM(s)")
-
-    # Resolve AIM IDs to cluster-auth group IDs
-    group_ids = await _get_group_ids_for_aim_ids(kube_client, namespace, aim_ids)
-
-    if not group_ids:
-        logger.warning(f"No group IDs found for {len(aim_ids)} AIM(s) - no bindings will be created")
-        return
-
-    logger.info(f"Resolved {len(aim_ids)} AIM(s) to {len(group_ids)} group ID(s)")
-
-    # Create tasks for all bind operations
-    bind_tasks = [cluster_auth_client.bind_api_key_to_group(cluster_auth_key_id, group_id) for group_id in group_ids]
-
-    # Run all bind operations concurrently
-    if bind_tasks:
-        bind_results = await asyncio.gather(*bind_tasks, return_exceptions=True)
-        for group_id, result in zip(group_ids, bind_results):
-            if isinstance(result, Exception):
-                logger.error(f"Failed to bind API key {cluster_auth_key_id} to group {group_id}: {result}")
-            else:
-                logger.info(f"Bound API key {cluster_auth_key_id} to group {group_id}")
-
-
-async def _get_group_ids_for_aim_ids(
-    kube_client: KubernetesClient,
-    namespace: str,
-    aim_ids: list[str],
-) -> list[str]:
-    """
-    Get cluster-auth group IDs for deployed AIMs.
-
-    Fetches AIMService resources from Kubernetes by their IDs and extracts
-    the cluster-auth group ID from the "cluster-auth/allowed-group" annotation.
-
-    Args:
-        kube_client: Kubernetes client instance
-        namespace: Kubernetes namespace where AIMs are deployed
-        aim_ids: List of AIM service IDs (UUIDs as strings)
-
-    Returns:
-        List of cluster-auth group IDs extracted from AIMService annotations (deduplicated)
-    """
-    # Handle empty list case - no AIMs means no groups
-    if not aim_ids:
-        return []
-
-    group_ids_set: set[str] = set()
-
-    # Fetch each AIMService and extract its group ID from spec.routing.annotations
-    for aim_id_str in aim_ids:
-        try:
-            aim_uuid = UUID(aim_id_str)
-            aim_service = await get_aim_service(kube_client, namespace, aim_uuid)
-
-            # Extract group ID from spec.routing.annotations
-            routing_annotations = aim_service.spec.routing.get("annotations", {})
-            group_id = routing_annotations.get(CLUSTER_AUTH_GROUP_ANNOTATION)
-            if group_id:
-                group_ids_set.add(group_id)
-                logger.debug(f"Found group ID {group_id} for AIMService {aim_id_str}")
-            else:
-                logger.warning(
-                    f"AIMService {aim_id_str} does not have '{CLUSTER_AUTH_GROUP_ANNOTATION}' in spec.routing.annotations"
-                )
-
-        except ValueError as e:
-            logger.error(f"Invalid UUID format for AIM ID {aim_id_str}: {e}")
-        except NotFoundException:
-            logger.warning(f"AIMService {aim_id_str} not found in namespace {namespace}")
-        except Exception as e:
-            logger.error(f"Failed to fetch AIMService {aim_id_str}: {e}")
-
-    return list(group_ids_set)
-
-
-async def _sync_api_key_group_bindings(
-    cluster_auth_key_id: str,
-    current_groups: set[str],
-    target_groups: set[str],
-    cluster_auth_client: ClusterAuthClient,
-) -> None:
-    """
-    Synchronize API key group bindings by adding/removing groups as needed.
-
-    Args:
-        cluster_auth_key_id: The cluster-auth key ID
-        current_groups: Current set of group IDs
-        target_groups: Desired set of group IDs
-        cluster_auth_client: Cluster-auth client instance
-    """
-    groups_to_remove = current_groups - target_groups
-    groups_to_add = target_groups - current_groups
-
-    # Create tasks for all unbind operations
-    unbind_tasks = [
-        cluster_auth_client.unbind_api_key_from_group(cluster_auth_key_id, group_id) for group_id in groups_to_remove
-    ]
-
-    # Create tasks for all bind operations
-    bind_tasks = [
-        cluster_auth_client.bind_api_key_to_group(cluster_auth_key_id, group_id) for group_id in groups_to_add
-    ]
-
-    # Run unbind and bind operations in parallel
-    unbind_task = asyncio.gather(*unbind_tasks, return_exceptions=True) if unbind_tasks else None
-    bind_task = asyncio.gather(*bind_tasks, return_exceptions=True) if bind_tasks else None
-
-    unbind_results: list[dict | BaseException] = []
-    bind_results: list[dict | BaseException] = []
-
-    if unbind_task and bind_task:
-        results = await asyncio.gather(unbind_task, bind_task)
-        unbind_results = results[0]
-        bind_results = results[1]
-    elif unbind_task:
-        unbind_results = await unbind_task
-    elif bind_task:
-        bind_results = await bind_task
-
-    # Check for unbind errors
-    failed_unbinds = []
-    for group_id, result in zip(groups_to_remove, unbind_results):
-        if isinstance(result, Exception):
-            logger.error(f"Failed to unbind API key from group {group_id}: {result}")
-            failed_unbinds.append((group_id, result))
-        else:
-            logger.info(f"Unbound API key {cluster_auth_key_id} from group {group_id}")
-
-    # Check for bind errors
-    failed_binds = []
-    for group_id, result in zip(groups_to_add, bind_results):
-        if isinstance(result, Exception):
-            logger.error(f"Failed to bind API key to group {group_id}: {result}")
-            failed_binds.append((group_id, result))
-        else:
-            logger.info(f"Bound API key {cluster_auth_key_id} to group {group_id}")
-
-    # Raise exception if any operations failed
-    if failed_unbinds or failed_binds:
-        error_details = []
-        if failed_unbinds:
-            error_details.append(f"Failed to unbind from {len(failed_unbinds)} group(s)")
-        if failed_binds:
-            error_details.append(f"Failed to bind to {len(failed_binds)} group(s)")
-        raise ExternalServiceError(f"API key group synchronization failed: {', '.join(error_details)}")
 
 
 def truncate_api_key(full_key: str) -> str:
@@ -224,7 +59,7 @@ def truncate_api_key(full_key: str) -> str:
     """
     prefix = "amd_aim_api_key_"
 
-    # All API keys from cluster-auth have the prefix
+    # All API keys carry this prefix.
     if not full_key.startswith(prefix):
         raise ValueError(f"API key must start with '{prefix}'")
 
@@ -236,80 +71,151 @@ def truncate_api_key(full_key: str) -> str:
     return f"{prefix}••••••••{last_four}"
 
 
-async def create_api_key_with_cluster_auth(
+def generate_api_key() -> str:
+    """Generate a new opaque API-key token.
+
+    AIWB now mints the token itself (previously cluster-auth did). The format is kept identical to
+    what cluster-auth emitted — ``amd_aim_api_key_hvs.<random>`` — so the value is indistinguishable
+    to clients. It is the credential the gateway's native apiKeyAuth matches against the per-backend
+    Secret (an opaque byte-for-byte comparison), so a high-entropy random body is sufficient.
+    """
+    return f"amd_aim_api_key_hvs.{secrets.token_urlsafe(32)}"
+
+
+# Vault-style duration units accepted in the `ttl` field.
+_TTL_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
+_TTL_COMPONENT_RE = re.compile(r"(\d+)([smhdw])")
+
+
+def _expires_at_from_ttl(ttl: str | None) -> datetime | None:
+    """Convert a Vault-style TTL ('30d', '24h', '1h30m', '86400', '0'/''/None = never) to an expiry.
+
+    Accepts bare seconds and one-or-more ``<int><unit>`` components (compound durations like
+    '1h30m' are summed). OpenBao's ``delete_version_after`` enforces the real drop; this is the
+    value AIWB persists and the UI displays, so an under-count here would misreport expiry.
+    """
+    if not ttl or ttl in ("0", "0s"):
+        return None
+    stripped = ttl.strip()
+    if stripped.isdigit():
+        seconds = int(stripped)  # bare seconds, e.g. "86400"
+    else:
+        components = _TTL_COMPONENT_RE.findall(stripped)
+        # Require the components to cover the whole string; a partial parse (e.g. "1h30x") would
+        # silently drop time, so treat anything that doesn't fully match as non-expiring.
+        if not components or "".join(f"{n}{u}" for n, u in components) != stripped:
+            logger.warning(f"Unparseable ttl '{ttl}', treating key as non-expiring")
+            return None
+        seconds = sum(int(n) * _TTL_UNITS[u] for n, u in components)
+    return datetime.now(UTC) + timedelta(seconds=seconds)
+
+
+def _require_openbao_client(openbao_client: OpenBaoClient | None, action: str) -> OpenBaoClient:
+    """
+    Refuse every API-key mutation while the store is disabled (``openBao.enabled: false``).
+
+    Reads stay available so keys created before the store was disabled remain visible, but
+    nothing may create, rebind, or delete a key: a delete without the store would drop the DB
+    row and leave the raw token alive in OpenBao with nothing left that can revoke it.
+    """
+    if openbao_client is None:
+        raise ExternalServiceError(f"OpenBao store is not configured; cannot {action} API key")
+    return openbao_client
+
+
+async def ensure_store_matches_existing_keys(session: AsyncSession, openbao_client: OpenBaoClient | None) -> None:
+    """
+    Refuse to run without the OpenBao store while API keys exist.
+
+    OpenBao is an install-time choice and is not removed afterwards. Keys in the database with
+    the store disabled therefore mean the configuration was changed underneath live credentials
+    that nothing can revoke any more. Startup fails until an operator re-enables the store and
+    deletes the keys, or restores the configuration.
+    """
+    if openbao_client is not None:
+        return
+    existing = await count_api_keys(session)
+    if existing:
+        noun = "API key" if existing == 1 else "API keys"
+        raise RuntimeError(
+            f"OpenBao store is disabled but the database holds {existing} {noun}. Re-enable OpenBao "
+            "(openBao.enabled and openbaoToken.enabled) and delete the keys before disabling it."
+        )
+
+
+async def create_api_key_in_store(
     session: AsyncSession,
     kube_client: KubernetesClient,
     namespace: str,
     api_key_in: ApiKeyCreate,
     user: str,
-    cluster_auth_client: ClusterAuthClient,
+    openbao_client: OpenBaoClient | None = None,
 ) -> ApiKeyWithFullKey:
     """
-    Create an API key with cluster-auth integration.
+    Create an API key in the OpenBao/ESO store (the sole key path).
 
-    Args:
-        session: Database session
-        kube_client: Kubernetes client instance
-        namespace: The namespace
-        api_key_in: API key creation data
-        user: Email of the user creating the key
-        cluster_auth_client: Cluster-auth client instance
+    AIWB generates the token, writes it to OpenBao KV, and records the key's bindings as entries in
+    each bound backend's ExternalSecret (ESO materializes the labelled Secrets the gateway reads).
+    No cluster-auth calls. The store is the source of truth; on any store failure the DB row is
+    rolled back so a key is never half-created.
 
     Returns:
         The created API key with the full key (shown only once)
     """
-
     logger.info(f"Creating API key '{api_key_in.display_name}' for namespace {namespace}")
 
-    cluster_auth_response = await cluster_auth_client.create_api_key(
-        ttl=api_key_in.ttl,
-        num_uses=api_key_in.num_uses,
-        meta=api_key_in.meta,
-        renewable=api_key_in.renewable,
-        explicit_max_ttl=api_key_in.explicit_max_ttl,
-        period=api_key_in.period,
-        display_name=f"{namespace}-{api_key_in.display_name}",
+    openbao_client = _require_openbao_client(openbao_client, "create")
+
+    full_key = generate_api_key()
+    truncated_key = truncate_api_key(full_key)
+    expires_at = _expires_at_from_ttl(api_key_in.ttl)
+
+    # Distinct display names can sanitize to the same client_id (the Secret data-key /
+    # x-api-key-id / metric label): e.g. "my key" and "my-key" both collapse to token-<ns>-my-key.
+    # The DB uniqueness guards the raw display_name, so the derived id needs its own guard here —
+    # otherwise the two keys would share one OpenBao path and silently overwrite each other.
+    client_id = es_store.compute_client_id(namespace, api_key_in.display_name)
+    existing_keys = await get_api_keys_for_namespace(session, namespace)
+    if any(es_store.compute_client_id(namespace, k.display_name) == client_id for k in existing_keys):
+        raise ConflictException(
+            f"An API key whose name normalizes to the same identifier already exists in namespace "
+            f"'{namespace}'. Choose a more distinct display name."
+        )
+
+    api_key_db = await create_api_key(
+        session=session,
+        display_name=api_key_in.display_name,
+        truncated_key=truncated_key,
+        namespace=namespace,
+        creator=user,
+        expires_at=expires_at,
     )
 
-    full_key = cluster_auth_response["api_key"]
-    truncated_key = truncate_api_key(full_key)
-    cluster_auth_key_id = cluster_auth_response["key_id"]
-
+    key_id = str(api_key_db.id)
     try:
-        api_key_db = await create_api_key(
-            session=session,
-            display_name=api_key_in.display_name,
-            truncated_key=truncated_key,
-            cluster_auth_key_id=cluster_auth_key_id,
-            namespace=namespace,
-            creator=user,
+        await openbao_client.put_token(key_id, full_key, namespace, client_id, ttl=api_key_in.ttl)
+        await es_store.create_key_secret(
+            kube_client,
+            namespace,
+            key_id,
+            client_id,
+            api_key_in.display_name,
+            {str(a) for a in (api_key_in.aim_ids or [])},
         )
-
-        # Fetch ttl, expires_at, renewable, and num_uses from cluster-auth (source of truth)
-        cluster_auth_data = await cluster_auth_client.lookup_api_key(cluster_auth_key_id)
-
-        # Bind API key to AIM groups if specified
-        if api_key_in.aim_ids:
-            await _bind_api_key_to_aim_groups(
-                kube_client=kube_client,
-                namespace=namespace,
-                cluster_auth_key_id=cluster_auth_key_id,
-                aim_ids=api_key_in.aim_ids,
-                cluster_auth_client=cluster_auth_client,
-            )
-            # Refresh cluster auth data to get updated groups
-            cluster_auth_data = await cluster_auth_client.lookup_api_key(cluster_auth_key_id)
-
     except Exception:
-        # DB insert, cluster-auth lookup, or binding failed - revoke the key to prevent orphaning
-        logger.error(
-            f"Failed to create API key '{api_key_in.display_name}', revoking cluster-auth key {cluster_auth_key_id}"
-        )
+        # Store is the source of truth — never leave a DB row without its token/bindings.
+        logger.error(f"Store write failed for API key '{api_key_in.display_name}', rolling back")
+        await delete_api_key(session, api_key_db)
         try:
-            await cluster_auth_client.revoke_api_key(cluster_auth_key_id)
-            logger.info(f"Successfully revoked orphaned cluster-auth key {cluster_auth_key_id}")
-        except Exception as revoke_error:
-            logger.error(f"Failed to revoke orphaned cluster-auth key {cluster_auth_key_id}: {revoke_error}")
+            await es_store.delete_key_secret(kube_client, namespace, key_id)
+            await openbao_client.delete_token(key_id)
+        except Exception as cleanup_error:
+            # Log the identifiers so an orphaned OpenBao token / ExternalSecret entry stays
+            # discoverable and reapable — the DB row is already gone at this point.
+            logger.error(
+                f"Partial-store cleanup after failed create also failed "
+                f"(key_id={key_id}, client_id={client_id}, namespace={namespace}): {cleanup_error}"
+            )
         raise
 
     return ApiKeyWithFullKey(
@@ -317,10 +223,8 @@ async def create_api_key_with_cluster_auth(
         display_name=api_key_db.display_name,
         truncated_key=api_key_db.truncated_key,
         namespace=api_key_db.namespace,
-        expires_at=cluster_auth_data.get("expire_time"),
-        renewable=cluster_auth_data.get("renewable", True),
-        num_uses=cluster_auth_data.get("num_uses", 0),
-        ttl=cluster_auth_data.get("ttl"),
+        expires_at=expires_at,
+        ttl=api_key_in.ttl if expires_at else None,
         created_at=api_key_db.created_at,
         updated_at=api_key_db.updated_at,
         created_by=api_key_db.created_by,
@@ -329,73 +233,42 @@ async def create_api_key_with_cluster_auth(
     )
 
 
-async def update_api_key_bindings_with_cluster_auth(
+async def update_api_key_bindings_in_store(
     session: AsyncSession,
     kube_client: KubernetesClient,
     namespace: str,
     api_key_id: UUID,
     api_key_update: ApiKeyUpdate,
-    cluster_auth_client: ClusterAuthClient,
+    openbao_client: OpenBaoClient | None = None,
 ) -> ApiKeyDetails:
     """
-    Update API key bindings to AIM groups.
+    Update an API key's model bindings via the store.
 
-    Args:
-        session: Database session
-        kube_client: Kubernetes client instance
-        namespace: The namespace
-        api_key_id: The ID of the API key to update
-        api_key_update: API key update data containing aim_ids
-        cluster_auth_client: Cluster-auth client instance
-
-    Returns:
-        Updated API key details
+    ``aim_ids`` is the complete desired set; the key's bindings (the ``bound-<workload-id>`` labels
+    on its ExternalSecret) are converged on it. A per-model SecurityPolicy lists every key Secret
+    carrying its label, so a binding change is a label edit — no token handling, no cluster-auth.
+    The store client is still required: a rebind widens what an existing key can reach, and
+    that must stay impossible while the store is disabled.
 
     Raises:
         NotFoundException: If the API key is not found
     """
-    # Verify the API key exists
+    _require_openbao_client(openbao_client, "update")
+
     api_key = await get_api_key_by_id(session, api_key_id, namespace)
     if not api_key:
         raise NotFoundException(f"API key with ID {api_key_id} not found in namespace '{namespace}'")
 
-    logger.info(f"Updating API key {api_key_id} bindings for {len(api_key_update.aim_ids)} AIM(s)")
+    logger.info(f"Updating API key {api_key_id} bindings for {len(api_key_update.aim_ids)} model(s)")
 
-    # Get current group bindings from cluster-auth
-    try:
-        cluster_auth_data = await cluster_auth_client.lookup_api_key(api_key.cluster_auth_key_id)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.warning(f"API key {api_key.cluster_auth_key_id} not found in cluster-auth")
-            await delete_api_key(session, api_key)
-            raise NotFoundException(
-                f"API key with ID {api_key_id} not found - orphaned database record has been cleaned up"
-            )
-        raise
+    key_id = str(api_key.id)
+    await es_store.set_key_bindings(kube_client, namespace, key_id, {str(a) for a in (api_key_update.aim_ids or [])})
 
-    current_groups = set(cluster_auth_data.get("groups", []))
-
-    # Get target groups from aim_ids
-    target_group_ids = await _get_group_ids_for_aim_ids(
+    return await get_api_key_details_from_store(
+        session=session,
         kube_client=kube_client,
         namespace=namespace,
-        aim_ids=api_key_update.aim_ids,
-    )
-
-    # Synchronize the group bindings
-    await _sync_api_key_group_bindings(
-        cluster_auth_key_id=api_key.cluster_auth_key_id,
-        current_groups=current_groups,
-        target_groups=set(target_group_ids),
-        cluster_auth_client=cluster_auth_client,
-    )
-
-    # Return updated details
-    return await get_api_key_details_from_cluster_auth(
-        session=session,
-        namespace=namespace,
         api_key_id=api_key_id,
-        cluster_auth_client=cluster_auth_client,
     )
 
 
@@ -436,23 +309,17 @@ async def list_api_keys_for_namespace(
     return paginate_list(responses, page=page, page_size=page_size)
 
 
-async def get_api_key_details_from_cluster_auth(
+async def get_api_key_details_from_store(
     session: AsyncSession,
+    kube_client: KubernetesClient,
     namespace: str,
     api_key_id: UUID,
-    cluster_auth_client: ClusterAuthClient,
 ) -> ApiKeyDetails:
     """
-    Get detailed API key information including cluster-auth metadata.
+    Get detailed API key information from the store.
 
-    Args:
-        session: Database session
-        namespace: The namespace
-        api_key_id: The ID of the API key
-        cluster_auth_client: Cluster-auth client instance
-
-    Returns:
-        Detailed API key information
+    Expiry comes from the DB; the models the key is bound to (``groups``) are the
+    ``bound-<workload-id>`` labels on its ExternalSecret. No cluster-auth calls.
 
     Raises:
         NotFoundException: If the API key is not found
@@ -461,283 +328,54 @@ async def get_api_key_details_from_cluster_auth(
     if not api_key:
         raise NotFoundException(f"API key with ID {api_key_id} not found in namespace '{namespace}'")
 
-    try:
-        cluster_auth_data = await cluster_auth_client.lookup_api_key(api_key.cluster_auth_key_id)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.warning(
-                f"API key {api_key.cluster_auth_key_id} not found in cluster-auth, deleting orphaned record from database"
-            )
-            await delete_api_key(session, api_key)
-            raise NotFoundException(
-                f"API key with ID {api_key_id} not found - orphaned database record has been cleaned up"
-            )
-        raise
+    workload_ids = await es_store.list_workload_ids_for_key(kube_client, namespace, str(api_key.id))
 
     return ApiKeyDetails(
         id=api_key.id,
         display_name=api_key.display_name,
         truncated_key=api_key.truncated_key,
         namespace=api_key.namespace,
-        renewable=cluster_auth_data.get("renewable", True),
-        num_uses=cluster_auth_data.get("num_uses", 0),
         created_at=api_key.created_at,
         updated_at=api_key.updated_at,
         created_by=api_key.created_by,
         updated_by=api_key.updated_by,
-        ttl=cluster_auth_data.get("ttl"),
-        expires_at=cluster_auth_data.get("expire_time"),
-        groups=cluster_auth_data.get("groups", []),
-        entity_id=cluster_auth_data.get("entity_id"),
-        meta=cluster_auth_data.get("meta", {}),
+        ttl=None,
+        # Advisory display value only — OpenBao's delete_version_after enforces the actual drop;
+        # nothing gates access on this field.
+        expires_at=api_key.expires_at,
+        groups=workload_ids,
     )
 
 
-async def delete_api_key_from_cluster_auth(
+async def delete_api_key_from_store(
     session: AsyncSession,
     namespace: str,
     api_key_id: UUID,
-    cluster_auth_client: ClusterAuthClient,
+    kube_client: KubernetesClient,
+    openbao_client: OpenBaoClient | None = None,
 ) -> None:
     """
-    Delete an API key and revoke it in cluster-auth.
-
-    Args:
-        session: Database session
-        namespace: The namespace
-        api_key_id: The ID of the API key
-        cluster_auth_client: Cluster-auth client instance
+    Delete an API key from the store: delete its ExternalSecret (and thus the materialized Secret,
+    dropping it from every model's SecurityPolicy), delete its OpenBao entry, and remove the DB
+    record. No cluster-auth calls.
 
     Raises:
         NotFoundException: If the API key is not found
+        ExternalServiceError: If the OpenBao store is disabled, so the token could not be revoked
     """
+    openbao_client = _require_openbao_client(openbao_client, "delete")
+
     api_key = await get_api_key_by_id(session, api_key_id, namespace)
     if not api_key:
         raise NotFoundException(f"API key with ID {api_key_id} not found in namespace '{namespace}'")
 
-    try:
-        await cluster_auth_client.revoke_api_key(api_key.cluster_auth_key_id)
-        logger.info(f"Revoked API key {api_key.cluster_auth_key_id} in cluster-auth")
-    except httpx.HTTPStatusError as e:
-        # 404 is tolerated so a missing cluster-auth key cannot block DB cleanup;
-        # other status codes are real failures that must surface to the caller.
-        if e.response.status_code != 404:
-            raise
-        logger.warning(
-            f"API key {api_key.cluster_auth_key_id} not found in cluster-auth, proceeding with database deletion"
-        )
+    key_id = str(api_key.id)
+
+    await es_store.delete_key_secret(kube_client, namespace, key_id)
+    await openbao_client.delete_token(key_id)
 
     await delete_api_key(session, api_key)
-
-
-async def renew_api_key_in_cluster_auth(
-    session: AsyncSession,
-    namespace: str,
-    api_key_id: UUID,
-    cluster_auth_client: ClusterAuthClient,
-) -> dict:
-    """
-    Renew an API key in cluster-auth.
-
-    Args:
-        session: Database session
-        namespace: The namespace
-        api_key_id: The ID of the API key
-        cluster_auth_client: Cluster-auth client instance
-
-    Returns:
-        dict with lease_duration
-
-    Raises:
-        NotFoundException: If the API key is not found
-    """
-    api_key = await get_api_key_by_id(session, api_key_id, namespace)
-    if not api_key:
-        raise NotFoundException(f"API key with ID {api_key_id} not found in namespace '{namespace}'")
-
-    try:
-        result = await cluster_auth_client.renew_api_key(api_key.cluster_auth_key_id)
-        logger.info(f"Renewed API key {api_key.cluster_auth_key_id} in cluster-auth")
-        return result
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.error(f"Failed to renew API key {api_key.cluster_auth_key_id}: {e}")
-            raise NotFoundException(f"Failed to renew API key: {e}")
-        raise
-
-
-async def list_api_key_group_memberships(
-    session: AsyncSession,
-    namespace: str,
-    api_key_id: UUID,
-    cluster_auth_client: ClusterAuthClient,
-) -> list[str]:
-    """
-    List the cluster-auth groups this API key currently belongs to.
-
-    Args:
-        session: Database session
-        namespace: The namespace
-        api_key_id: The ID of the API key
-        cluster_auth_client: Cluster-auth client instance
-
-    Returns:
-        List of group IDs the API key is a member of
-
-    Raises:
-        NotFoundException: If the API key is not found
-    """
-    api_key = await get_api_key_by_id(session, api_key_id, namespace)
-    if not api_key:
-        raise NotFoundException(f"API key with ID {api_key_id} not found in namespace '{namespace}'")
-
-    try:
-        cluster_auth_data = await cluster_auth_client.lookup_api_key(api_key.cluster_auth_key_id)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.warning(
-                f"API key {api_key.cluster_auth_key_id} not found in cluster-auth, deleting orphaned record from database"
-            )
-            await delete_api_key(session, api_key)
-            raise NotFoundException(
-                f"API key with ID {api_key_id} not found - orphaned database record has been cleaned up"
-            )
-        raise
-
-    return cluster_auth_data.get("groups", [])
-
-
-async def add_api_key_group_membership(
-    session: AsyncSession,
-    namespace: str,
-    api_key_id: UUID,
-    group_id: str,
-    cluster_auth_client: ClusterAuthClient,
-) -> list[str]:
-    """
-    Add an API key to a cluster-auth group.
-
-    Args:
-        session: Database session
-        namespace: The namespace
-        api_key_id: The ID of the API key
-        group_id: The ID of the group
-        cluster_auth_client: Cluster-auth client instance
-
-    Returns:
-        Updated list of group IDs the API key is a member of
-
-    Raises:
-        NotFoundException: If the API key or group is not found
-    """
-    api_key = await get_api_key_by_id(session, api_key_id, namespace)
-    if not api_key:
-        raise NotFoundException(f"API key with ID {api_key_id} not found in namespace '{namespace}'")
-
-    try:
-        result = await cluster_auth_client.bind_api_key_to_group(api_key.cluster_auth_key_id, group_id)
-        logger.info(f"Added API key {api_key.cluster_auth_key_id} to group {group_id}")
-        return result["groups"]
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.error(f"Failed to add API key to group: {e}")
-            raise NotFoundException(f"Failed to add API key to group: {e}")
-        raise
-
-
-async def remove_api_key_group_membership(
-    session: AsyncSession,
-    namespace: str,
-    api_key_id: UUID,
-    group_id: str,
-    cluster_auth_client: ClusterAuthClient,
-) -> list[str]:
-    """
-    Remove an API key from a cluster-auth group.
-
-    Args:
-        session: Database session
-        namespace: The namespace
-        api_key_id: The ID of the API key
-        group_id: The ID of the group
-        cluster_auth_client: Cluster-auth client instance
-
-    Returns:
-        Updated list of group IDs the API key is a member of
-
-    Raises:
-        NotFoundException: If the API key or group is not found
-    """
-    api_key = await get_api_key_by_id(session, api_key_id, namespace)
-    if not api_key:
-        raise NotFoundException(f"API key with ID {api_key_id} not found in namespace '{namespace}'")
-
-    try:
-        result = await cluster_auth_client.unbind_api_key_from_group(api_key.cluster_auth_key_id, group_id)
-        logger.info(f"Removed API key {api_key.cluster_auth_key_id} from group {group_id}")
-        return result["groups"]
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.error(f"API key or group not found: {e}")
-            raise NotFoundException("API key or group not found")
-        raise
-
-
-async def create_group_in_cluster_auth(
-    cluster_auth_client: ClusterAuthClient,
-    name: str | None = None,
-    group_id: str | None = None,
-) -> GroupResponse:
-    """
-    Create a group in cluster-auth.
-
-    Args:
-        cluster_auth_client: Cluster-auth client instance
-        name: Optional name for the group
-        group_id: Optional ID for the group
-
-    Returns:
-        GroupResponse with id and name
-
-    Note:
-        Groups are managed at the cluster-auth level and are not scoped to namespaces.
-    """
-
-    try:
-        result = await cluster_auth_client.create_group(name=name or "", group_id=group_id)
-        logger.info(f"Created group {result['id']} with name {result['name']}")
-        return GroupResponse(id=result["id"], name=result["name"])
-    except Exception as e:
-        logger.error(f"Failed to create group: {e}")
-        raise
-
-
-async def delete_group_from_cluster_auth(
-    group_id: str,
-    cluster_auth_client: ClusterAuthClient,
-) -> None:
-    """
-    Delete a group from cluster-auth.
-
-    Args:
-        group_id: The ID of the group to delete
-        cluster_auth_client: Cluster-auth client instance
-
-    Raises:
-        NotFoundException: If the group is not found
-
-    Note:
-        Groups are managed at the cluster-auth level and are not scoped to namespaces.
-    """
-
-    try:
-        await cluster_auth_client.delete_group(group_id)
-        logger.info(f"Deleted group {group_id}")
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.warning(f"Group {group_id} not found in cluster-auth")
-            raise NotFoundException(f"Group with ID {group_id} not found")
-        raise
+    logger.info(f"Deleted API key {api_key_id} from the store")
 
 
 def _pivot_to_wide(results: list[dict], services: list[str]) -> dict[str, dict[str, float]]:
@@ -772,10 +410,13 @@ async def get_api_key_usage_metrics(
     if not api_key:
         raise NotFoundException(f"API key with ID {api_key_id} not found in namespace '{namespace}'")
 
-    # OpenBao prefixes the token display_name with "token-" and sanitizes it
-    # (replaces non-alphanumeric/hyphen chars with hyphens, lowercases).
-    # This is what ends up as the api_key_id label in Prometheus metrics.
-    prom_key_id = "token-" + re.sub(r"[^a-z0-9\-]", "-", f"{namespace}-{api_key.display_name}".lower())
+    # The api_key_id label on the gateway metrics is the client id forwarded by the
+    # per-model apiKeyAuth SecurityPolicy (forwardClientIDHeader: x-api-key-id), which is
+    # the Secret data-key name — i.e. compute_client_id(namespace, display_name) =
+    # "token-<namespace>-<display_name>". Build the query id the same way so the filter
+    # matches. (The old form omitted the namespace and stopped matching after the move
+    # from cluster-auth to native apiKeyAuth.)
+    prom_key_id = es_store.compute_client_id(namespace, api_key.display_name)
 
     step = get_step_for_range_query(start, end)
     lookback = get_aggregation_lookback_for_metrics(step)

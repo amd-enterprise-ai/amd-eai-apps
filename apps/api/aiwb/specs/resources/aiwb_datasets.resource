@@ -192,6 +192,14 @@ Response should contain at least ${expected_count} datasets
     ${count}=               Get length              ${datasets}
     Should be true          ${count} >= ${expected_count}                   msg=Expected at least ${expected_count} datasets, but found ${count}
 
+Listed datasets should report their file sizes
+    [Documentation]    Verifies every listed dataset reports a non-negative file size.
+    VAR                     ${body}                 ${TEST_RESPONSE.json()}
+    FOR    ${dataset}    IN    @{body}[data]
+        Dictionary Should Contain Key              ${dataset}              sizeBytes
+        Should Be True                             ${dataset}[sizeBytes] >= 0
+    END
+
 Response should contain only datasets with type "${expected_type}"
     [Documentation]    Verifies all datasets in the response list have the specified type
     ${body}=                Set variable            ${TEST_RESPONSE.json()}
@@ -222,6 +230,12 @@ Downloaded content should match uploaded file
     [Documentation]    Verifies the downloaded content matches the original uploaded file
     ${expected_content}=    Get Binary File         ${TEST_DATASET_FILE}
     Should Be Equal         ${TEST_RESPONSE.content}     ${expected_content}
+
+Dataset size should match uploaded file
+    [Documentation]    Verifies the reported dataset size matches its uploaded file.
+    ${expected_size}=       Get File Size           ${TEST_DATASET_FILE}
+    VAR                     ${body}                 ${TEST_RESPONSE.json()}
+    Dictionary Should Contain Item                  ${body}                 sizeBytes               ${expected_size}
 
 Get dataset request is sent for "${dataset_id}"
     [Documentation]    Get a specific dataset and store the response as test variable.

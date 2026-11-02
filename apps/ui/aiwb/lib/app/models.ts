@@ -2,25 +2,16 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { APIRequestError, getErrorMessage } from '@amdenterpriseai/utils/app';
+import { APIRequestError } from '@amdenterpriseai/utils/app';
 
+import { apiClient, getApiClientErrorMessage } from '@/lib/api-client';
 import { FinetunableModel, ModelFinetuneParams } from '@/types/models';
-import { AIMModel } from '@/types/aims';
-import type { PaginatedList } from '@/types/pagination';
+import type { components } from '@/types/api';
 
 import { fetchAllPages } from './pagination';
 
-interface FineTuningJobRequest {
-  // baseModel is required by the new fine-tuning capability API (was a URL path
-  // segment under the legacy endpoint).
-  baseModel: string;
-  displayName: string;
-  datasetId: string;
-  epochs?: number;
-  learningRate?: number;
-  batchSize?: number;
-  hfTokenSecretName?: string;
-}
+/** AIMModel CRD resource as returned by the fine-tuning list/read endpoints. */
+type AIMModelResource = components['schemas']['AIMModelResource'];
 
 /**
  * Retrieves a list of models that can be fine-tuned.
@@ -29,41 +20,31 @@ interface FineTuningJobRequest {
  * @throws {APIRequestError} If the API request fails.
  */
 export const getFinetunableModels = async (): Promise<FinetunableModel[]> => {
-  const url = `/api/fine-tuning/models`;
+  const { data, error, response } = await apiClient.GET(
+    '/api/fine-tuning/models',
+  );
 
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to get finetunable models: ${errorMessage}`,
+      `Failed to get finetunable models: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 
-  const json = await response.json();
-  return (json.data as FinetunableModel[]).map((model) => ({
-    ...model,
+  return (data.data ?? []).map((model) => ({
+    canonicalName: model.canonicalName,
+    gpuCount: model.gpuCount ?? null,
     compatibleAccelerators: model.compatibleAccelerators ?? [],
     compatibleAcceleratorNames: model.compatibleAcceleratorNames ?? [],
+    hfTokenRequired: model.hfTokenRequired,
+    trainingType: model.trainingType,
+    hyperparameters: model.hyperparameters,
   }));
 };
 
-// EAI-6600 tracks replacing load-all UI consumers with server-side
+// TODO: replace load-all UI consumers with server-side
 // paginated tables; until then `listAllProjectFineTunedModels` walks
 // every page via the shared fetchAllPages utility.
-
-const buildFineTunedModelsListUrl = (
-  projectId: string,
-  page: number,
-  pageSize: number,
-) =>
-  `/api/projects/${projectId}/fine-tuning/models?pageSize=${pageSize}&page=${page}`;
 
 /**
  * Fetches a single page of fine-tuned models for a project.
@@ -73,41 +54,41 @@ const buildFineTunedModelsListUrl = (
  *
  * @param {string} projectId - The project (1:1 with namespace) to list in.
  * @param {object} [options] - Optional pagination controls.
- * @returns {Promise<PaginatedList<AIMModel>>} The requested page and pagination metadata.
+ * @returns The requested page and pagination metadata.
  * @throws {APIRequestError} If the API request fails.
  */
 export const listProjectFineTunedModels = async (
   projectId: string,
   options: { page?: number; pageSize?: number } = {},
-): Promise<PaginatedList<AIMModel>> => {
+): Promise<components['schemas']['FineTuningModelsList']> => {
   if (!projectId) {
     throw new APIRequestError('No project selected', 422);
   }
   const { page = 1, pageSize = 10 } = options;
-  const response = await fetch(
-    buildFineTunedModelsListUrl(projectId, page, pageSize),
+  const { data, error, response } = await apiClient.GET(
+    '/api/projects/{project}/fine-tuning/models',
     {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
+      params: {
+        path: { project: projectId },
+        query: { page, pageSize },
+      },
     },
   );
 
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to get fine-tuned models: ${errorMessage}`,
+      `Failed to get fine-tuned models: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 
-  return await response.json();
+  return data;
 };
 
 /**
  * Lists every fine-tuned model in a project by walking all pages.
  *
- * Thin wrapper around fetchAllPages — see `apps/ui/aiwb/AGENTS.md`
- * "Paginated list loaders". Returns `[]` on any failure so callers
+ * Thin wrapper around fetchAllPages. Returns `[]` on any failure so callers
  * (joins against deployments / workloads) can render empty state
  * without an error boundary — matches `listAllInferenceDeployments`.
  *
@@ -117,13 +98,13 @@ export const listProjectFineTunedModels = async (
  * `listProjectFineTunedModels` and handle the error themselves.
  *
  * @param {string} projectId - The project (1:1 with namespace) to list in.
- * @returns {Promise<AIMModel[]>} All fine-tuned models in the project.
+ * @returns {Promise<AIMModelResource[]>} All fine-tuned models in the project.
  */
 export const listAllProjectFineTunedModels = async (
   projectId: string,
-): Promise<AIMModel[]> => {
+): Promise<AIMModelResource[]> => {
   try {
-    return await fetchAllPages<AIMModel>((page, pageSize) =>
+    return await fetchAllPages<AIMModelResource>((page, pageSize) =>
       listProjectFineTunedModels(projectId, { page, pageSize }),
     );
   } catch (error) {
@@ -132,43 +113,67 @@ export const listAllProjectFineTunedModels = async (
   }
 };
 
+type FineTuningJobRequest = components['schemas']['FineTuningJobRequest'];
+
+// `output` is the only field the generated type marks as required:
+// openapi-typescript's --default-non-nullable treats a nullable field with a
+// non-null default as non-optional, and `output` defaults to `"model"`. The
+// backend's actual OpenAPI `required` list omits it, so widen it back to
+// optional and the request body can leave it out. The three hyperparameters and
+// `lora` all default to null, so they stay optional without any widening.
+type FineTuningJobRequestBody = Omit<FineTuningJobRequest, 'output'> &
+  Partial<Pick<FineTuningJobRequest, 'output'>>;
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
 export const finetuneModel = async (
   baseModelId: string,
   params: ModelFinetuneParams,
   projectId: string,
 ) => {
-  const body: FineTuningJobRequest = {
-    baseModel: baseModelId,
-    displayName: params.displayName,
-    datasetId: params.datasetId,
-    epochs: params.epochs,
-    learningRate: params.learningRate,
-    batchSize: params.batchSize,
-  };
-
-  if (params.hfTokenSecretName) {
-    body.hfTokenSecretName = params.hfTokenSecretName;
-  }
-
-  const bodyString = JSON.stringify(body);
-
-  const response = await fetch(`/api/projects/${projectId}/fine-tuning/jobs`, {
-    method: 'POST',
-    body: bodyString,
-    headers: {
-      'Content-Type': 'application/json',
+  const { data, error, response } = await apiClient.POST(
+    '/api/projects/{project}/fine-tuning/jobs',
+    {
+      params: { path: { project: projectId } },
+      body: {
+        baseModel: baseModelId,
+        displayName: params.displayName,
+        datasetIds: params.datasetIds,
+        ...(params.description ? { description: params.description } : {}),
+        // Omit untouched Advanced Settings entirely rather than sending null,
+        // so the run trains with the base model recipe's own values, exactly as
+        // it would for any other caller that never sends the key.
+        ...(isFiniteNumber(params.epochs) ? { epochs: params.epochs } : {}),
+        ...(isFiniteNumber(params.learningRate)
+          ? { learningRate: params.learningRate }
+          : {}),
+        ...(isFiniteNumber(params.batchSize)
+          ? { batchSize: params.batchSize }
+          : {}),
+        ...(params.hfTokenSecretName
+          ? { hfTokenSecretName: params.hfTokenSecretName }
+          : {}),
+        ...(params.output ? { output: params.output } : {}),
+        ...(params.lora
+          ? {
+              lora: {
+                ...params.lora,
+              },
+            }
+          : {}),
+      } satisfies FineTuningJobRequestBody as FineTuningJobRequest,
     },
-  });
+  );
 
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error || !data) {
     throw new APIRequestError(
-      `Failed to finetune model: ${errorMessage}`,
+      `Failed to finetune model: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
 
-  return await response.json();
+  return data;
 };
 
 /**
@@ -182,20 +187,14 @@ export const cancelFineTuningJob = async (
   jobId: string,
   projectId: string,
 ): Promise<void> => {
-  const response = await fetch(
-    `/api/projects/${projectId}/fine-tuning/jobs/${encodeURIComponent(jobId)}`,
-    {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    },
+  const { error, response } = await apiClient.DELETE(
+    '/api/projects/{project}/fine-tuning/jobs/{job_id}',
+    { params: { path: { project: projectId, job_id: jobId } } },
   );
 
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error) {
     throw new APIRequestError(
-      `Failed to cancel fine-tuning job: ${errorMessage}`,
+      `Failed to cancel fine-tuning job: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }
@@ -206,20 +205,19 @@ export const deleteModel = async (
   projectId: string,
   force?: boolean,
 ) => {
-  const baseUrl = `/api/projects/${projectId}/fine-tuning/models/${encodeURIComponent(name)}`;
-  const url = force ? `${baseUrl}?force=true` : baseUrl;
-
-  const response = await fetch(url, {
-    method: 'DELETE',
-    headers: {
-      'Content-Type': 'application/json',
+  const { error, response } = await apiClient.DELETE(
+    '/api/projects/{project}/fine-tuning/models/{model_id}',
+    {
+      params: {
+        path: { project: projectId, model_id: name },
+        ...(force ? { query: { force: true } } : {}),
+      },
     },
-  });
+  );
 
-  if (!response.ok) {
-    const errorMessage = await getErrorMessage(response);
+  if (error) {
     throw new APIRequestError(
-      `Failed to delete model: ${errorMessage}`,
+      `Failed to delete model: ${getApiClientErrorMessage(error, response)}`,
       response.status,
     );
   }

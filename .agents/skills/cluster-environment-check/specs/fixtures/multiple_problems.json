@@ -1,0 +1,12 @@
+{
+  "get volumes.longhorn.io -A -o json": [
+    0,
+    "{\"items\":[{\"metadata\":{\"name\":\"volume-example\"},\"status\":{\"robustness\":\"faulted\",\"state\":\"detached\"}}]}",
+    ""
+  ],
+  "get events -A --field-selector reason=FailedMount -o json": [
+    0,
+    "{\"items\":[{\"involvedObject\":{\"namespace\":\"project-example\",\"name\":\"workload-example\"}}]}",
+    ""
+  ]
+}

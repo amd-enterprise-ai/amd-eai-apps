@@ -161,6 +161,9 @@ rules:
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["keda.sh"]
+    resources: ["scaledobjects", "triggerauthentications"]
+    verbs: ["*"]
 {{- range .Values.airm.additionalClusterRoles.projectMember }}
   - apiGroups:
       {{ .apiGroups | toYaml | nindent 6 }}

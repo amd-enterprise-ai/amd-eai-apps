@@ -165,35 +165,6 @@ const { appConfigMock } = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/app/app-config', () => appConfigMock);
 
-// Mock HeroUI
-vi.mock('@heroui/react', () => ({
-  HeroUIProvider: ({
-    children,
-    disableRipple,
-  }: {
-    children: React.ReactNode;
-    disableRipple?: boolean;
-  }) => (
-    <div data-testid="heroui-provider" data-disable-ripple={disableRipple}>
-      {children}
-    </div>
-  ),
-  DropdownSection: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="dropdown-section">{children}</div>
-  ),
-  DropdownItem: ({
-    children,
-    href,
-  }: {
-    children: React.ReactNode;
-    href?: string;
-  }) => (
-    <div data-testid="dropdown-item" data-href={href}>
-      {children}
-    </div>
-  ),
-}));
-
 // Test component that accepts props
 const TestComponent = ({
   testProp,
@@ -250,7 +221,6 @@ describe('App Component', () => {
       expect(screen.getByTestId('session-provider')).toBeInTheDocument();
       expect(screen.getByTestId('query-client-provider')).toBeInTheDocument();
       expect(screen.getByTestId('project-provider')).toBeInTheDocument();
-      expect(screen.getByTestId('heroui-provider')).toBeInTheDocument();
       expect(screen.getByTestId('theme-provider')).toBeInTheDocument();
       expect(screen.getByTestId('app-layout')).toBeInTheDocument();
       expect(screen.getByTestId('page-error-handler')).toBeInTheDocument();
@@ -299,13 +269,6 @@ describe('App Component', () => {
       expect(themeProvider).toHaveAttribute('data-attribute', 'class');
       expect(themeProvider).toHaveAttribute('data-default-theme', 'dark');
       expect(themeProvider).toHaveAttribute('data-disable-transition', 'true');
-    });
-
-    it('should configure HeroUIProvider with disableRipple', () => {
-      render(<App {...baseAppProps} />);
-
-      const heroUIProvider = screen.getByTestId('heroui-provider');
-      expect(heroUIProvider).toHaveAttribute('data-disable-ripple', 'true');
     });
   });
 
@@ -526,14 +489,12 @@ describe('App Component', () => {
       const sessionProvider = screen.getByTestId('session-provider');
       const queryProvider = screen.getByTestId('query-client-provider');
       const projectProvider = screen.getByTestId('project-provider');
-      const heroUIProvider = screen.getByTestId('heroui-provider');
       const themeProvider = screen.getByTestId('theme-provider');
 
       // Check if providers are nested correctly by DOM structure
       expect(sessionProvider).toContainElement(queryProvider);
       expect(queryProvider).toContainElement(projectProvider);
-      expect(projectProvider).toContainElement(heroUIProvider);
-      expect(heroUIProvider).toContainElement(themeProvider);
+      expect(projectProvider).toContainElement(themeProvider);
     });
   });
 

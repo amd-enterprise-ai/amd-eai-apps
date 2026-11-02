@@ -8,7 +8,13 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'next-i18next';
 import { useRouter } from 'next/router';
 import { fetchProjectWorkloadMetrics } from '@/lib/app/projects';
-import { aimParser, resolveAIMServiceDisplay } from '@/lib/app/aims';
+import type { FetchProjectWorkloadMetricsParams } from '@/lib/app/projects';
+import {
+  aimParser,
+  getMaxSupportedLoraRank,
+  getModelCapability,
+  resolveAIMServiceDisplay,
+} from '@/lib/app/aims';
 import {
   deleteInferenceDeployment,
   listAllInferenceDeployments,
@@ -20,6 +26,8 @@ import {
   listAllProjectFineTunedModels,
 } from '@/lib/app/models';
 import { useProfileSpecsForServices } from '@/hooks/useProfileSpecsForServices';
+import { useCustomProfileDeployments } from '@/hooks/useCustomProfileDeployments';
+import { resolveModelDeploymentName } from '@/lib/app/modelDeploymentDisplay';
 import {
   AIMService,
   FINE_TUNED_LABEL,
@@ -32,18 +40,13 @@ import { getWorkloadTypeVariants } from '@amdenterpriseai/utils/app';
 
 import { TableColumns } from '@amdenterpriseai/types';
 import { SortDirection } from '@amdenterpriseai/types';
-import { ResourceType } from '@/types/enums/workloads';
-import { WorkloadType } from '@amdenterpriseai/types';
-import { WorkloadStatus } from '@/types/enums/workloads';
-import { NamespaceWorkloadsTableField } from '@/enums';
-import type { ResourceMetrics } from '@/types/projects';
+import type { EnrichedWorkloadMetrics } from '@/types/projects';
 import {
   useDebouncedCallback,
   useOverlayState,
   useSystemToast,
 } from '@amdenterpriseai/hooks';
 import { CollectionRequestParams } from '@amdenterpriseai/types';
-import { WorkloadMetricsResponse } from '@/types/projects';
 
 import {
   ChipDisplay,
@@ -76,28 +79,37 @@ interface Props {
   namespace: string;
 }
 
+type NamespaceWorkloadsTableField =
+  | 'displayName'
+  | 'type'
+  | 'status'
+  | 'gpuCount'
+  | 'vram'
+  | 'createdAt'
+  | 'createdBy';
+
 const columns: TableColumns<NamespaceWorkloadsTableField | null> = [
   {
-    key: NamespaceWorkloadsTableField.NAME,
+    key: 'displayName',
     sortable: true,
   },
   {
-    key: NamespaceWorkloadsTableField.TYPE,
+    key: 'type',
     sortable: true,
   },
-  { key: NamespaceWorkloadsTableField.STATUS, sortable: true },
-  { key: NamespaceWorkloadsTableField.GPUS },
-  { key: NamespaceWorkloadsTableField.VRAM },
-  { key: NamespaceWorkloadsTableField.CREATED_AT, sortable: true },
-  { key: NamespaceWorkloadsTableField.CREATED_BY, sortable: true },
+  { key: 'status', sortable: true },
+  { key: 'gpuCount' },
+  { key: 'vram' },
+  { key: 'createdAt', sortable: true },
+  { key: 'createdBy', sortable: true },
 ];
 
-const API_REQUEST_DEFAULTS: CollectionRequestParams<ResourceMetrics> = {
+const API_REQUEST_DEFAULTS: CollectionRequestParams<EnrichedWorkloadMetrics> = {
   page: 1,
   pageSize: 20,
   sort: [
     {
-      field: 'createdAt' as keyof ResourceMetrics,
+      field: 'createdAt' as keyof EnrichedWorkloadMetrics,
       direction: SortDirection.DESC,
     },
   ],
@@ -114,12 +126,14 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
   const queryClient = useQueryClient();
 
   const [tableParams, setTableParams] =
-    useState<CollectionRequestParams<ResourceMetrics>>(API_REQUEST_DEFAULTS);
+    useState<CollectionRequestParams<EnrichedWorkloadMetrics>>(
+      API_REQUEST_DEFAULTS,
+    );
   const [workloadBeingSelected, setWorkloadBeingSelected] = useState<
-    ResourceMetrics | undefined
+    EnrichedWorkloadMetrics | undefined
   >(undefined);
   const [resourceForConnect, setResourceForConnect] = useState<
-    ResourceMetrics | undefined
+    EnrichedWorkloadMetrics | undefined
   >(undefined);
 
   const {
@@ -140,7 +154,7 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
     onClose: onConnectModalClose,
   } = useOverlayState();
 
-  const fetchParams = useMemo(() => {
+  const fetchParams = useMemo<FetchProjectWorkloadMetricsParams>(() => {
     const sortField = tableParams.sort?.[0]?.field as string | undefined;
     const sortDirection = tableParams.sort?.[0]?.direction;
 
@@ -148,12 +162,17 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
       page: tableParams.page,
       pageSize: tableParams.pageSize,
       sortBy: sortField,
-      sortOrder: sortDirection,
+      sortOrder:
+        sortDirection === undefined
+          ? undefined
+          : sortDirection === 'ascending'
+            ? 'asc'
+            : 'desc',
     };
   }, [tableParams]);
 
   const { data: namespaceMetrics, isFetching: isNamespaceMetricsLoading } =
-    useQuery<WorkloadMetricsResponse>({
+    useQuery({
       queryKey: ['namespace', namespace, 'workloads', fetchParams],
       queryFn: () => fetchProjectWorkloadMetrics(namespace, fetchParams),
       enabled: !!namespace,
@@ -177,7 +196,7 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
             s.metadata.labels?.[FINE_TUNED_LABEL] !== 'true' &&
             s.metadata.labels?.[NAMESPACE_AIM_MODEL_LABEL] !== 'true',
         )
-        .map((s) => s.spec.model?.name)
+        .map((s) => s.spec?.model?.name)
         .filter((name): name is string => !!name),
     [aimServices],
   );
@@ -210,20 +229,29 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
         ...Array.from(clusterAimsByName.values()).map((m) => m.status?.aimId),
         ...fineTunedModels.map((m) => m.status?.aimId),
       ].filter((id): id is string => !!id);
+  const resolvedProfiles = useMemo(
+    () => aimServices?.map(({ status }) => status?.resolvedProfile) ?? [],
+    [aimServices],
+  );
   const { specByName: profileSpecByName } = useProfileSpecsForServices({
     aimIds,
     project: namespace,
+    resolvedProfiles,
   });
+  const { profileByServiceId: customProfileByServiceId } =
+    useCustomProfileDeployments({
+      services: aimServices ?? [],
+      project: namespace,
+    });
 
   // Merge resolved profile spec into table rows so HeroUI's TableBody sees a
   // new array reference when AIM services arrive and rows can render
   // hardware details.
-  const tableData = useMemo((): ResourceMetrics[] => {
+  const tableData = useMemo((): EnrichedWorkloadMetrics[] => {
     const rows = namespaceMetrics?.data ?? [];
     if (!aimServices || aimServices.length === 0) return rows;
 
     // TODO: This is workaround as the API doesn't return createdAt and createdBy as it still reading from DB.
-    // Follow up this on https://amd.atlassian.net/browse/EAI-6063
 
     const aimServiceById = new Map<string, AIMService>(
       aimServices.flatMap((s) => (s.id ? [[s.id, s]] : [])),
@@ -232,7 +260,15 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
     return rows.map((item) => {
       const aimService = aimServiceById.get(String(item.id));
       if (!aimService) return item;
-      const profile = toProfileSummaryFields(aimService, profileSpecByName);
+      const customProfile = customProfileByServiceId.get(String(item.id));
+      const baseProfile =
+        customProfile?.profile ??
+        toProfileSummaryFields(aimService, profileSpecByName);
+      // Custom-profile axes never carry maxLoraRank — it's sourced from the
+      // deployment's own spec, not the profile — so fold it in explicitly
+      // rather than letting a custom profile short-circuit past it.
+      const maxLoraRank =
+        baseProfile?.maxLoraRank ?? getMaxSupportedLoraRank(aimService.spec);
 
       return {
         ...item,
@@ -242,31 +278,41 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
           item.createdBy ??
           aimService?.metadata?.annotations?.[SUBMITTER_ANNOTATION_KEY] ??
           null,
-        metric: profile?.metric ?? null,
-        gpu: profile?.gpu ?? null,
-        templateGpuCount: profile?.templateGpuCount ?? null,
-        acceleratorType: profile?.acceleratorType ?? null,
-        precision: profile?.precision ?? null,
+        metric: baseProfile?.metric ?? null,
+        gpu: baseProfile?.gpu ?? null,
+        templateGpuCount: baseProfile?.templateGpuCount ?? null,
+        acceleratorType: baseProfile?.acceleratorType ?? null,
+        precision: baseProfile?.precision ?? null,
+        maxLoraRank: maxLoraRank ?? null,
+        profileDisplayName: customProfile?.displayName ?? null,
       };
     });
-  }, [namespaceMetrics?.data, aimServices, profileSpecByName]);
+  }, [
+    namespaceMetrics?.data,
+    aimServices,
+    profileSpecByName,
+    customProfileByServiceId,
+  ]);
 
   const connectInfo = useMemo(() => {
     if (
       !resourceForConnect ||
-      resourceForConnect.resourceType !== ResourceType.AIM_SERVICE ||
+      resourceForConnect.resourceType !== 'AIMService' ||
       !aimServices
     )
       return undefined;
     const service = aimServices.find((s) => s.id === resourceForConnect.id);
     if (!service) return undefined;
-    const modelName = service.status?.resolvedModel?.name;
+    const modelName = service.status?.resolvedModel?.name ?? undefined;
     return {
       serviceId: service.id ?? undefined,
       endpoints: service.endpoints,
       modelName,
+      capability: getModelCapability(
+        resolveAIMServiceDisplay(service, parsedAIMs).tags,
+      ),
     };
-  }, [resourceForConnect, aimServices]);
+  }, [resourceForConnect, aimServices, parsedAIMs]);
 
   const { mutate: deleteWorkloadMutated } = useMutation({
     mutationFn: (id: string) => {
@@ -275,16 +321,14 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
         throw new Error('No resource selected');
       }
 
-      if (resource.resourceType === ResourceType.AIM_SERVICE) {
+      if (resource.resourceType === 'AIMService') {
         return deleteInferenceDeployment(namespace, id);
-      } else if (resource.type === WorkloadType.FINE_TUNING) {
+      } else if (resource.type === 'FINE_TUNING') {
         return cancelFineTuningJob(id, namespace);
-      } else if (resource.type === WorkloadType.WORKSPACE) {
+      } else if (resource.type === 'WORKSPACE') {
         return deleteWorkspace(namespace, id);
       }
-      // Generic /workloads DELETE was removed in EAI-6313 — deletion is now
-      // capability-specific. MODEL_DOWNLOAD/CUSTOM rows have no owning
-      // capability surface yet, so the UI must not offer delete for them.
+      // Generic /workloads DELETE was removed, so deletion is capability-specific.
       throw new Error(
         `No delete capability for workload type ${resource.type}`,
       );
@@ -304,46 +348,53 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
   });
 
   const rowActions = useMemo(
-    () => (item: ResourceMetrics) => {
-      const actionsList: ActionItem<ResourceMetrics>[] = [];
+    () => (item: EnrichedWorkloadMetrics) => {
+      const actionsList: ActionItem<EnrichedWorkloadMetrics>[] = [];
 
-      if (item.type !== WorkloadType.CUSTOM) {
-        actionsList.push({
-          key: 'details',
-          label: t('workloads:list.actions.details.label'),
-          startContent: <IconEye />,
-          onPress: (w: ResourceMetrics) => {
-            const pathname =
-              w.resourceType === ResourceType.AIM_SERVICE
-                ? projectPath(`/aims/${w.id}`)
-                : projectPath(`/workloads/${w.id}`);
+      actionsList.push({
+        key: 'details',
+        label: t('workloads:list.actions.details.label'),
+        startContent: <IconEye />,
+        onPress: (w: EnrichedWorkloadMetrics) => {
+          const pathname =
+            w.resourceType === 'AIMService'
+              ? projectPath(`/aims/${w.id}`)
+              : projectPath(`/workloads/${w.id}`);
 
-            router.push({
-              pathname,
-              query: { ref: router.asPath },
-            });
-          },
-        });
-      }
+          router.push({
+            pathname,
+            query: { ref: router.asPath },
+          });
+        },
+      });
 
-      if (
-        item.type === WorkloadType.INFERENCE &&
-        item.status === WorkloadStatus.RUNNING
-      ) {
-        actionsList.push({
-          key: 'chat',
-          label: t('workloads:list.actions.chat.label'),
-          startContent: <IconMessage />,
-          onPress: () => {
-            window.open(projectUrl(`/chat?workload=${item.id}`), '_blank');
-          },
-        });
-        if (item.resourceType === ResourceType.AIM_SERVICE) {
+      if (item.type === 'INFERENCE' && item.status === 'Running') {
+        const service =
+          item.resourceType === 'AIMService'
+            ? aimServices?.find((s) => s.id === item.id)
+            : undefined;
+        const capability = service
+          ? getModelCapability(
+              resolveAIMServiceDisplay(service, parsedAIMs).tags,
+            )
+          : 'chat';
+        // Transcription deployments have no chat surface; omit the chat action.
+        if (capability !== 'transcription') {
+          actionsList.push({
+            key: 'chat',
+            label: t('workloads:list.actions.chat.label'),
+            startContent: <IconMessage />,
+            onPress: () => {
+              window.open(projectUrl(`/chat?workload=${item.id}`), '_blank');
+            },
+          });
+        }
+        if (item.resourceType === 'AIMService') {
           actionsList.push({
             key: 'connect',
             label: tModels('aimCatalog.actions.connect.label'),
             startContent: <IconLink />,
-            onPress: (w: ResourceMetrics) => {
+            onPress: (w: EnrichedWorkloadMetrics) => {
               setResourceForConnect(w);
               onConnectModalOpen();
             },
@@ -355,21 +406,21 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
         key: 'logs',
         label: t('workloads:list.actions.logs.label'),
         startContent: <IconFileText />,
-        onPress: (w: ResourceMetrics) => {
+        onPress: (w: EnrichedWorkloadMetrics) => {
           setWorkloadBeingSelected(w);
           onWorkloadLogsModalOpen();
         },
       });
 
       // The delete mutation can only dispatch to capability-specific endpoints
-      // (AIM service / fine-tuning / workspace). MODEL_DOWNLOAD/CUSTOM and any
-      // unrecognized row type have no owning capability surface, so the action
-      // is filtered out rather than letting the user click into a thrown error.
+      // (AIM service / fine-tuning / workspace). Any other row type has no owning
+      // capability surface, so the action is filtered out rather than letting the
+      // user click into a thrown error.
       const canDelete =
-        item.status !== WorkloadStatus.DELETED &&
-        (item.resourceType === ResourceType.AIM_SERVICE ||
-          item.type === WorkloadType.FINE_TUNING ||
-          item.type === WorkloadType.WORKSPACE);
+        item.status !== 'Deleted' &&
+        (item.resourceType === 'AIMService' ||
+          item.type === 'FINE_TUNING' ||
+          item.type === 'WORKSPACE');
 
       if (canDelete) {
         actionsList.push({
@@ -377,7 +428,7 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
           label: t('workloads:list.actions.delete.label'),
           color: 'danger',
           startContent: <IconTrash />,
-          onPress: (w: ResourceMetrics) => {
+          onPress: (w: EnrichedWorkloadMetrics) => {
             setWorkloadBeingSelected(w);
             onDeleteWorkloadModalOpen();
           },
@@ -392,11 +443,13 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
       onWorkloadLogsModalOpen,
       onDeleteWorkloadModalOpen,
       onConnectModalOpen,
+      aimServices,
+      parsedAIMs,
     ],
   );
 
   const handleTableParamsChange = useDebouncedCallback(
-    (params: CollectionRequestParams<ResourceMetrics>) => {
+    (params: CollectionRequestParams<EnrichedWorkloadMetrics>) => {
       setTableParams(params);
     },
     100,
@@ -405,23 +458,23 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
   const customRenderers: Partial<
     Record<
       NamespaceWorkloadsTableField,
-      (item: ResourceMetrics) => React.ReactNode | string
+      (item: EnrichedWorkloadMetrics) => React.ReactNode | string
     >
   > = {
-    [NamespaceWorkloadsTableField.VRAM]: (item) =>
-      item.vram !== null ? (
+    vram: (item) =>
+      item.vram != null ? (
         displayMegabytesInGigabytes(item.vram)
       ) : (
         <NoDataDisplay />
       ),
-    [NamespaceWorkloadsTableField.CREATED_AT]: (item) => {
+    createdAt: (item) => {
       if (item.createdAt) {
         return <DateDisplay date={item.createdAt} />;
       }
       return <NoDataDisplay />;
     },
-    [NamespaceWorkloadsTableField.NAME]: (item) => {
-      const isAimService = item.resourceType === ResourceType.AIM_SERVICE;
+    displayName: (item) => {
+      const isAimService = item.resourceType === 'AIMService';
       const profileSummary = <ModelProfileSummary profile={item} t={tModels} />;
 
       if (isAimService && aimServices && parsedAIMs.length > 0) {
@@ -430,14 +483,12 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
         );
         if (aimService) {
           const displayInfo = resolveAIMServiceDisplay(aimService, parsedAIMs);
-          const canonicalName =
-            `${displayInfo.canonicalName} ${displayInfo.imageVersion ? `(${displayInfo.imageVersion})` : ''}`.trim();
-          // Prefer the API display name; fall back to canonical + version when
-          // the API only echoes the K8s resource name (displayName === name).
-          const displayName =
-            item.displayName && item.displayName !== item.name
-              ? item.displayName
-              : canonicalName;
+          const displayName = resolveModelDeploymentName({
+            displayName: item.displayName,
+            resourceName: item.name,
+            canonicalName: displayInfo.canonicalName,
+            imageVersion: displayInfo.imageVersion,
+          });
           return (
             <div className="flex flex-col gap-1">
               <span>{displayName}</span>
@@ -455,22 +506,20 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
         </div>
       );
     },
-    [NamespaceWorkloadsTableField.STATUS]: (item) => (
+    status: (item) => (
       <StatusDisplay
         type={item.status}
         variants={getWorkloadStatusVariants(workloadsT)}
       />
     ),
-    [NamespaceWorkloadsTableField.TYPE]: (item) => (
+    type: (item) => (
       <ChipDisplay
         type={item.type ?? t('common:error.misc.unknownEntity')}
         variants={getWorkloadTypeVariants(workloadsT)}
       />
     ),
-    [NamespaceWorkloadsTableField.GPUS]: (item) =>
-      item.gpuCount ?? <NoDataDisplay />,
-    [NamespaceWorkloadsTableField.CREATED_BY]: (item) =>
-      item.createdBy ?? <NoDataDisplay />,
+    gpuCount: (item) => item.gpuCount ?? <NoDataDisplay />,
+    createdBy: (item) => item.createdBy ?? <NoDataDisplay />,
   };
 
   return (
@@ -482,7 +531,7 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
         data={tableData}
         columns={columns}
         customRenderers={customRenderers}
-        defaultSortByField={NamespaceWorkloadsTableField.CREATED_AT}
+        defaultSortByField="createdAt"
         defaultSortDirection={SortDirection.DESC}
         rowActions={rowActions}
         translation={t}
@@ -519,6 +568,7 @@ export const NamespaceWorkloadsTable: React.FC<Props> = ({ namespace }) => {
         serviceId={connectInfo?.serviceId}
         endpoints={connectInfo?.endpoints}
         modelName={connectInfo?.modelName}
+        capability={connectInfo?.capability ?? 'chat'}
         onChatRequested={(serviceId) => {
           window.open(projectUrl(`/chat?workload=${serviceId}`), '_blank');
           onConnectModalClose();

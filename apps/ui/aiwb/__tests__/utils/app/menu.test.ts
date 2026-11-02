@@ -90,13 +90,26 @@ describe('Menu Utils', () => {
       expect(chatItem?.icon).toBeDefined();
     });
 
-    it('should contain datasets menu item', () => {
-      const datasetsItem = aiWorkbenchMenuItems.find(
-        (item) => item.href === '/datasets',
+    it('should group fine-tuning pages', () => {
+      const fineTuningItem = aiWorkbenchMenuItems.find(
+        (item) => item.href === '/fine-tuning',
       );
-      expect(datasetsItem).toBeDefined();
-      expect(datasetsItem?.stringKey).toBe('pages.datasets.title');
-      expect(datasetsItem?.icon).toBeDefined();
+      expect(fineTuningItem?.stringKey).toBe('pages.fineTuning.title');
+      expect(fineTuningItem?.icon).toBeDefined();
+      expect(fineTuningItem?.subItems).toEqual([
+        {
+          href: '/fine-tuning/datasets',
+          stringKey: 'pages.datasets.title',
+        },
+        {
+          href: '/fine-tuning/models',
+          stringKey: 'pages.fineTuneModels.title',
+        },
+        {
+          href: '/fine-tuning/loras',
+          stringKey: 'pages.loras.title',
+        },
+      ]);
     });
 
     it('should contain models menu item', () => {
@@ -106,6 +119,10 @@ describe('Menu Utils', () => {
       expect(modelsItem).toBeDefined();
       expect(modelsItem?.stringKey).toBe('pages.models.title');
       expect(modelsItem?.icon).toBeDefined();
+      expect(modelsItem?.subItems).not.toContainEqual({
+        href: '/models/fine-tune-models',
+        stringKey: 'pages.fineTuneModels.title',
+      });
     });
 
     it('should contain secrets menu item', () => {

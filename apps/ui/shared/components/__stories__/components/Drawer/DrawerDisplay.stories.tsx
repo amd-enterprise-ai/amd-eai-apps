@@ -26,17 +26,17 @@ export const Basic: Story = () => {
         title="Connection details"
       >
         <div className="flex flex-col gap-3">
-          <p className="text-sm text-default-500">
-            DrawerDisplay wraps DrawerPrimitive with the shared backdrop,
-            motion, and close-button conventions for read-only content.
+          <p className="text-sm text-muted">
+            DrawerDisplay wraps DrawerPrimitive for read-only content with a
+            fixed right-edge layout and blur backdrop.
           </p>
           <dl className="flex flex-col gap-2 text-sm">
             <div className="flex justify-between">
-              <dt className="text-default-500">Endpoint</dt>
+              <dt className="text-muted">Endpoint</dt>
               <dd className="font-mono">https://api.example.com/v1</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-default-500">Region</dt>
+              <dt className="text-muted">Region</dt>
               <dd className="font-mono">us-east-1</dd>
             </div>
           </dl>
@@ -61,7 +61,7 @@ export const LongContent: Story = () => {
       >
         <div className="flex flex-col gap-4">
           {Array.from({ length: 12 }).map((_, index) => (
-            <p key={index} className="text-sm text-default-600">
+            <p key={index} className="text-sm text-foreground">
               Section {index + 1}: the drawer body scrolls independently while
               the header stays pinned, so long content stays readable.
             </p>

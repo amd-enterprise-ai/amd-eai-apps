@@ -15,7 +15,7 @@ Documentation       Frontend E2E tests for AIRM role-based access control.
 Resource            resources/common/browser_setup.resource
 Resource            resources/rbac.resource
 
-Suite Setup         Skip the suite if team member is not provisioned
+Suite Setup         Require the team member account
 Test Setup          Open test browser
 Test Teardown       Close test browser
 

@@ -2,11 +2,9 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import { useRouter } from 'next/router';
-
-import type { SidebarItem } from '@amdenterpriseai/types';
 
 import { AppBar } from '@amdenterpriseai/components';
 
@@ -27,10 +25,6 @@ vi.mock('next-i18next', () => ({
   }),
 }));
 
-vi.mock('@/src/Navigation/MobileMenu', () => ({
-  MobileMenu: () => <div>MobileMenu</div>,
-}));
-
 vi.mock('@/src/Navigation/UserMenu', () => ({
   UserMenu: () => <div>UserMenu</div>,
 }));
@@ -40,7 +34,10 @@ vi.mock('@amdenterpriseai/utils/app', () => ({
   toCamelCase: (str: string) => str,
 }));
 
-const emptyMenuItems: SidebarItem[] = [];
+const appBarProps = {
+  isMobileMenuOpen: false,
+  onMobileMenuOpenChange: vi.fn(),
+};
 
 describe('AppBar', () => {
   const useRouterMock = useRouter as Mock;
@@ -59,16 +56,17 @@ describe('AppBar', () => {
       { href: '/test-path', title: 'Test Path' },
     ];
 
-    render(
-      <AppBar pageBreadcrumb={pageBreadcrumb} menuItems={emptyMenuItems} />,
-    );
+    render(<AppBar {...appBarProps} pageBreadcrumb={pageBreadcrumb} />);
 
+    expect(
+      screen.getByRole('navigation', { name: 'breadcrumbs.label' }),
+    ).toBeInTheDocument();
     expect(screen.getByText('Home')).toBeInTheDocument();
     expect(screen.getByText('Test Path')).toBeInTheDocument();
   });
 
   it('renders the AppBar with title when no breadcrumbs are provided', () => {
-    render(<AppBar menuItems={emptyMenuItems} />);
+    render(<AppBar {...appBarProps} />);
 
     expect(screen.getByText('pages.test-path.title')).toBeInTheDocument();
   });
@@ -82,7 +80,7 @@ describe('AppBar', () => {
       });
       const pageBreadcrumb = [{ href: '/myproject/models', title: 'Models' }];
 
-      render(<AppBar pageBreadcrumb={pageBreadcrumb} />);
+      render(<AppBar {...appBarProps} pageBreadcrumb={pageBreadcrumb} />);
 
       const link = screen.getByRole('link', { name: 'Models' });
       expect(link).toHaveAttribute('href', '/myproject/models');
@@ -96,7 +94,7 @@ describe('AppBar', () => {
       });
       const pageBreadcrumb = [{ href: '/myproject/models', title: 'Models' }];
 
-      render(<AppBar pageBreadcrumb={pageBreadcrumb} />);
+      render(<AppBar {...appBarProps} pageBreadcrumb={pageBreadcrumb} />);
 
       const link = screen.getByRole('link', { name: 'Models' });
       expect(link).toHaveAttribute('href', '/de/myproject/models');
@@ -110,9 +108,23 @@ describe('AppBar', () => {
       });
       const pageBreadcrumb = [{ title: 'Current Page' }];
 
-      render(<AppBar pageBreadcrumb={pageBreadcrumb} />);
+      render(<AppBar {...appBarProps} pageBreadcrumb={pageBreadcrumb} />);
 
       expect(screen.getByText('Current Page')).toBeInTheDocument();
     });
+  });
+
+  it('opens the mobile navigation from the toolbar', () => {
+    const onMobileMenuOpenChange = vi.fn();
+    render(
+      <AppBar
+        {...appBarProps}
+        onMobileMenuOpenChange={onMobileMenuOpenChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'menu.actions.open' }));
+
+    expect(onMobileMenuOpenChange).toHaveBeenCalledOnce();
   });
 });

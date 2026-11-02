@@ -41,15 +41,12 @@ Library             ModelCatalog
 An AIM model is running
     [Documentation]    Ensure an AIMS model is in Running state
     AIM is deployed and running
-    # Get the external endpoint and cluster auth group ID from AIM Service (AIWB API)
+    # Get the external endpoint from AIM Service (AIWB API)
     ${response}=    Get AIM Service By ID    ${TEST_AIM_ID}    expected_status=200
     ${json}=    Set variable    ${response.json()}
     ${endpoints}=    Get from dictionary    ${json}    endpoints
     ${external_url}=    Get from dictionary    ${endpoints}    external
     Set test variable    ${TEST_AIM_EXTERNAL_HOST}    ${external_url}
-    # Extract cluster auth group ID for API key assignment
-    ${cluster_auth_group_id}=    Get from dictionary    ${json}    clusterAuthGroupId
-    Set test variable    ${TEST_AIM_AUTH_GROUP_ID}    ${cluster_auth_group_id}
 
 An AIM model is running with api key
     [Documentation]    Ensure AIMS model is running and has API key assigned
@@ -58,6 +55,7 @@ An AIM model is running with api key
     Api key exists for user
     Api key is assigned to AIMS model
     Key assignment should succeed
+    Api key binding should take effect
     # Discover model ID using the API key for auth (external endpoint requires it)
     ${models}=    List models from external endpoint    ${TEST_AIM_EXTERNAL_HOST}    ${TEST_AIM_ID}    ${TEST_API_KEY_VALUE}
     ${first_model}=    Get from list    ${models}    0
@@ -66,20 +64,30 @@ An AIM model is running with api key
 
 # API Key Assignment Keywords for AIMS
 Api key is assigned to AIMS model
-    [Documentation]    Assign API key to AIMS model using AIWB API
-    ...    Uses PATCH /api-keys/{api_key_id} endpoint with aimIds parameter (AIM service IDs)
-    ...    The API internally maps AIM service IDs to cluster auth group IDs
+    [Documentation]    Assign API key to a single AIMS model using AIWB API
+    ...    Convenience wrapper around "Api key is assigned to AIMS models" for the
+    ...    common single-model case.
     ...    Can specify api_key and aim_id or use defaults (TEST_API_KEY, TEST_AIM_ID)
     [Arguments]    ${api_key}=${TEST_API_KEY}    ${aim_id}=${TEST_AIM_ID}
 
-    # Validate we have required values
-    Should not be empty    ${api_key}
-    ...    msg=API key required - pass api_key= or ensure TEST_API_KEY is set
     Should not be empty    ${aim_id}
     ...    msg=AIM service ID required - pass aim_id= or ensure TEST_AIM_ID is set
 
-    # Update API key bindings via AIWB API with AIM service ID
     @{aim_ids}=    Create list    ${aim_id}
+    Api key is assigned to AIMS models    ${aim_ids}    api_key=${api_key}
+
+Api key is assigned to AIMS models
+    [Documentation]    Assign the API key to multiple AIMS models in a single PATCH.
+    ...    The API replaces the whole aimIds list on each PATCH, so calling the
+    ...    singular keyword a second time would overwrite the first binding
+    ...    rather than add to it — use this keyword to bind more than one model.
+    [Arguments]    ${aim_ids}    ${api_key}=${TEST_API_KEY}
+
+    Should not be empty    ${api_key}
+    ...    msg=API key required - pass api_key= or ensure TEST_API_KEY is set
+    Should not be empty    ${aim_ids}
+    ...    msg=AIM service IDs required - pass a non-empty list of aim_ids
+
     ${update_data}=    Create dictionary    aimIds=${aim_ids}
 
     ${project}=    Get Project Namespace
@@ -91,22 +99,52 @@ Api key is assigned to AIMS model
 
     Set test variable    ${TEST_RESPONSE}    ${response}
 
+Api key binding should take effect
+    [Documentation]    Wait until a freshly bound API key is accepted by the model gateway.
+    ...    The management API returns before the binding reaches the gateway authorizer, so
+    ...    callers that bind and immediately use a key must wait for propagation.
+    [Arguments]    ${host}=${TEST_AIM_EXTERNAL_HOST}    ${aim_id}=${TEST_AIM_ID}
+    ...    ${api_key_value}=${TEST_API_KEY_VALUE}
+
+    Should not be empty    ${host}
+    ...    msg=Host required - pass host= or ensure TEST_AIM_EXTERNAL_HOST is set
+    Should not be empty    ${api_key_value}
+    ...    msg=API key value required - pass api_key_value= or ensure TEST_API_KEY_VALUE is set
+    Wait until keyword succeeds    2 min    5 sec
+    ...    External endpoint should accept the api key    ${host}    ${aim_id}    ${api_key_value}
+
+External endpoint should accept the api key
+    [Documentation]    Assert that the model gateway authorizes an assigned API key.
+    [Arguments]    ${host}    ${aim_id}    ${api_key_value}
+    ${response}=    Get models response from external endpoint
+    ...    ${host}    ${aim_id}    ${api_key_value}    timeout=4
+    Should be equal as integers    ${response.status_code}    200
+    ...    msg=External endpoint has not accepted the bound API key yet (got ${response.status_code})
+
 # AIMS Model Access Keywords
 Request is made to AIMS model with valid api key
     [Documentation]    Make a request to AIMS model endpoint with valid API key
     ...    Can specify api_key_value and host or use defaults (TEST_API_KEY_VALUE, TEST_AIM_EXTERNAL_HOST)
-    ...    Lazily discovers the model ID on first call using /v1/models with the API key.
+    ...    Waits for a freshly assigned key before discovering the model ID and sending chat.
     [Arguments]    ${api_key_value}=${TEST_API_KEY_VALUE}    ${host}=${TEST_AIM_EXTERNAL_HOST}
 
     Should not be empty    ${api_key_value}
     ...    msg=API key value required - pass api_key_value= or ensure TEST_API_KEY_VALUE is set
     Should not be empty    ${host}
     ...    msg=Host required - pass host= or ensure TEST_AIM_EXTERNAL_HOST is set
+    Api key binding should take effect    host=${host}    api_key_value=${api_key_value}
 
     # Discover model ID if not already set (external endpoint requires API key auth)
     ${model_id_set}=    Get variable value    ${TEST_AIM_MODEL_ID}    ${None}
     IF    $model_id_set is None
-        ${models}=    List models from external endpoint    ${host}    ${TEST_AIM_ID}    ${api_key_value}
+        # This is the first call made with a freshly created and assigned key. AIWB stores the
+        # key-to-AIM binding immediately, but the gateway authorises against a cluster auth group
+        # that is populated asynchronously, so the endpoint can still answer 401 for a key that is
+        # perfectly valid. Verified against the live gateway that an unknown key is rejected with
+        # 401 too, so a single 401 here cannot distinguish "not propagated yet" from "wrong key" —
+        # poll instead of reading once, and let a genuinely bad key fail on the timeout.
+        ${models}=    Wait until keyword succeeds    2 min    5 sec
+        ...    List models from external endpoint    ${host}    ${TEST_AIM_ID}    ${api_key_value}
         ${first_model}=    Get from list    ${models}    0
         ${discovered_id}=    Get from dictionary    ${first_model}    id
         Set test variable    ${TEST_AIM_MODEL_ID}    ${discovered_id}
@@ -162,8 +200,8 @@ Response error message should indicate authentication failure
     [Documentation]    Verify response error message indicates authentication failure
     ...    Handles both JSON responses (from service) and non-JSON responses (from Envoy gateway)
     ${status}=    Set variable    ${TEST_RESPONSE.status_code}
-    # 403/404 from the gateway may not have a structured JSON body
-    IF    ${status} in [403, 404]
+    # Authentication gateways may return denial statuses without a structured JSON body.
+    IF    ${status} in [401, 403, 404]
         Log    Gateway returned ${status} (expected for authentication failure)    INFO
         RETURN
     END
@@ -185,8 +223,11 @@ AIMS model should reject the revoked api key
 Revoked api key request should be denied
     [Documentation]    Make a request with the revoked key and assert it is rejected.
     ...    Used as the polling condition inside Wait Until Keyword Succeeds.
-    # TEST_API_KEY_VALUE still holds the revoked key's value string
-    Request is made to AIMS model with valid api key
+    # TEST_API_KEY_VALUE still holds the revoked key's value string. Send directly: this
+    # path waits for rejection propagation, so it must not wait for the key to be accepted.
+    ${response}=    Send chat completion request to external endpoint
+    ...    ${TEST_AIM_EXTERNAL_HOST}    ${TEST_AIM_MODEL_ID}    api_key=${TEST_API_KEY_VALUE}
+    Set test variable    ${TEST_RESPONSE}    ${response}
     ${status}=    Set variable    ${TEST_RESPONSE.status_code}
     Should be true    ${status} in [401, 403, 404]
     ...    Expected 401/403/404 for revoked key, got ${status}
@@ -206,25 +247,21 @@ Same AIM is redeployed
     # No need to rediscover — the old key can't auth against the new deployment anyway.
 
 Api key should not be bound to redeployed AIM
-    [Documentation]    Verify the key's group bindings don't include the new AIM's auth group.
-    ...    After redeployment, the AIM gets a new cluster_auth_group_id.
-    ...    The key should still be bound to the OLD group, not the new one.
+    [Documentation]    Verify the key's model bindings don't include the redeployed AIM.
+    ...    Redeployment creates a new AIM (new workload id); the key stays bound to the
+    ...    OLD id, so the binding is stale. A key's ``groups`` are the bound-<workload-id>
+    ...    labels — the AIM ids it is bound to — so the redeployed AIM's id must not appear.
 
-    # Get the NEW deployment's auth group ID
-    ${response}=    Get AIM Service By ID    ${TEST_AIM_ID}    expected_status=200
-    ${json}=    Set variable    ${response.json()}
-    ${new_auth_group}=    Get from dictionary    ${json}    clusterAuthGroupId
-
-    # Get the key's current group bindings
+    # ${TEST_AIM_ID} now holds the redeployed AIM's (new) id.
+    # Get the key's current model bindings.
     ${project}=    Get Project Namespace
     ${key_response}=    api_keys_api.Get api key    ${TEST_API_KEY}[id]
     ...    project=${project}    expected_status=200
-    ${key_data}=    Set variable    ${key_response.json()}
-    ${groups}=    Get from dictionary    ${key_data}    groups
+    ${groups}=    Get from dictionary    ${key_response.json()}    groups
 
-    # The key should NOT be bound to the new auth group
-    Should not contain    ${groups}    ${new_auth_group}
-    ...    API key should not be bound to the new deployment's auth group after redeployment
+    # The key was bound to the old id, so the redeployed AIM's id must not appear.
+    Should not contain    ${groups}    ${TEST_AIM_ID}
+    ...    API key should not be bound to the redeployed AIM's id after redeployment
 
 Api key should still exist in system
     [Documentation]    Verify the API key still exists and is retrievable
@@ -234,79 +271,87 @@ Api key should still exist in system
     ${key_data}=    Set variable    ${response.json()}
     Should be equal    ${key_data}[id]    ${TEST_API_KEY}[id]
 
-# Group Membership Keywords for AIMS
-The api-key's group memberships are listed
-    [Documentation]    List the cluster-auth groups the current API key belongs to
+# Binding Lifecycle Keywords for AIMS
+Api key should have no model bindings
+    [Documentation]    Verify the API key's groups field is empty (key not bound to any AIM).
+    ...    Fetches the key details and checks the groups field.
     ${project}=    Get Project Namespace
-    ${response}=    api_keys_api.List api key groups
+    ${response}=    api_keys_api.Get api key    ${TEST_API_KEY}[id]
+    ...    project=${project}    expected_status=200
+    ${key_data}=    Set variable    ${response.json()}
+    Should contain    ${key_data}    groups
+    ${groups}=    Get from dictionary    ${key_data}    groups
+    Should be empty    ${groups}
+    ...    Expected no model bindings (groups=[]), got ${groups}
+
+Api key should be bound to the AIM
+    [Documentation]    Verify the API key's groups field contains the running AIM's workload ID.
+    ...    Convenience wrapper around "Api key should be bound to AIM" for TEST_AIM_ID.
+
+    Api key should be bound to AIM "${TEST_AIM_ID}"
+
+Api key should be bound to AIM "${aim_id}"
+    [Documentation]    Verify the API key's groups field contains the given AIM service ID.
+    ...    Generalizes "Api key should be bound to the AIM" for tests binding multiple AIMs,
+    ...    where the binding to check is not necessarily TEST_AIM_ID.
+    ${project}=    Get Project Namespace
+    ${response}=    api_keys_api.Get api key    ${TEST_API_KEY}[id]
+    ...    project=${project}    expected_status=200
+    ${key_data}=    Set variable    ${response.json()}
+    Should contain    ${key_data}    groups
+    ${groups}=    Get from dictionary    ${key_data}    groups
+    Should not be empty    ${groups}
+    ...    Expected AIM to appear in groups, but groups is empty
+    Should contain    ${groups}    ${aim_id}
+    ...    Expected groups to contain AIM ID ${aim_id}, got ${groups}
+
+Api key bindings are cleared
+    [Documentation]    Unbind the API key from all AIMs by PATCHing aimIds to an empty list.
+    ...    Uses the same PATCH bindings flow as assignment, but with an empty aimIds list.
+    @{empty_aims}=    Create list
+    ${update_data}=    Create dictionary    aimIds=${empty_aims}
+    ${project}=    Get Project Namespace
+    ${response}=    Update api key
     ...    ${TEST_API_KEY}[id]
+    ...    ${update_data}
     ...    project=${project}
     ...    expected_status=200
     Set test variable    ${TEST_RESPONSE}    ${response}
-
-The api-key has no group memberships
-    [Documentation]    Verify the API key has no group memberships in the listing response
-    Should be equal as integers    ${TEST_RESPONSE.status_code}    200
-    VAR    ${data}    ${TEST_RESPONSE.json()}[data]
-    Should be empty    ${data}
-    ...    Expected no group memberships, got ${data}
-
-The api-key is added to the AIM's auth group
-    [Documentation]    Add the current API key to the running AIM's cluster-auth group
-    Should not be empty    ${TEST_AIM_AUTH_GROUP_ID}
-    ...    msg=AIM auth group ID required - ensure "an AIM model is running" ran first
-    ${project}=    Get Project Namespace
-    ${response}=    api_keys_api.Add api key to group
-    ...    ${TEST_API_KEY}[id]
-    ...    ${TEST_AIM_AUTH_GROUP_ID}
-    ...    project=${project}
-    ...    expected_status=201
-    Set test variable    ${TEST_RESPONSE}    ${response}
-
-The api-key has that group in its memberships
-    [Documentation]    Verify the API key's membership list contains the AIM's auth group
-    VAR    ${data}    ${TEST_RESPONSE.json()}[data]
-    Should contain    ${data}    ${TEST_AIM_AUTH_GROUP_ID}
-    ...    Expected membership list to contain ${TEST_AIM_AUTH_GROUP_ID}, got ${data}
-
-The api-key is removed from the AIM's auth group
-    [Documentation]    Remove the current API key from the running AIM's cluster-auth group
-    Should not be empty    ${TEST_AIM_AUTH_GROUP_ID}
-    ...    msg=AIM auth group ID required - ensure "an AIM model is running" ran first
-    ${project}=    Get Project Namespace
-    ${response}=    api_keys_api.Remove api key from group
-    ...    ${TEST_API_KEY}[id]
-    ...    ${TEST_AIM_AUTH_GROUP_ID}
-    ...    project=${project}
-    ...    expected_status=204
-    Set test variable    ${TEST_RESPONSE}    ${response}
-    # Refresh memberships into TEST_RESPONSE so subsequent assertions can re-check the state.
-    The api-key's group memberships are listed
 
 # ========================================================================
 # Dual-AIM keywords for multi-model regression tests (Bug A)
 # ========================================================================
 
-Second smallest deployable AIM resource name
-    [Documentation]    Returns the metadata.name of the second-smallest open
-    ...    auto-deployable AIM on this cluster. Used by dual-AIM regression tests
-    ...    (Bug A — per-model auth when two AIMs share the workloads.* hostname)
-    ...    so that AIM-B is a genuinely distinct model from AIM-A.
+Second smallest deployable AIM resource name, profile and GPU count
+    [Documentation]    Returns the model, exact profile, and GPU count of the second-smallest AIM.
     ${response}=    List AIMs    expected_status=200    status_filter=Ready    page_size=100
     VAR    ${aims_list}    ${response.json()}[data]
     ${count}=    Get Length    ${aims_list}
     Should Be True    ${count} > 1
     ...    msg=Need at least two Ready AIMs on cluster for dual-AIM regression test
     ${profiles}=    All inference profiles
-    ${resource_name}=    Get Second Smallest Deployable Aim    ${aims_list}    ${profiles}
-    Log    Selected second-smallest deployable AIM: ${resource_name}    INFO
+    ${resource_name}    ${profile_name}    ${gpu_count}=    Get Second Smallest Deployable Aim With Profile
+    ...    ${aims_list}    ${profiles}
+    Log    Selected second-smallest AIM: ${resource_name} (profile: ${profile_name}, ${gpu_count} GPU)    INFO
+    RETURN    ${resource_name}    ${profile_name}    ${gpu_count}
+
+Second smallest deployable AIM resource name and GPU count
+    [Documentation]    Returns model resource name and GPU count for compatibility callers.
+    ${resource_name}    ${profile_name}    ${gpu_count}=
+    ...    Second smallest deployable AIM resource name, profile and GPU count
+    RETURN    ${resource_name}    ${gpu_count}
+
+Second smallest deployable AIM resource name
+    [Documentation]    Returns only the resource name of the second-smallest deployable AIM.
+    ${resource_name}    ${profile_name}    ${gpu_count}=
+    ...    Second smallest deployable AIM resource name, profile and GPU count
     RETURN    ${resource_name}
 
 A second AIM model is running
     [Documentation]    Deploys a second AIM (distinct from TEST_AIM_NAME / TEST_AIM_ID)
-    ...    and records its external host and cluster-auth group in TEST_AIM_B_* variables.
-    ...    AIM-A state (TEST_AIM_NAME, TEST_AIM_ID, TEST_AIM_EXTERNAL_HOST,
-    ...    TEST_AIM_AUTH_GROUP_ID) is preserved — only the B-suffixed variables are set.
+    ...    and records its external host in TEST_AIM_B_* variables.
+    ...    AIM-A state (TEST_AIM_NAME, TEST_AIM_ID, TEST_AIM_EXTERNAL_HOST) is preserved
+    ...    — only the B-suffixed variables are set.
     ...    Used by the Bug-A regression: "Inference is authorized per model when two AIMs
     ...    share the workloads host".
 
@@ -314,13 +359,19 @@ A second AIM model is running
     VAR    ${saved_aim_name}    ${TEST_AIM_NAME}
     VAR    ${saved_aim_id}    ${TEST_AIM_ID}
     VAR    ${saved_ext_host}    ${TEST_AIM_EXTERNAL_HOST}
-    VAR    ${saved_auth_group}    ${TEST_AIM_AUTH_GROUP_ID}
+    VAR    ${saved_profile_name}    ${TEST_AIM_PROFILE_NAME}
+    VAR    ${saved_gpu_count}    ${TEST_AIM_GPU_COUNT}
 
     # Select and deploy AIM-B (second-smallest, different from AIM-A).
-    ${aim_b_name}=    Second smallest deployable AIM resource name
+    ${aim_b_name}    ${aim_b_profile_name}    ${aim_b_gpu_count}=
+    ...    Second smallest deployable AIM resource name, profile and GPU count
     Should Not Be Equal    ${aim_b_name}    ${TEST_AIM_NAME}
     ...    msg=Second smallest AIM resolves to the same model as AIM-A (${TEST_AIM_NAME}); need a second distinct model on cluster
+    ${combined_gpu_count}=    Evaluate    int($saved_gpu_count) + int($aim_b_gpu_count)
+    Set project quota for model GPU count    ${combined_gpu_count}
     VAR    ${TEST_AIM_NAME}    ${aim_b_name}    scope=TEST
+    VAR    ${TEST_AIM_PROFILE_NAME}    ${aim_b_profile_name}    scope=TEST
+    VAR    ${TEST_AIM_GPU_COUNT}    ${aim_b_gpu_count}    scope=TEST
 
     AIM is deployed and running
 
@@ -329,33 +380,40 @@ A second AIM model is running
     ${json}=    Set Variable    ${response.json()}
     ${endpoints}=    Get From Dictionary    ${json}    endpoints
     ${ext_b}=    Get From Dictionary    ${endpoints}    external
-    ${auth_b}=    Get From Dictionary    ${json}    clusterAuthGroupId
     VAR    ${TEST_AIM_B_NAME}    ${aim_b_name}    scope=TEST
     VAR    ${TEST_AIM_B_ID}    ${TEST_AIM_ID}    scope=TEST
     VAR    ${TEST_AIM_B_EXTERNAL_HOST}    ${ext_b}    scope=TEST
-    VAR    ${TEST_AIM_B_AUTH_GROUP_ID}    ${auth_b}    scope=TEST
 
     # Restore AIM-A state so subsequent steps see A's coordinates again.
     VAR    ${TEST_AIM_NAME}    ${saved_aim_name}    scope=TEST
     VAR    ${TEST_AIM_ID}    ${saved_aim_id}    scope=TEST
     VAR    ${TEST_AIM_EXTERNAL_HOST}    ${saved_ext_host}    scope=TEST
-    VAR    ${TEST_AIM_AUTH_GROUP_ID}    ${saved_auth_group}    scope=TEST
+    VAR    ${TEST_AIM_PROFILE_NAME}    ${saved_profile_name}    scope=TEST
+    VAR    ${TEST_AIM_GPU_COUNT}    ${saved_gpu_count}    scope=TEST
+
+The API key is also linked to the second AIM model
+    [Documentation]    Binds the existing API key to AIM-B in addition to AIM-A,
+    ...    in a single PATCH (the API replaces the whole aimIds list on each call,
+    ...    so binding both models requires one call carrying both IDs).
+    ...    Requires: TEST_AIM_ID, TEST_AIM_B_ID (from "A second AIM model is running")
+    Variable Should Exist    ${TEST_AIM_B_ID}
+    ...    msg=TEST_AIM_B_ID not set — run "A second AIM model is running" first
+    @{aim_ids}=    Create list    ${TEST_AIM_ID}    ${TEST_AIM_B_ID}
+    Api key is assigned to AIMS models    ${aim_ids}
+    Key assignment should succeed
 
 An api key authorized only for model A is created
-    [Documentation]    Creates a fresh API key bound to AIM-A's cluster-auth group only.
-    ...    AIM-B's group is intentionally excluded so cross-model enforcement is
-    ...    testable. Stores the key in TEST_API_KEY / TEST_API_KEY_VALUE.
-    ...    Requires: TEST_AIM_AUTH_GROUP_ID (set by "An AIM model is running")
-    Variable Should Exist    ${TEST_AIM_AUTH_GROUP_ID}
-    ...    msg=TEST_AIM_AUTH_GROUP_ID not set — run "An AIM model is running" first
+    [Documentation]    Creates a fresh API key bound to AIM-A only (via aimIds binding).
+    ...    AIM-B is intentionally excluded so cross-model enforcement is testable.
+    ...    Stores the key in TEST_API_KEY / TEST_API_KEY_VALUE.
+    ...    Requires: TEST_AIM_ID (set by "An AIM model is running")
+    Variable Should Exist    ${TEST_AIM_ID}
+    ...    msg=TEST_AIM_ID not set — run "An AIM model is running" first
     Api key exists for user
-    # Bind the key to AIM-A's auth group.
-    ${project}=    Get Project Namespace
-    api_keys_api.Add api key to group
-    ...    ${TEST_API_KEY}[id]
-    ...    ${TEST_AIM_AUTH_GROUP_ID}
-    ...    project=${project}
-    ...    expected_status=201
+    # Bind the key to AIM-A by ID — AIM-B's ID is intentionally omitted.
+    Api key is assigned to AIMS model    api_key=${TEST_API_KEY}    aim_id=${TEST_AIM_ID}
+    Key assignment should succeed
+    Api key binding should take effect
     # Discover model ID for AIM-A so requests can target the correct model name.
     ${models}=    List models from external endpoint
     ...    ${TEST_AIM_EXTERNAL_HOST}    ${TEST_AIM_ID}    ${TEST_API_KEY_VALUE}

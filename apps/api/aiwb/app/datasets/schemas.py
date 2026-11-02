@@ -29,6 +29,10 @@ class DatasetResponse(BaseEntityPublic):
         description="The type of the dataset.",
         examples=["Fine-tuning"],
     )
+    size_bytes: int | None = Field(
+        default=None,
+        description="Size of the dataset file in bytes, read from object storage.",
+    )
 
 
 class DatasetsList(BasePaginationList):

@@ -50,6 +50,19 @@ Add secret through UI form
     When user creates a secret "ui-created-secret" with use case "HuggingFace" and value "hf_test_token_value"
     Then secret "ui-created-secret" should be visible in the list
 
+Add S3 secret through UI form
+    [Documentation]    Verify that a user can create an S3 secret via the UI form
+    ...                and it appears in the secrets list with S3 use case.
+    [Tags]    ui    secrets    create    s3
+
+    Given a ready project with user access exists
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    And user is on secrets page
+    When user creates an S3 secret "ui-s3-secret" with access key "AKIAEXAMPLE" and secret key "secret-access-key-value"
+    Then secret "ui-s3-secret" should be visible in the list
+    And secrets table should contain text "S3"
+
 Delete secret through UI
     [Documentation]    Verify that a user can delete a secret via the UI actions menu
     ...                and it is removed from the list.
@@ -63,6 +76,21 @@ Delete secret through UI
     And secret "${TEST_AIWB_SECRET_NAME}" should be visible in the list
     When user deletes secret "${TEST_AIWB_SECRET_NAME}"
     Then secret "${TEST_AIWB_SECRET_NAME}" should not be visible in the list
+
+Delete confirmation references the display name
+    [Documentation]    Verify the delete confirmation modal references the user-facing display name
+    ...                shown in the table, not the internal Kubernetes resource name.
+    [Tags]    ui    secrets    delete
+
+    Given a ready project with user access exists
+    And a secret "ui-delete-confirm-name" is created via AIWB
+    And user is logged in
+    And project "${TEST_PROJECT}[name]" is selected
+    And user is on secrets page
+    And secret "${TEST_AIWB_SECRET_NAME}" should be visible in the list
+    When user opens the delete confirmation for secret "${TEST_AIWB_SECRET_NAME}"
+    Then the delete confirmation should reference "${TEST_AIWB_SECRET_NAME}"
+    And the delete confirmation should not reference "${TEST_AIWB_SECRET_K8S_NAME}"
 
 No duplicate secrets after namespace switching
     [Documentation]    Regression test: switching between projects should not cause

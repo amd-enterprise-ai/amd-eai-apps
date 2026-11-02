@@ -11,7 +11,7 @@ import {
   Skeleton,
   Tooltip,
 } from '@amdenterpriseai/components';
-import { IconInfoCircle } from '@tabler/icons-react';
+import { IconAlertTriangle, IconInfoCircle } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { AvailableChartColorsKeys } from '@amdenterpriseai/types';
@@ -23,6 +23,8 @@ import { LineChart, TooltipProps } from '../LineChart';
 export interface Props {
   title: string;
   tooltip: string;
+  /** When set, shows a warning icon next to the info tooltip with this message on hover. */
+  alertTooltip?: string;
   data: TimeSeriesDataPoint[];
   dataFormatter?: (value: number | string) => string;
   upperLimitData?: TimeSeriesDataPoint[];
@@ -39,6 +41,7 @@ export interface Props {
 export const StatsWithLineChart: React.FC<Props> = ({
   title,
   tooltip,
+  alertTooltip,
   colors,
   data,
   dataFormatter,
@@ -99,8 +102,8 @@ export const StatsWithLineChart: React.FC<Props> = ({
     if (!showValueAsPercentage) {
       return data.map((item, idx) => ({
         ...item,
-        numerator: item.value,
-        denominator: upperLimitData[idx].value,
+        numerator: item.value ?? null,
+        denominator: upperLimitData[idx].value ?? null,
       }));
     }
 
@@ -148,21 +151,21 @@ export const StatsWithLineChart: React.FC<Props> = ({
   }, [chartData]);
 
   return (
-    <Card
-      className={`max-w-full xl:max-w-[${width}px]`}
-      classNames={{
-        base: 'shadow-sm border-1 border-default-200 rounded-sm	dark:bg-default-100 overflow-visible',
-      }}
-    >
+    <Card className={`max-w-full xl:max-w-[${width}px]  overflow-visible`}>
       <CardHeader>
         <div className="flex items-center flex-grow">
           <div>{title}</div>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            {alertTooltip ? (
+              <Tooltip content={alertTooltip} className="max-w-[300px]">
+                <IconAlertTriangle
+                  className="text-warning cursor-pointer"
+                  size={16}
+                />
+              </Tooltip>
+            ) : null}
             <Tooltip content={tooltip} className="max-w-[300px]">
-              <IconInfoCircle
-                className="text-default-400 cursor-pointer"
-                size={16}
-              />
+              <IconInfoCircle className="text-muted cursor-pointer" size={16} />
             </Tooltip>
           </div>
         </div>

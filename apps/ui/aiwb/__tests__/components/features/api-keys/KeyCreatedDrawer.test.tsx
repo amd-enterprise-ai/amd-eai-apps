@@ -6,7 +6,8 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { vi } from 'vitest';
 
 import { KeyCreatedDrawer } from '@/components/features/api-keys/KeyCreatedDrawer';
-import { ApiKeyWithFullKey } from '@/types/api-keys';
+
+import { generateMockFullApiKey } from '@/__mocks__/utils/api-keys-mock';
 
 import '@testing-library/jest-dom';
 
@@ -33,19 +34,12 @@ vi.mock('@amdenterpriseai/hooks', () => ({
   }),
 }));
 
-const mockApiKey: ApiKeyWithFullKey = {
-  id: '123e4567-e89b-12d3-a456-426614174000',
-  projectId: '123e4567-e89b-12d3-a456-426614174001',
+const mockApiKey = generateMockFullApiKey({
   displayName: 'test-api-key',
   truncatedKey: 'amd_aim_api_key_••••••••1234',
-  createdAt: '2024-01-01T00:00:00Z',
-  createdBy: 'test@example.com',
-  expiresAt: '2024-12-31T23:59:59Z',
   ttl: '24h',
-  renewable: true,
-  numUses: 0,
   fullKey: 'amd_aim_api_key_3bb1211ab8c5fee8fc88bbaf89383f08',
-};
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -116,8 +110,8 @@ describe('KeyCreatedDrawer', () => {
     const warningText = screen.getByText('form.keyCreated.warning');
     expect(warningText).toBeInTheDocument();
 
-    // Check that the Alert component is rendered with danger color
-    const alertElement = warningText.closest('[role="alert"]');
+    // HeroUI v3 Alert no longer exposes role="alert"; assert warning is inside the alert root.
+    const alertElement = warningText.closest('[data-slot="alert-root"]');
     expect(alertElement).toBeInTheDocument();
   });
 
@@ -196,9 +190,10 @@ describe('KeyCreatedDrawer', () => {
 
     const alertElement = screen
       .getByText('form.keyCreated.warning')
-      .closest('[role="alert"]');
+      .closest('[data-slot="alert-root"]');
     const icon = alertElement?.querySelector('svg');
 
+    expect(alertElement).toBeInTheDocument();
     expect(icon).toBeInTheDocument();
   });
 
@@ -215,7 +210,9 @@ describe('KeyCreatedDrawer', () => {
       );
     });
 
-    const copyButton = screen.getByLabelText('form.keyCreated.aria.copyButton');
+    const copyButton = screen.getByRole('button', {
+      name: 'actions.copy.title',
+    });
 
     await act(async () => {
       fireEvent.click(copyButton);

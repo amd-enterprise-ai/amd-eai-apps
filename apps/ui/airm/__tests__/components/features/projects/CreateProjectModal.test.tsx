@@ -164,6 +164,39 @@ describe('CreateProjectModal', () => {
     ).toBeInTheDocument();
   });
 
+  it('rejects a name whose repeated hyphens would collapse into another name', async () => {
+    // The project name becomes a namespace, and the namespace's slug is the object-storage
+    // boundary. Slugging folds runs of hyphens, so 'data--science' addresses the same prefix
+    // as a project legitimately named 'data-science'. The API refuses such a name; the form
+    // has to refuse it too, or the user only learns about it from a 422.
+    await act(() => {
+      render(
+        <CreateProjectModal
+          isOpen={true}
+          onOpenChange={onOpenChange}
+          projects={projects}
+          clusters={generateClustersMock(1)}
+          onProjectCreate={onProjectCreate}
+        />,
+        { wrapper },
+      );
+    });
+
+    await fireEvent.change(
+      screen.getByLabelText('modal.create.form.name.label'),
+      {
+        target: { value: 'data--science' },
+      },
+    );
+
+    const actionButton = screen.getByText('modal.create.actions.confirm');
+    fireEvent.click(actionButton);
+
+    expect(
+      await screen.findByText('modal.create.form.name.validation.format'),
+    ).toBeInTheDocument();
+  });
+
   it('validates name length invalid with more than 41', async () => {
     await act(() => {
       render(
@@ -288,6 +321,7 @@ describe('CreateProjectModal', () => {
   });
 
   it('allows selection only of healthy clusters', async () => {
+    const user = userEvent.setup();
     const clusters = generateClustersMock(3);
     clusters[1].status = ClusterStatus.UNHEALTHY;
     clusters[2].status = ClusterStatus.VERIFYING;
@@ -305,23 +339,27 @@ describe('CreateProjectModal', () => {
       );
     });
 
-    const clusterSelect = screen.getByTestId('cluster-select');
-    fireEvent.click(clusterSelect);
+    await user.click(
+      screen.getByRole('button', {
+        name: /modal.create.form.cluster.label/,
+      }),
+    );
 
-    expect(screen.queryByTestId(clusters[0].id)).toBeInTheDocument();
-    expect(screen.queryByTestId(clusters[0].id)).not.toHaveAttribute(
-      'data-disabled',
-      'true',
-    );
-    expect(screen.queryByTestId(clusters[1].id)).toBeInTheDocument();
-    expect(screen.queryByTestId(clusters[1].id)).toHaveAttribute(
-      'data-disabled',
-      'true',
-    );
-    expect(screen.queryByTestId(clusters[2].id)).not.toBeInTheDocument();
+    const healthy = await screen.findByRole('option', {
+      name: clusters[0].name,
+    });
+    const unhealthy = screen.getByRole('option', { name: clusters[1].name });
+    expect(healthy).toBeInTheDocument();
+    expect(healthy).not.toHaveAttribute('aria-disabled', 'true');
+    expect(unhealthy).toBeInTheDocument();
+    expect(unhealthy).toHaveAttribute('aria-disabled', 'true');
+    expect(
+      screen.queryByRole('option', { name: clusters[2].name }),
+    ).not.toBeInTheDocument();
   });
 
   it('detects max projects in cluster', async () => {
+    const user = userEvent.setup();
     const clusters = generateClustersMock(1);
     await act(async () => {
       render(
@@ -349,10 +387,14 @@ describe('CreateProjectModal', () => {
       },
     );
 
-    const clusterSelect = screen.getByTestId('cluster-select');
-    fireEvent.click(clusterSelect);
-    const clusterOption = screen.getByTestId(clusters[0].id);
-    fireEvent.click(clusterOption);
+    await user.click(
+      screen.getByRole('button', {
+        name: /modal.create.form.cluster.label/,
+      }),
+    );
+    await user.click(
+      await screen.findByRole('option', { name: clusters[0].name }),
+    );
 
     const actionButton = screen.getByText('modal.create.actions.confirm');
     await fireEvent.click(actionButton);
@@ -364,6 +406,7 @@ describe('CreateProjectModal', () => {
   });
 
   it('calls createProject on form success', async () => {
+    const user = userEvent.setup();
     (createProject as Mock).mockResolvedValueOnce({ id: 'newProjectId' }); // Mock successful creation
     const clusters = generateClustersMock(1);
 
@@ -393,10 +436,14 @@ describe('CreateProjectModal', () => {
       },
     );
 
-    const clusterSelect = screen.getByTestId('cluster-select');
-    fireEvent.click(clusterSelect);
-    const clusterOption = screen.getByTestId(clusters[0].id);
-    fireEvent.click(clusterOption);
+    await user.click(
+      screen.getByRole('button', {
+        name: /modal.create.form.cluster.label/,
+      }),
+    );
+    await user.click(
+      await screen.findByRole('option', { name: clusters[0].name }),
+    );
 
     const actionButton = screen.getByText('modal.create.actions.confirm');
     await fireEvent.click(actionButton);
@@ -423,6 +470,7 @@ describe('CreateProjectModal', () => {
   });
 
   it('calls createProject on form error', async () => {
+    const user = userEvent.setup();
     const clusters = generateClustersMock(1);
 
     const mockError = new APIRequestError('test error', 400);
@@ -452,10 +500,14 @@ describe('CreateProjectModal', () => {
         target: { value: 'Description ' },
       },
     );
-    const clusterSelect = screen.getByTestId('cluster-select');
-    fireEvent.click(clusterSelect);
-    const clusterOption = screen.getByTestId(clusters[0].id);
-    fireEvent.click(clusterOption);
+    await user.click(
+      screen.getByRole('button', {
+        name: /modal.create.form.cluster.label/,
+      }),
+    );
+    await user.click(
+      await screen.findByRole('option', { name: clusters[0].name }),
+    );
 
     const actionButton = screen.getByText('modal.create.actions.confirm');
     await fireEvent.click(actionButton);
@@ -507,9 +559,14 @@ describe('CreateProjectModal', () => {
       screen.getByLabelText('modal.create.form.description.label'),
       { target: { value: 'Description ' } },
     );
-    const clusterSelect = screen.getByTestId('cluster-select');
-    fireEvent.click(clusterSelect);
-    fireEvent.click(screen.getByTestId(clusters[0].id));
+    await user.click(
+      screen.getByRole('button', {
+        name: /modal.create.form.cluster.label/,
+      }),
+    );
+    await user.click(
+      await screen.findByRole('option', { name: clusters[0].name }),
+    );
 
     await user.click(
       screen.getByRole('switch', {
@@ -517,8 +574,27 @@ describe('CreateProjectModal', () => {
       }),
     );
 
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', {
+          name: /modal.create.form.preemption.policy.label/,
+        }),
+      ).toBeInTheDocument();
+    });
+
+    const thresholdInput = screen.getByLabelText(
+      'modal.create.form.preemption.threshold.label',
+    );
+    await user.clear(thresholdInput);
+    await user.type(thresholdInput, '10');
+    const graceInput = screen.getByLabelText(
+      'modal.create.form.preemption.gracePeriod.label',
+    );
+    await user.clear(graceInput);
+    await user.type(graceInput, '30');
+
     const actionButton = screen.getByText('modal.create.actions.confirm');
-    await user.click(actionButton);
+    await fireEvent.click(actionButton);
 
     await waitFor(() => {
       expect(createProject).toHaveBeenCalled();
@@ -568,9 +644,14 @@ describe('CreateProjectModal', () => {
       screen.getByLabelText('modal.create.form.description.label'),
       { target: { value: 'Valid description for the project.' } },
     );
-    const clusterSelect = screen.getByTestId('cluster-select');
-    fireEvent.click(clusterSelect);
-    fireEvent.click(screen.getByTestId(clusters[0].id));
+    await user.click(
+      screen.getByRole('button', {
+        name: /modal.create.form.cluster.label/,
+      }),
+    );
+    await user.click(
+      await screen.findByRole('option', { name: clusters[0].name }),
+    );
 
     await user.click(
       screen.getByRole('switch', {

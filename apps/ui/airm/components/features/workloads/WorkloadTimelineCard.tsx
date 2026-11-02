@@ -27,10 +27,10 @@ export const WorkloadTimelineCard: React.FC<WorkloadTimelineCardProps> = ({
   const { t } = useTranslation('workloads');
 
   return (
-    <Card className="border border-default-200 shadow-sm rounded-sm dark:bg-default-100">
+    <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center gap-2">
-          <IconCalendar size={18} className="text-default-400" />
+          <IconCalendar size={18} className="text-muted" />
           <span className="text-sm font-medium">
             {t('details.sections.timeline')}
           </span>
@@ -38,29 +38,21 @@ export const WorkloadTimelineCard: React.FC<WorkloadTimelineCardProps> = ({
       </CardHeader>
       <CardBody className="pt-0 space-y-3 text-sm">
         <div className="space-y-0.5">
-          <div className="text-default-500">
-            {t('details.fields.createdAt')}
-          </div>
+          <div className="text-muted">{t('details.fields.createdAt')}</div>
           <div>{displayTimestamp(new Date(createdAt))}</div>
         </div>
         <div className="space-y-0.5">
-          <div className="text-default-500">
-            {t('details.fields.updatedAt')}
-          </div>
+          <div className="text-muted">{t('details.fields.updatedAt')}</div>
           <div>{displayTimestamp(new Date(updatedAt))}</div>
         </div>
         <div className="space-y-0.5">
-          <div className="text-default-500">
-            {t('details.fields.queueTime')}
-          </div>
+          <div className="text-muted">{t('details.fields.queueTime')}</div>
           <div>
             {queueTime != null ? formatDurationFromSeconds(queueTime) : '—'}
           </div>
         </div>
         <div className="space-y-0.5">
-          <div className="text-default-500">
-            {t('details.fields.runningTime')}
-          </div>
+          <div className="text-muted">{t('details.fields.runningTime')}</div>
           <div>
             {runningTime != null ? formatDurationFromSeconds(runningTime) : '—'}
           </div>

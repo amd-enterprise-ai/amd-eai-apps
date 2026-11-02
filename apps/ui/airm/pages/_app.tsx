@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { HeroUIProvider } from '@heroui/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SessionProvider } from 'next-auth/react';
 
@@ -18,7 +17,6 @@ import { WithDocumentationLink } from '@amdenterpriseai/utils/app';
 import { SystemToastContainer } from '@amdenterpriseai/components';
 
 import '@/styles/globals.css';
-import '@/styles/toastify.css';
 
 function App({ Component, pageProps: { session, ...pageProps } }: AppProps) {
   const queryClient = new QueryClient();
@@ -29,23 +27,21 @@ function App({ Component, pageProps: { session, ...pageProps } }: AppProps) {
   return (
     <SessionProvider session={session} refetchInterval={10 * 60}>
       <QueryClientProvider client={queryClient}>
-        <HeroUIProvider disableRipple>
-          <NextThemesProvider
-            disableTransitionOnChange
-            attribute="class"
-            defaultTheme="dark"
+        <NextThemesProvider
+          disableTransitionOnChange
+          attribute="class"
+          defaultTheme="dark"
+        >
+          <SystemToastContainer />
+          <AppLayout
+            pageBreadcrumb={pageProps?.pageBreadcrumb}
+            menuItems={airmMenuItems}
+            appTitle={'sections.resourceManagement.title'}
+            documentationHref={documentationHref}
           >
-            <SystemToastContainer />
-            <AppLayout
-              pageBreadcrumb={pageProps?.pageBreadcrumb}
-              menuItems={airmMenuItems}
-              appTitle={'sections.resourceManagement.title'}
-              documentationHref={documentationHref}
-            >
-              <Component {...pageProps} />
-            </AppLayout>
-          </NextThemesProvider>
-        </HeroUIProvider>
+            <Component {...pageProps} />
+          </AppLayout>
+        </NextThemesProvider>
       </QueryClientProvider>
     </SessionProvider>
   );

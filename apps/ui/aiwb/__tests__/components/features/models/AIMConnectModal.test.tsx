@@ -49,18 +49,9 @@ vi.mock('@amdenterpriseai/components', async (importOriginal) => ({
       <input value={value} readOnly={readOnly} {...props} />
     </div>
   ),
-  CopySnippet: ({
-    children,
-    value,
-    copyIcon,
-    classNames,
-    symbol,
-    'data-testid': _dataTestId,
-    ...props
-  }: any) => (
+  CopySnippet: ({ children, value, ...props }: any) => (
     <div data-testid="code-snippet" {...props}>
       {children ?? value}
-      {copyIcon}
     </div>
   ),
   ActionButton: ({
@@ -159,6 +150,7 @@ describe('AIMConnectModal', () => {
     serviceId: mockService.id ?? undefined,
     endpoints: mockService.endpoints,
     modelName: mockServedModelName,
+    capability: 'chat' as const,
   };
 
   beforeEach(() => {
@@ -186,7 +178,7 @@ describe('AIMConnectModal', () => {
     it('renders modal with correct size', () => {
       render(<AIMConnectModal {...defaultProps} />);
 
-      expect(screen.getByTestId('modal')).toHaveAttribute('data-size', 'xl');
+      expect(screen.getByTestId('modal')).toHaveAttribute('data-size', 'lg');
     });
 
     it('renders both external and internal URLs when service has both', () => {
@@ -209,6 +201,19 @@ describe('AIMConnectModal', () => {
       expect(
         screen.getByText('actions.connect.modal.codeExample'),
       ).toBeInTheDocument();
+    });
+
+    it('hides the internal URL box when there is no internal endpoint', () => {
+      render(
+        <AIMConnectModal
+          {...defaultProps}
+          endpoints={{ external: 'https://api.example.com', internal: '' }}
+        />,
+      );
+
+      expect(
+        screen.queryByText('actions.connect.modal.internalUrl'),
+      ).not.toBeInTheDocument();
     });
 
     it('renders action buttons', () => {
@@ -275,11 +280,7 @@ describe('AIMConnectModal', () => {
         />,
       );
 
-      const codeSnippets = screen.getAllByTestId('code-snippet');
-      // The code example snippet is the one with curl command
-      const codeSnippet = codeSnippets.find((snippet) =>
-        snippet.textContent?.includes('curl -X POST'),
-      );
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
       expect(codeSnippet).toBeInTheDocument();
 
       // Check if the code snippet contains expected content
@@ -304,11 +305,7 @@ describe('AIMConnectModal', () => {
       expect(mockServedModelName).not.toBe(mockCanonicalName);
       render(<AIMConnectModal {...defaultProps} />);
 
-      const codeSnippets = screen.getAllByTestId('code-snippet');
-      // The code example snippet is the one with curl command
-      const codeSnippet = codeSnippets.find((snippet) =>
-        snippet.textContent?.includes('curl -X POST'),
-      );
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
       expect(codeSnippet).toHaveTextContent(
         `"model": "${mockServedModelName}"`,
       );
@@ -320,11 +317,7 @@ describe('AIMConnectModal', () => {
     it('leaves the model field empty when no served id is provided (no display-name fallback)', () => {
       render(<AIMConnectModal {...defaultProps} modelName="" />);
 
-      const codeSnippets = screen.getAllByTestId('code-snippet');
-      // The code example snippet is the one with curl command
-      const codeSnippet = codeSnippets.find((snippet) =>
-        snippet.textContent?.includes('curl -X POST'),
-      );
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
       expect(codeSnippet).toHaveTextContent('"model": ""');
       // The display name must NOT be used as a fallback — it silently 404s.
       expect(codeSnippet).not.toHaveTextContent(
@@ -401,7 +394,7 @@ describe('AIMConnectModal', () => {
   });
 
   describe('Accessibility', () => {
-    it('sets correct aria-labels on snippet fields', () => {
+    it('renders visible labels for snippet fields', () => {
       render(
         <AIMConnectModal
           {...defaultProps}
@@ -412,31 +405,15 @@ describe('AIMConnectModal', () => {
         />,
       );
 
-      const snippets = screen.getAllByTestId('code-snippet');
-
-      // Check external URL snippet
-      const externalUrlSnippet = snippets.find(
-        (snippet) =>
-          snippet.getAttribute('aria-label') ===
-          'actions.connect.modal.externalUrl',
-      );
-      expect(externalUrlSnippet).toBeInTheDocument();
-
-      // Check internal URL snippet
-      const internalUrlSnippet = snippets.find(
-        (snippet) =>
-          snippet.getAttribute('aria-label') ===
-          'actions.connect.modal.internalUrl',
-      );
-      expect(internalUrlSnippet).toBeInTheDocument();
-
-      // Check code example snippet
-      const codeSnippet = snippets.find(
-        (snippet) =>
-          snippet.getAttribute('aria-label') ===
-          'actions.connect.modal.codeExample',
-      );
-      expect(codeSnippet).toBeInTheDocument();
+      expect(
+        screen.getByText('actions.connect.modal.externalUrl'),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText('actions.connect.modal.internalUrl'),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText('actions.connect.modal.codeExample'),
+      ).toBeInTheDocument();
     });
   });
 
@@ -453,9 +430,10 @@ describe('AIMConnectModal', () => {
       // Should still render the modal
       expect(screen.getByTestId('modal')).toBeInTheDocument();
 
-      // Should still render snippets
-      const snippets = screen.getAllByTestId('code-snippet');
-      expect(snippets.length).toBeGreaterThan(0);
+      // With no endpoints, the URL boxes are omitted, but the code example
+      // snippet still renders.
+      expect(screen.getByTestId('connect-code-snippet')).toBeInTheDocument();
+      expect(screen.queryAllByTestId('code-snippet')).toHaveLength(0);
     });
   });
 
@@ -468,13 +446,6 @@ describe('AIMConnectModal', () => {
 
       const modalContent = screen.getByTestId('modal-content');
       expect(modalContent).toBeInTheDocument();
-    });
-
-    it('renders copy icons in snippets', () => {
-      render(<AIMConnectModal {...defaultProps} />);
-
-      const copyIcons = screen.getAllByTestId('copy-icon');
-      expect(copyIcons.length).toBeGreaterThan(0);
     });
   });
 
@@ -506,10 +477,7 @@ describe('AIMConnectModal', () => {
         />,
       );
 
-      const codeSnippets = screen.getAllByTestId('code-snippet');
-      const codeSnippet = codeSnippets.find((snippet) =>
-        snippet.textContent?.includes('curl -X POST'),
-      );
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
       expect(codeSnippet).toHaveTextContent('curl -X POST');
       expect(codeSnippet).toHaveTextContent(
         'https://api.example.com/v1/chat/completions',
@@ -531,12 +499,7 @@ describe('AIMConnectModal', () => {
         fireEvent.click(screen.getByTestId('tab-python'));
       });
 
-      const codeSnippets = screen.getAllByTestId('code-snippet');
-      const codeSnippet = codeSnippets.find(
-        (snippet) =>
-          snippet.getAttribute('aria-label') ===
-          'actions.connect.modal.codeExample',
-      );
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
       expect(codeSnippet).toHaveTextContent('import requests');
     });
 
@@ -555,12 +518,7 @@ describe('AIMConnectModal', () => {
         fireEvent.click(screen.getByTestId('tab-javascript'));
       });
 
-      const codeSnippets = screen.getAllByTestId('code-snippet');
-      const codeSnippet = codeSnippets.find(
-        (snippet) =>
-          snippet.getAttribute('aria-label') ===
-          'actions.connect.modal.codeExample',
-      );
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
       expect(codeSnippet).toHaveTextContent('fetch(url,');
     });
   });
@@ -598,6 +556,19 @@ describe('AIMConnectModal', () => {
       expect(screen.queryByTestId('switch')).not.toBeInTheDocument();
     });
 
+    it('hides the internal URL switch when there is no internal URL', () => {
+      // Without an internal endpoint the toggle would let the user select an
+      // empty URL, so it must not render.
+      render(
+        <AIMConnectModal
+          {...defaultProps}
+          endpoints={{ external: 'https://api.example.com', internal: '' }}
+        />,
+      );
+
+      expect(screen.queryByTestId('switch')).not.toBeInTheDocument();
+    });
+
     it('switch is unchecked by default (external URL)', () => {
       render(
         <AIMConnectModal
@@ -624,10 +595,7 @@ describe('AIMConnectModal', () => {
         />,
       );
 
-      const codeSnippets = screen.getAllByTestId('code-snippet');
-      const codeSnippet = codeSnippets.find((snippet) =>
-        snippet.textContent?.includes('curl -X POST'),
-      );
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
 
       // Initially should show external URL
       expect(codeSnippet).toHaveTextContent(
@@ -657,10 +625,7 @@ describe('AIMConnectModal', () => {
     it('curl example contains correct structure', () => {
       render(<AIMConnectModal {...defaultProps} {...serviceWithHostsProps} />);
 
-      const codeSnippets = screen.getAllByTestId('code-snippet');
-      const codeSnippet = codeSnippets.find((snippet) =>
-        snippet.textContent?.includes('curl -X POST'),
-      );
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
       expect(codeSnippet).toHaveTextContent('curl -X POST');
       expect(codeSnippet).toHaveTextContent('-H "Authorization: Bearer');
       expect(codeSnippet).toHaveTextContent(
@@ -673,30 +638,21 @@ describe('AIMConnectModal', () => {
     it('includes UPDATE_YOUR_API_KEY_HERE placeholder in all examples', () => {
       render(<AIMConnectModal {...defaultProps} {...serviceWithHostsProps} />);
 
-      const codeSnippets = screen.getAllByTestId('code-snippet');
-      const codeSnippet = codeSnippets.find((snippet) =>
-        snippet.textContent?.includes('curl'),
-      );
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
       expect(codeSnippet).toHaveTextContent('UPDATE_YOUR_API_KEY_HERE');
     });
 
     it('includes the served model id in code examples', () => {
       render(<AIMConnectModal {...defaultProps} {...serviceWithHostsProps} />);
 
-      const codeSnippets = screen.getAllByTestId('code-snippet');
-      const codeSnippet = codeSnippets.find((snippet) =>
-        snippet.textContent?.includes('curl'),
-      );
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
       expect(codeSnippet).toHaveTextContent(mockServedModelName);
     });
 
     it('includes Hello message in all examples', () => {
       render(<AIMConnectModal {...defaultProps} {...serviceWithHostsProps} />);
 
-      const codeSnippets = screen.getAllByTestId('code-snippet');
-      const codeSnippet = codeSnippets.find((snippet) =>
-        snippet.textContent?.includes('curl'),
-      );
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
       expect(codeSnippet).toHaveTextContent('Hello');
     });
   });
@@ -855,9 +811,7 @@ describe('AIMConnectModal', () => {
 
       render(<AIMConnectModal {...defaultProps} endpoints={endpoints} />);
 
-      const codeSnippet = screen
-        .getAllByTestId('code-snippet')
-        .find((snippet) => snippet.textContent?.includes('curl -X POST'));
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
       // Precise backend routing requires both routing headers (deployment UUID +
       // model name) so the gateway reaches this exact deployment.
       expect(codeSnippet).toHaveTextContent(
@@ -876,11 +830,141 @@ describe('AIMConnectModal', () => {
 
       render(<AIMConnectModal {...defaultProps} endpoints={endpoints} />);
 
-      const codeSnippet = screen
-        .getAllByTestId('code-snippet')
-        .find((snippet) => snippet.textContent?.includes('curl -X POST'));
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
       expect(codeSnippet).not.toHaveTextContent('x-ai-eg-backend');
       expect(codeSnippet).not.toHaveTextContent('x-ai-eg-model');
+    });
+  });
+
+  describe('Transcription capability', () => {
+    const endpoints = {
+      external: 'https://api.example.com',
+      internal: 'http://test-internal.example.com',
+    };
+
+    it('targets the audio transcriptions endpoint, not chat completions', () => {
+      render(
+        <AIMConnectModal
+          {...defaultProps}
+          capability="transcription"
+          endpoints={endpoints}
+        />,
+      );
+
+      const snippets = screen.getAllByTestId('code-snippet');
+      const audioSnippet = snippets.find((snippet) =>
+        snippet.textContent?.includes(
+          'https://api.example.com/v1/audio/transcriptions',
+        ),
+      );
+      expect(audioSnippet).toBeInTheDocument();
+
+      const chatSnippet = snippets.find((snippet) =>
+        snippet.textContent?.includes('/v1/chat/completions'),
+      );
+      expect(chatSnippet).toBeUndefined();
+    });
+
+    it('renders a multipart curl upload with the served model id', () => {
+      render(
+        <AIMConnectModal
+          {...defaultProps}
+          capability="transcription"
+          endpoints={endpoints}
+        />,
+      );
+
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
+      expect(codeSnippet).toHaveTextContent('curl -X POST');
+      expect(codeSnippet).toHaveTextContent('-F "file=@audio.wav"');
+      expect(codeSnippet).toHaveTextContent(
+        `-F "model=${mockServedModelName}"`,
+      );
+      // No JSON chat body for a multipart upload.
+      expect(codeSnippet).not.toHaveTextContent('"messages"');
+    });
+
+    it('parses the transcription response text in the python example', async () => {
+      render(
+        <AIMConnectModal
+          {...defaultProps}
+          capability="transcription"
+          endpoints={endpoints}
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('tab-python'));
+      });
+
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
+      expect(codeSnippet).toHaveTextContent('{"file": audio}');
+      expect(codeSnippet).toHaveTextContent('result["text"]');
+      expect(codeSnippet).not.toHaveTextContent('choices');
+      // The file is opened via a context manager so the descriptor is closed.
+      expect(codeSnippet).toHaveTextContent('with open("audio.wav", "rb")');
+    });
+
+    it('uses FormData and result.text in the javascript example', async () => {
+      render(
+        <AIMConnectModal
+          {...defaultProps}
+          capability="transcription"
+          endpoints={endpoints}
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('tab-javascript'));
+      });
+
+      const codeSnippet = screen.getByTestId('connect-code-snippet');
+      expect(codeSnippet).toHaveTextContent('new FormData()');
+      expect(codeSnippet).toHaveTextContent('result.text');
+      // The audio File must be defined before use so the snippet runs as-is.
+      expect(codeSnippet).toHaveTextContent('const audioFile =');
+    });
+
+    it('hides the Open chat action for transcription deployments', () => {
+      render(
+        <AIMConnectModal
+          {...defaultProps}
+          capability="transcription"
+          endpoints={endpoints}
+        />,
+      );
+
+      expect(
+        screen.queryByText('actions.connect.modal.openChat'),
+      ).not.toBeInTheDocument();
+      // Close remains available.
+      expect(screen.getByText('actions.close.title')).toBeInTheDocument();
+    });
+
+    it('does not route transcription through the unified gateway', () => {
+      mockProject.aiGatewayEnabled = true;
+      mockProject.aiGatewayUrl = 'https://ai.example.com';
+
+      render(
+        <AIMConnectModal
+          {...defaultProps}
+          capability="transcription"
+          endpoints={endpoints}
+        />,
+      );
+
+      const snippets = screen.getAllByTestId('code-snippet');
+      const gatewaySnippet = snippets.find((snippet) =>
+        snippet.textContent?.includes('https://ai.example.com'),
+      );
+      expect(gatewaySnippet).toBeUndefined();
+
+      const perServiceAudio = snippets.find((snippet) =>
+        snippet.textContent?.includes(
+          'https://api.example.com/v1/audio/transcriptions',
+        ),
+      );
+      expect(perServiceAudio).toBeInTheDocument();
     });
   });
 });

@@ -53,4 +53,21 @@ describe('DrawerPrimitive adapter', () => {
     expect(screen.getByText('Flat Body')).toBeInTheDocument();
     expect(screen.getByText('Flat Footer')).toBeInTheDocument();
   });
+
+  // Width utilities must stay aligned with DRAWER_DIALOG_PANEL_CLASS in DrawerPrimitive.tsx.
+  it('applies shim drawer dialog width classes on the dialog surface', () => {
+    render(
+      <DrawerPrimitive isOpen onOpenChange={() => {}}>
+        <DrawerContent>
+          <DrawerHeader>Title</DrawerHeader>
+          <DrawerBody>Body</DrawerBody>
+        </DrawerContent>
+      </DrawerPrimitive>,
+    );
+
+    const dialog =
+      document.querySelector('[data-slot="drawer-dialog"]') ??
+      screen.getByRole('dialog');
+    expect(dialog).toHaveClass('w-[30rem]', 'max-w-[85vw]');
+  });
 });

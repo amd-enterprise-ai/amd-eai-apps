@@ -17,10 +17,12 @@ from api_common.exceptions import (
     UploadFailedException,
     ValidationException,
 )
+from api_common.slugs import slugify
 
 from ..minio.config import MINIO_BUCKET
 from . import repository
 from .models import Dataset, DatasetType
+from .schemas import DatasetResponse
 from .utils import (
     MinioClient,
     delete_from_s3,
@@ -157,12 +159,27 @@ async def download_dataset_file(
     )
 
 
-async def get_dataset_by_id(session: AsyncSession, dataset_id: UUID, namespace: str) -> Dataset:
+def _dataset_response(dataset: Dataset, size_bytes: int | None) -> DatasetResponse:
+    return DatasetResponse.model_validate(dataset).model_copy(update={"size_bytes": size_bytes})
+
+
+async def get_dataset_by_id(
+    session: AsyncSession,
+    dataset_id: UUID,
+    namespace: str,
+    minio_client: MinioClient,
+) -> DatasetResponse:
     """Get a dataset by ID, raising NotFoundException if not found."""
     dataset = await repository.select_dataset(session, dataset_id, namespace)
     if not dataset:
         raise NotFoundException(f"Dataset with ID {dataset_id} not found")
-    return dataset
+    try:
+        stat = await asyncio.to_thread(minio_client.stat_object, MINIO_BUCKET, dataset.path)
+        size_bytes = stat.size
+    except Exception as e:
+        logger.warning(f"Failed to read size for dataset {dataset_id}: {e}")
+        size_bytes = None
+    return _dataset_response(dataset, size_bytes)
 
 
 async def list_paginated_datasets(
@@ -172,15 +189,26 @@ async def list_paginated_datasets(
     name: str | None,
     page: int,
     page_size: int,
-) -> PaginatedResult[Dataset]:
+    minio_client: MinioClient,
+) -> PaginatedResult[DatasetResponse]:
     datasets = await repository.list_datasets(
         session=session,
         namespace=namespace,
         type=type,
         name=name,
     )
+    sizes: dict[str, int] = {}
+    if datasets:
+        prefix = f"{slugify(namespace)}/datasets/"
+        try:
+            sizes = await asyncio.to_thread(minio_client.get_object_sizes, MINIO_BUCKET, prefix)
+        except Exception as e:
+            logger.warning(f"Failed to read dataset sizes for namespace {namespace}: {e}")
+
+    responses = [_dataset_response(dataset, sizes.get(dataset.path)) for dataset in datasets]
+
     # Paginate after filtering so `total` reflects the filtered set.
-    return paginate_list(datasets, page=page, page_size=page_size)
+    return paginate_list(responses, page=page, page_size=page_size)
 
 
 async def delete_dataset(session: AsyncSession, dataset_id: UUID, namespace: str, minio_client: MinioClient) -> None:

@@ -61,4 +61,47 @@ describe('Tabs adapter', () => {
 
     expect(screen.getByText('Alpha panel')).toBeInTheDocument();
   });
+
+  it('defaults to fit-content tab list width', () => {
+    const { container } = render(
+      <Tabs selectedKey="one" aria-label="Width test">
+        <Tab key="one" title="One" />
+        <Tab key="two" title="Two" />
+      </Tabs>,
+    );
+
+    expect(container.querySelector('.tabs__list')).toHaveClass('w-fit');
+    expect(container.querySelector('.tabs__tab')).toHaveClass('w-fit');
+  });
+
+  it('renders full-width tab list when fullWidth is true', () => {
+    const { container } = render(
+      <Tabs selectedKey="one" fullWidth aria-label="Width test">
+        <Tab key="one" title="One" />
+        <Tab key="two" title="Two" />
+      </Tabs>,
+    );
+
+    expect(container.querySelector('.tabs__list')).toHaveClass('w-full');
+    expect(container.querySelector('.tabs__tab')).toHaveClass('w-full');
+  });
+
+  it('renders full-width secondary strip with fit-content tabs', () => {
+    const { container } = render(
+      <Tabs
+        selectedKey="one"
+        variant="secondary"
+        aria-label="Secondary width test"
+      >
+        <Tab key="one" title="One" />
+        <Tab key="two" title="Two" />
+      </Tabs>,
+    );
+
+    expect(container.querySelector('.tabs__list-container')).toHaveClass(
+      'w-full',
+    );
+    expect(container.querySelector('.tabs__list')).toHaveClass('w-full');
+    expect(container.querySelector('.tabs__tab')).toHaveClass('w-fit');
+  });
 });

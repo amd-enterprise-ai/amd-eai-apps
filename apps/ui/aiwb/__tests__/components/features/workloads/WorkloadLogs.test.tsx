@@ -12,14 +12,7 @@ import {
 
 import { getWorkloadLogs } from '@/lib/app/workloads';
 
-import { WorkloadStatus } from '@/types/enums/workloads';
-import { LogLevel } from '@/types/enums/workloads';
-import {
-  Workload,
-  LogEntry,
-  WorkloadLogResponse,
-  WorkloadLogPagination,
-} from '@/types/workloads';
+import type { Workload, LogEntry } from '@/types/workloads';
 
 import WorkloadLogs from '@/components/features/workloads/WorkloadLogs';
 
@@ -71,30 +64,28 @@ describe('WorkloadLogs', () => {
   const mockLogEntries: LogEntry[] = [
     {
       timestamp: '2023-01-01T10:00:00Z',
-      level: LogLevel.INFO,
+      level: 'info',
       message: 'Application started successfully',
     },
     {
       timestamp: '2023-01-01T10:01:00Z',
-      level: LogLevel.WARNING,
+      level: 'warning',
       message: 'Low memory warning',
     },
     {
       timestamp: '2023-01-01T10:02:00Z',
-      level: LogLevel.ERROR,
+      level: 'error',
       message: 'Connection timeout error',
     },
   ];
 
-  const mockPagination: WorkloadLogPagination = {
-    hasMore: true,
-    pageToken: '2023-01-01T09:59:00Z',
-    totalReturned: 3,
-  };
-
-  const mockWorkloadLogsResponse: WorkloadLogResponse = {
+  const mockWorkloadLogsResponse = {
     data: mockLogEntries,
-    pagination: mockPagination,
+    pagination: {
+      hasMore: true,
+      pageToken: '2023-01-01T09:59:00Z',
+      totalReturned: 3,
+    },
   };
 
   beforeEach(() => {
@@ -247,6 +238,8 @@ describe('WorkloadLogs', () => {
 
     await waitFor(() => {
       expect(getWorkloadLogs).toHaveBeenCalledWith('workbench', 'workload-1', {
+        start: expect.any(String),
+        end: expect.any(String),
         direction: 'backward',
         pageToken: undefined,
         level: undefined,
@@ -351,7 +344,7 @@ describe('WorkloadLogs', () => {
   });
 
   it('handles empty logs response', async () => {
-    const emptyResponse: WorkloadLogResponse = {
+    const emptyResponse = {
       data: [],
       pagination: {
         hasMore: false,
@@ -581,7 +574,7 @@ describe('WorkloadLogs', () => {
 
   it('displays pagination loading indicator', async () => {
     // Mock a scenario where pagination is loading
-    const firstResponse: WorkloadLogResponse = {
+    const firstResponse = {
       data: mockLogEntries.slice(0, 2),
       pagination: {
         hasMore: true,
@@ -643,9 +636,10 @@ describe('WorkloadLogs', () => {
         screen.getByText('list.actions.logs.modal.logLevelFilter.label'),
       ).toBeInTheDocument();
 
-      // Should show the "All levels" option by default
       expect(
-        screen.getByText('list.actions.logs.modal.logLevelFilter.allLevels'),
+        screen.getByRole('button', {
+          name: /list\.actions\.logs\.modal\.logLevelFilter\.label/,
+        }),
       ).toBeInTheDocument();
     });
 
@@ -713,6 +707,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -742,9 +738,11 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
-            level: LogLevel.ERROR,
+            level: 'error',
             logType: 'workload',
           },
         );
@@ -792,9 +790,11 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
-            level: LogLevel.WARNING,
+            level: 'warning',
             logType: 'workload',
           },
         );
@@ -959,6 +959,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -1001,9 +1003,11 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
-            level: LogLevel.ERROR,
+            level: 'error',
             logType: 'workload',
           },
         );
@@ -1027,6 +1031,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -1120,6 +1126,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -1151,6 +1159,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -1201,6 +1211,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -1387,6 +1399,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -1423,6 +1437,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -1471,6 +1487,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -1493,7 +1511,7 @@ describe('WorkloadLogs', () => {
     it('defaults to EVENT log type for PENDING workloads', async () => {
       const pendingWorkload: Workload = {
         ...mockWorkload,
-        status: WorkloadStatus.PENDING,
+        status: 'Pending',
       };
 
       await act(async () => {
@@ -1515,6 +1533,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -1547,7 +1567,7 @@ describe('WorkloadLogs', () => {
 
       const pendingWorkload: Workload = {
         ...mockWorkload,
-        status: WorkloadStatus.PENDING,
+        status: 'Pending',
       };
 
       await act(async () => {
@@ -1604,6 +1624,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -1641,6 +1663,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -1687,9 +1711,11 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
-            level: LogLevel.ERROR,
+            level: 'error',
             logType: 'workload',
           },
         );
@@ -1725,9 +1751,11 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
-            level: LogLevel.ERROR,
+            level: 'error',
             logType: 'event',
           },
         );
@@ -1805,7 +1833,7 @@ describe('WorkloadLogs', () => {
     it('resets log type to default when component is closed and reopened', async () => {
       const pendingWorkload: Workload = {
         ...mockWorkload,
-        status: WorkloadStatus.PENDING,
+        status: 'Pending',
       };
 
       const { rerender } = await act(async () => {
@@ -1826,6 +1854,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -1855,6 +1885,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -1891,6 +1923,8 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
             level: undefined,
@@ -1937,9 +1971,11 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
-            level: LogLevel.WARNING,
+            level: 'warning',
             logType: 'workload',
           },
         );
@@ -1975,9 +2011,11 @@ describe('WorkloadLogs', () => {
           'workbench',
           'workload-1',
           {
+            start: expect.any(String),
+            end: expect.any(String),
             direction: 'backward',
             pageToken: undefined,
-            level: LogLevel.WARNING,
+            level: 'warning',
             logType: 'event',
           },
         );

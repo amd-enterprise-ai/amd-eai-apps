@@ -4,9 +4,11 @@
 
 import { useTranslation } from 'next-i18next';
 
-import { ApiKey } from '@/types/api-keys';
+import type { components } from '@/types/api';
 
 import { ConfirmationModal } from '@amdenterpriseai/components';
+
+type ApiKey = components['schemas']['ApiKeyResponse'];
 
 interface DeleteApiKeyModalProps {
   isOpen: boolean;

@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { APIRequestError } from '@amdenterpriseai/utils/app';
 
@@ -13,13 +13,48 @@ import {
   deleteCustomModel,
   extractCustomModelCanonicalName,
   extractCustomModelDisplayMetadata,
+  extractCustomModelPrecision,
   getCustomModel,
+  getRuntimeProfileOptions,
   listCustomModels,
   normalizeCustomModelDisplayName,
   parseCustomModelDeleteErrorBody,
   patchCustomModel,
 } from '@/lib/app/custom-models';
-import { CustomModel } from '@/types/custom-models';
+import type { components } from '@/types/api';
+
+type CustomModelResponse = components['schemas']['CustomModelResponse'];
+
+// Reusable typed-apiClient mock. Each verb is a vi.fn() the service layer awaits
+// for an openapi-fetch `{ data, error, response }` envelope; tests set the
+// resolved value per case. Mock the client (not globalThis.fetch) so assertions
+// ride the typed path/param contract instead of URL strings.
+const mockGET = vi.fn();
+const mockPOST = vi.fn();
+const mockDELETE = vi.fn();
+const mockPATCH = vi.fn();
+
+vi.mock('@/lib/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api-client')>();
+  return {
+    ...actual,
+    apiClient: {
+      GET: (...args: unknown[]) => mockGET(...args),
+      POST: (...args: unknown[]) => mockPOST(...args),
+      DELETE: (...args: unknown[]) => mockDELETE(...args),
+      PATCH: (...args: unknown[]) => mockPATCH(...args),
+    },
+  };
+});
+
+vi.mock('@amdenterpriseai/utils/app', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@amdenterpriseai/utils/app')>();
+  return {
+    ...actual,
+    getErrorMessage: vi.fn().mockResolvedValue('error message'),
+  };
+});
 
 const emptyMetadata = {
   name: 'cr-name',
@@ -41,7 +76,9 @@ const ANNOTATIONS = {
   'airm.silogen.ai/revision': 'dcc83ea841ab6100d6b47a070329e1ba4cf78752',
 };
 
-function buildCustomModel(overrides: Partial<CustomModel> = {}): CustomModel {
+function buildCustomModel(
+  overrides: Partial<CustomModelResponse> = {},
+): CustomModelResponse {
   return {
     metadata: {
       name: 'gemma3-1b-it-custom-import-d41ec23c',
@@ -75,11 +112,34 @@ function buildCustomModel(overrides: Partial<CustomModel> = {}): CustomModel {
       artifactPhase: null,
       artifactLastError: null,
     },
-    status: null,
-    profile: null,
+    profiles: [],
     ...overrides,
   };
 }
+
+type CustomProfileResponse = components['schemas']['CustomProfileResponse'];
+
+function buildProfile(
+  overrides: Partial<CustomProfileResponse> = {},
+): CustomProfileResponse {
+  return {
+    name: 'default',
+    displayName: 'Default',
+    isDefault: true,
+    resourceName: 'gemma3-1b-it-custom-import-d41ec23c-default',
+    ...overrides,
+  };
+}
+
+const okData = (data: unknown) => ({
+  data,
+  error: undefined,
+  response: { status: 200 } as Response,
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 // ---------------------------------------------------------------------------
 // customModelToAggregatedAIM
@@ -300,66 +360,135 @@ describe('customModelToAggregatedAIM', () => {
 
     expect(result.repository).toBe('gemma3-1b-it-custom-import-d41ec23c');
   });
+
+  it('sets profileCount from the profiles collection length', () => {
+    const model = buildCustomModel({
+      profiles: [
+        buildProfile({
+          name: 'default',
+          displayName: 'Default',
+          isDefault: true,
+        }),
+        buildProfile({ name: 'extra', displayName: 'Extra', isDefault: false }),
+      ],
+    });
+
+    const result = customModelToAggregatedAIM(model);
+
+    expect(result.aggregated.profileCount).toBe(2);
+  });
+
+  it('selects the Default profile by its isDefault flag, not by list position', () => {
+    // Backend sorts Default first, but a named row listed first must not be
+    // mistaken for the Default. Select by flag so ordering changes cannot leak
+    // the wrong summary onto the card.
+    const named = buildProfile({
+      name: 'extra',
+      displayName: 'Extra',
+      isDefault: false,
+    });
+    const dflt = buildProfile({
+      name: 'default',
+      displayName: 'Default',
+      isDefault: true,
+    });
+    const model = buildCustomModel({ profiles: [named, dflt] });
+
+    const result = customModelToAggregatedAIM(model);
+
+    expect(result.aggregated.defaultProfile?.name).toBe('default');
+  });
+
+  it('leaves defaultProfile unset when the collection is empty', () => {
+    const result = customModelToAggregatedAIM(buildCustomModel());
+
+    expect(result.aggregated.profileCount).toBe(0);
+    expect(result.aggregated.defaultProfile).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
 // listCustomModels
 // ---------------------------------------------------------------------------
 
-const mockFetch = vi.fn();
-
-beforeEach(() => {
-  vi.stubGlobal('fetch', mockFetch);
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-  mockFetch.mockReset();
-});
-
-const okJson = (body: unknown) => ({
-  ok: true,
-  status: 200,
-  json: () => Promise.resolve(body),
-});
-
 describe('listCustomModels', () => {
   it('returns mapped AggregatedAIM list from API response', async () => {
     const model = buildCustomModel();
-    mockFetch.mockResolvedValue(okJson({ data: [model] }));
+    mockGET.mockResolvedValue(okData({ data: [model] }));
 
     const result = await listCustomModels('workbench');
 
     expect(result).toHaveLength(1);
     expect(result[0].repository).toBe('gemma3-1b-it-custom-import-d41ec23c');
-    expect(mockFetch).toHaveBeenCalledWith(
-      '/api/projects/workbench/models',
-      expect.objectContaining({ method: 'GET' }),
-    );
+    expect(mockGET).toHaveBeenCalledWith('/api/projects/{project}/models', {
+      params: { path: { project: 'workbench' } },
+    });
   });
 
   it('returns empty array when data is empty', async () => {
-    mockFetch.mockResolvedValue(okJson({ data: [] }));
+    mockGET.mockResolvedValue(okData({ data: [] }));
 
     const result = await listCustomModels('workbench');
 
     expect(result).toEqual([]);
   });
 
-  it('throws when project is empty', async () => {
-    await expect(listCustomModels('')).rejects.toThrow();
-    expect(mockFetch).not.toHaveBeenCalled();
+  it('throws without calling the client when project is empty', async () => {
+    await expect(listCustomModels('')).rejects.toThrow(APIRequestError);
+    expect(mockGET).not.toHaveBeenCalled();
   });
 
-  it('throws APIRequestError when the request fails', async () => {
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 502,
-      json: () => Promise.resolve({ detail: 'upstream error' }),
-      text: () => Promise.resolve('upstream error'),
+  it('throws APIRequestError when the client reports an error', async () => {
+    mockGET.mockResolvedValue({
+      data: undefined,
+      error: { detail: 'upstream error' },
+      response: { status: 502 } as Response,
     });
 
-    await expect(listCustomModels('workbench')).rejects.toThrow();
+    await expect(listCustomModels('workbench')).rejects.toThrow(
+      APIRequestError,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getRuntimeProfileOptions
+// ---------------------------------------------------------------------------
+
+describe('getRuntimeProfileOptions', () => {
+  it('returns the runtime profile options on success', async () => {
+    const options = {
+      acceleratorModels: ['MI300X'],
+      acceleratorCounts: [1, 2],
+      precisions: ['bf16'],
+      optimizationClasses: ['throughput'],
+    };
+    mockGET.mockResolvedValue(okData(options));
+
+    const result = await getRuntimeProfileOptions('workbench');
+
+    expect(result).toBe(options);
+    expect(mockGET).toHaveBeenCalledWith(
+      '/api/projects/{project}/models/runtime-profile-options',
+      { params: { path: { project: 'workbench' } } },
+    );
+  });
+
+  it('throws without calling the client when project is empty', async () => {
+    await expect(getRuntimeProfileOptions('')).rejects.toThrow(APIRequestError);
+    expect(mockGET).not.toHaveBeenCalled();
+  });
+
+  it('throws APIRequestError when the client reports an error', async () => {
+    mockGET.mockResolvedValue({
+      data: undefined,
+      error: { detail: 'boom' },
+      response: { status: 500 } as Response,
+    });
+
+    await expect(getRuntimeProfileOptions('workbench')).rejects.toThrow(
+      APIRequestError,
+    );
   });
 });
 
@@ -399,48 +528,61 @@ describe('extractCustomModelCanonicalName', () => {
   });
 });
 
+describe('extractCustomModelPrecision', () => {
+  it('reads the precision annotation (the CRD prunes it from overrides)', () => {
+    const model = buildCustomModel({
+      metadata: {
+        ...emptyMetadata,
+        annotations: { 'aiwb.apps.eai.amd.com/precision': 'fp8' },
+      },
+    });
+    expect(extractCustomModelPrecision(model)).toBe('fp8');
+  });
+
+  it('returns undefined for models onboarded before precision was tracked', () => {
+    const model = buildCustomModel({ metadata: emptyMetadata });
+    expect(extractCustomModelPrecision(model)).toBeUndefined();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // getCustomModel
 // ---------------------------------------------------------------------------
 
 describe('getCustomModel', () => {
-  it('GETs the model and unwraps the data envelope', async () => {
+  it('GETs the model by project and model name', async () => {
     const model = buildCustomModel();
-    mockFetch.mockResolvedValue(okJson({ data: model }));
+    mockGET.mockResolvedValue(okData(model));
 
     const result = await getCustomModel('workbench', 'my-model');
 
     expect(result.metadata.name).toBe(model.metadata.name);
-    expect(mockFetch).toHaveBeenCalledWith(
-      '/api/projects/workbench/models/my-model',
-      expect.objectContaining({ method: 'GET' }),
+    expect(mockGET).toHaveBeenCalledWith(
+      '/api/projects/{project}/models/{model_name}',
+      { params: { path: { project: 'workbench', model_name: 'my-model' } } },
     );
   });
 
-  it('returns the body directly when not enveloped', async () => {
-    const model = buildCustomModel();
-    mockFetch.mockResolvedValue(okJson(model));
-
-    const result = await getCustomModel('workbench', 'my-model');
-
-    expect(result.metadata.name).toBe(model.metadata.name);
+  it('throws without calling the client when project or modelId is empty', async () => {
+    await expect(getCustomModel('', 'my-model')).rejects.toThrow(
+      APIRequestError,
+    );
+    await expect(getCustomModel('workbench', '')).rejects.toThrow(
+      APIRequestError,
+    );
+    expect(mockGET).not.toHaveBeenCalled();
   });
 
-  it('throws without calling fetch when project or modelId is empty', async () => {
-    await expect(getCustomModel('', 'my-model')).rejects.toThrow();
-    await expect(getCustomModel('workbench', '')).rejects.toThrow();
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it('throws APIRequestError when the request fails', async () => {
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 404,
-      json: () => Promise.resolve({ detail: 'not found' }),
-      text: () => Promise.resolve('not found'),
+  it('throws APIRequestError when the client reports an error', async () => {
+    mockGET.mockResolvedValue({
+      data: undefined,
+      error: { detail: 'not found' },
+      response: { status: 404 } as Response,
     });
 
-    await expect(getCustomModel('workbench', 'my-model')).rejects.toThrow();
+    await expect(getCustomModel('workbench', 'my-model')).rejects.toThrow(
+      APIRequestError,
+    );
   });
 });
 
@@ -450,61 +592,56 @@ describe('getCustomModel', () => {
 
 describe('patchCustomModel', () => {
   it('PATCHes the provided body to the model endpoint', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({}),
+    mockPATCH.mockResolvedValue({
+      error: undefined,
+      response: { status: 200, ok: true } as Response,
     });
 
     await patchCustomModel('workbench', 'my-model', {
       displayName: 'new-name',
     });
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      '/api/projects/workbench/models/my-model',
-      expect.objectContaining({
-        method: 'PATCH',
-        body: JSON.stringify({ displayName: 'new-name' }),
-      }),
+    expect(mockPATCH).toHaveBeenCalledWith(
+      '/api/projects/{project}/models/{model_name}',
+      {
+        params: { path: { project: 'workbench', model_name: 'my-model' } },
+        body: { displayName: 'new-name' },
+      },
     );
   });
 
-  it('throws without calling fetch when the body is empty', async () => {
-    await expect(
-      patchCustomModel('workbench', 'my-model', {}),
-    ).rejects.toThrow();
-    expect(mockFetch).not.toHaveBeenCalled();
+  it('throws without calling the client when the body is empty', async () => {
+    await expect(patchCustomModel('workbench', 'my-model', {})).rejects.toThrow(
+      APIRequestError,
+    );
+    expect(mockPATCH).not.toHaveBeenCalled();
   });
 
-  it('throws without calling fetch when project or modelId is empty', async () => {
+  it('throws without calling the client when project or modelId is empty', async () => {
     await expect(
       patchCustomModel('', 'my-model', { displayName: 'x' }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(APIRequestError);
     await expect(
       patchCustomModel('workbench', '', { displayName: 'x' }),
-    ).rejects.toThrow();
-    expect(mockFetch).not.toHaveBeenCalled();
+    ).rejects.toThrow(APIRequestError);
+    expect(mockPATCH).not.toHaveBeenCalled();
   });
 
   it('throws APIRequestError when the request fails', async () => {
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 409,
-      json: () => Promise.resolve({ detail: 'conflict' }),
-      text: () => Promise.resolve('conflict'),
+    mockPATCH.mockResolvedValue({
+      error: { detail: 'conflict' },
+      response: { status: 409 } as Response,
     });
 
     await expect(
       patchCustomModel('workbench', 'my-model', { displayName: 'x' }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(APIRequestError);
   });
 
   it('uses a concise message for HTTP 405 (method not allowed)', async () => {
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 405,
-      json: () => Promise.resolve({ detail: 'Method Not Allowed' }),
-      text: () => Promise.resolve('Method Not Allowed'),
+    mockPATCH.mockResolvedValue({
+      error: { detail: 'Method Not Allowed' },
+      response: { status: 405 } as Response,
     });
 
     await expect(
@@ -552,6 +689,24 @@ describe('parseCustomModelDeleteErrorBody', () => {
     expect(parseCustomModelDeleteErrorBody(body)).toEqual({
       detail: 'In use',
       blockingServices: ['aim-svc-1'],
+    });
+  });
+
+  it('reads displayName from object blockingServices entries', () => {
+    // Profile delete sends {serviceId, displayName} objects here where model
+    // delete sends bare name strings.
+    const body = JSON.stringify({
+      detail: 'In use',
+      additionalInfo: {
+        blockingServices: [
+          { serviceId: 'svc-1', displayName: 'summarizer-prod' },
+          { serviceId: 'svc-2' },
+        ],
+      },
+    });
+    expect(parseCustomModelDeleteErrorBody(body)).toEqual({
+      detail: 'In use',
+      blockingServices: ['summarizer-prod', 'svc-2'],
     });
   });
 
@@ -611,35 +766,35 @@ describe('parseCustomModelDeleteErrorBody', () => {
 
 describe('deleteCustomModel', () => {
   it('DELETEs the model and returns on success (204)', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 204,
-      text: () => Promise.resolve(''),
+    mockDELETE.mockResolvedValue({
+      error: undefined,
+      response: { status: 204, ok: true } as Response,
     });
 
     await deleteCustomModel('workbench', 'my-model');
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      '/api/projects/workbench/models/my-model',
-      expect.objectContaining({ method: 'DELETE' }),
+    expect(mockDELETE).toHaveBeenCalledWith(
+      '/api/projects/{project}/models/{model_name}',
+      { params: { path: { project: 'workbench', model_name: 'my-model' } } },
     );
   });
 
-  it('throws without calling fetch when project or modelName is empty', async () => {
-    await expect(deleteCustomModel('', 'm')).rejects.toThrow();
-    await expect(deleteCustomModel('p', '')).rejects.toThrow();
-    expect(mockFetch).not.toHaveBeenCalled();
+  it('throws without calling the client when project or modelName is empty', async () => {
+    await expect(deleteCustomModel('', 'm')).rejects.toThrow(APIRequestError);
+    await expect(deleteCustomModel('p', '')).rejects.toThrow(APIRequestError);
+    expect(mockDELETE).not.toHaveBeenCalled();
   });
 
   it('throws CustomModelDeleteConflictError on 409 with parsed blocking services', async () => {
-    const payload = JSON.stringify({
-      detail: 'Model has active deployments',
-      additionalInfo: { blockingServices: ['deploy-a'] },
-    });
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 409,
-      text: () => Promise.resolve(payload),
+    // openapi-fetch drains the error body into `error` (parsed JSON when
+    // possible); the service re-serializes it rather than re-reading the
+    // already-consumed response body.
+    mockDELETE.mockResolvedValue({
+      error: {
+        detail: 'Model has active deployments',
+        additionalInfo: { blockingServices: ['deploy-a'] },
+      },
+      response: { status: 409 } as Response,
     });
 
     await expect(
@@ -652,61 +807,63 @@ describe('deleteCustomModel', () => {
   });
 
   it('throws APIRequestError on other error responses', async () => {
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 404,
-      text: () => Promise.resolve(JSON.stringify({ detail: 'missing' })),
+    mockDELETE.mockResolvedValue({
+      error: { detail: 'missing' },
+      response: { status: 404 } as Response,
     });
 
-    await expect(deleteCustomModel('workbench', 'gone')).rejects.toThrow(
-      APIRequestError,
-    );
     await expect(deleteCustomModel('workbench', 'gone')).rejects.toMatchObject({
       statusCode: 404,
     });
   });
 });
 
+// ---------------------------------------------------------------------------
+// copyCustomModel
+// ---------------------------------------------------------------------------
+
 describe('copyCustomModel', () => {
   it('calls the copy endpoint for the given project and source model', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 204,
+    mockPOST.mockResolvedValue({
+      error: undefined,
+      response: { status: 204, ok: true } as Response,
     });
 
     await copyCustomModel('workbench', 'custom-model-a');
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      '/api/projects/workbench/models/custom-model-a/copy',
-      expect.objectContaining({ method: 'POST' }),
+    expect(mockPOST).toHaveBeenCalledWith(
+      '/api/projects/{project}/models/{model_name}/copy',
+      {
+        params: {
+          path: { project: 'workbench', model_name: 'custom-model-a' },
+        },
+      },
     );
   });
 
-  it('throws when project is empty', async () => {
-    await expect(copyCustomModel('', 'custom-model-a')).rejects.toThrow();
-    expect(mockFetch).not.toHaveBeenCalled();
+  it('throws without calling the client when project is empty', async () => {
+    await expect(copyCustomModel('', 'custom-model-a')).rejects.toThrow(
+      APIRequestError,
+    );
+    expect(mockPOST).not.toHaveBeenCalled();
   });
 
-  it('throws when source model name is empty', async () => {
-    await expect(copyCustomModel('workbench', '')).rejects.toThrow();
-    expect(mockFetch).not.toHaveBeenCalled();
+  it('throws without calling the client when source model name is empty', async () => {
+    await expect(copyCustomModel('workbench', '')).rejects.toThrow(
+      APIRequestError,
+    );
+    expect(mockPOST).not.toHaveBeenCalled();
   });
 
   it('throws APIRequestError when the copy request fails', async () => {
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 400,
-      statusText: 'Model already exists',
-      json: () =>
-        Promise.resolve({
-          detail: 'Model already exists',
-        }),
-      text: () => Promise.resolve('Model already exists'),
+    mockPOST.mockResolvedValue({
+      error: { detail: 'Model already exists' },
+      response: { status: 400 } as Response,
     });
 
     await expect(
       copyCustomModel('workbench', 'custom-model-a'),
-    ).rejects.toThrow('Model already exists');
+    ).rejects.toThrow(APIRequestError);
   });
 });
 

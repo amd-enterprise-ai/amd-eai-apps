@@ -12,11 +12,12 @@ logs, and metrics. Capability-specific mutations live on their own routers
 Path-keying choice
 ------------------
 URLs use ``/v1/projects/{project}/workloads/...`` per the convention
-established by the capability routers (EAI-6354/6357/6359/6311/6312).
+established by the capability routers.
 ``ensure_access_to_project`` maps the project identifier 1:1 to the
 underlying workbench namespace.
 """
 
+import asyncio
 from textwrap import dedent
 from uuid import UUID
 
@@ -30,7 +31,9 @@ from api_common.database import get_session
 from api_common.exceptions import NotFoundException
 from api_common.schemas import QueryParam
 
-from ..common_responses import PROJECT_ACCESS_RESPONSES
+from ..cluster.schemas import ProjectQuotaResponse
+from ..cluster.service import get_project_quota_state
+from ..common_responses import EXTERNAL_SERVICE_RESPONSES, PROJECT_ACCESS_RESPONSES
 from ..dispatch.kube_client import KubernetesClient, get_kube_client
 from ..logs.client import get_loki_client
 from ..logs.schemas import LogsQuery, WorkloadLogsResponse
@@ -41,6 +44,8 @@ from ..metrics.schemas import MetricsScalar, MetricsScalarWithRange, MetricsTime
 from ..metrics.service import get_metric_by_namespace, get_metric_by_workload_id
 from ..projects.crds import Namespace
 from ..projects.security import ensure_access_to_project, get_project_namespace
+from .enums import WorkloadType
+from .gateway import get_finetuning_workloads_annotations
 from .repository import get_workload_by_id, get_workloads
 from .schemas import (
     WorkloadListQuery,
@@ -55,6 +60,8 @@ from .service import (
     ensure_workload_or_aim_service_exists,
     get_workload_metrics_paginated,
     get_workload_stats_counts,
+    resolve_workload_datasets,
+    resolve_workloads_datasets,
 )
 
 router = APIRouter(tags=["Workloads"])
@@ -93,8 +100,27 @@ async def list_project_workloads(
         status_filter=query.status_filter if query.status_filter else None,
     )
     paginated = paginate_list(workloads, page=query.page, page_size=query.page_size)
+    # The training-output annotation only applies to fine-tuning workloads, so skip the K8s list
+    # entirely when the page has none. When it is needed, fan the DB dataset resolution and
+    # the K8s label lookup out concurrently — they are independent, so latency is bounded by
+    # the slower call rather than their sum.
+    finetuning_workload_ids = [workload.id for workload in paginated.items if workload.type == WorkloadType.FINE_TUNING]
+    if finetuning_workload_ids:
+        datasets_by_workload, annotations_by_workload = await asyncio.gather(
+            resolve_workloads_datasets(session, paginated.items),
+            get_finetuning_workloads_annotations(project, finetuning_workload_ids),
+        )
+    else:
+        datasets_by_workload = await resolve_workloads_datasets(session, paginated.items)
+        annotations_by_workload = {}
+    responses: list[WorkloadResponse] = []
+    for workload in paginated.items:
+        response = WorkloadResponse.model_validate(workload)
+        response.datasets = datasets_by_workload[workload.id]
+        response.annotations = annotations_by_workload.get(workload.id, {})
+        responses.append(response)
     return WorkloadsList(
-        data=[WorkloadResponse.model_validate(workload) for workload in paginated.items],
+        data=responses,
         pagination=PaginationMetadata(
             page=paginated.page,
             page_size=paginated.page_size,
@@ -129,6 +155,34 @@ async def get_project_workload_stats(
         session=session,
         namespace=project,
     )
+
+
+@router.get(
+    "/projects/{project}/quota",
+    response_model=ProjectQuotaResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get project resource quota state",
+    description=dedent("""
+        Return the Kueue ClusterQueue quota state for a project.
+
+        When the project has a Kueue LocalQueue and ClusterQueue,
+        `isQuotaManaged` is `true` and `quotas` contains the configured
+        `nominalQuota` for each resource type (GPU, CPU, memory,
+        ephemeral storage). A quota of `0` means the project borrows
+        resources from the cluster cohort and workloads may be preempted
+        by projects with reserved quota.
+
+        When no Kueue queue exists (e.g. standalone mode or unmanaged
+        namespace), `isQuotaManaged` is `false` and all quota fields are
+        `null`.
+    """),
+    responses={**PROJECT_ACCESS_RESPONSES},
+)
+async def get_project_quota(
+    project: Namespace = Depends(get_project_namespace),
+    kube_client: KubernetesClient = Depends(get_kube_client),
+) -> ProjectQuotaResponse:
+    return await get_project_quota_state(project.name, kube_client)
 
 
 @router.get(
@@ -201,6 +255,7 @@ async def get_project_metric(
     metric: NamespaceMetricName = Path(description="Metric name to retrieve"),
     time_range: MetricsTimeRange = Depends(),
     prometheus_client: PrometheusConnect = Depends(get_prometheus_client),
+    kube_client: KubernetesClient = Depends(get_kube_client),
 ) -> MetricsTimeseries:
     return await get_metric_by_namespace(
         namespace=project,
@@ -208,6 +263,7 @@ async def get_project_metric(
         start=time_range.start,
         end=time_range.end,
         prometheus_client=prometheus_client,
+        kube_client=kube_client,
     )
 
 
@@ -231,7 +287,9 @@ async def get_workload(
     if not workload:
         raise NotFoundException(f"Workload {workload_id} not found")
 
-    return WorkloadResponse.model_validate(workload)
+    response = WorkloadResponse.model_validate(workload)
+    response.datasets = await resolve_workload_datasets(session, workload_id)
+    return response
 
 
 @router.get(
@@ -242,6 +300,7 @@ async def get_workload(
     description="Retrieve a metric for a workload by querying Prometheus with workload_id.",
     responses={
         **PROJECT_ACCESS_RESPONSES,
+        **EXTERNAL_SERVICE_RESPONSES,
         404: {"description": "Project or namespace not found, or workload not found."},
         422: {
             "description": (
@@ -270,6 +329,8 @@ async def get_workload_metric(
         start=time_range.start,
         end=time_range.end,
         prometheus_client=prometheus_client,
+        kube_client=kube_client,
+        namespace=project,
     )
 
 
@@ -281,6 +342,7 @@ async def get_workload_metric(
     description="Retrieve logs for a specific workload from Loki, with pagination and filtering support.",
     responses={
         **PROJECT_ACCESS_RESPONSES,
+        **EXTERNAL_SERVICE_RESPONSES,
         404: {"description": "Project or namespace not found, or workload not found."},
     },
 )
@@ -334,6 +396,7 @@ async def get_workload_logs_endpoint(
     """),
     responses={
         **PROJECT_ACCESS_RESPONSES,
+        **EXTERNAL_SERVICE_RESPONSES,
         200: {
             "description": "SSE stream established successfully",
             "content": {

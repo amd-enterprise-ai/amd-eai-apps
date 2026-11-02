@@ -4,8 +4,8 @@
 
 *** Settings ***
 Documentation       High-level keywords for the AIWB chattable inference listing.
-...                 Both AIWB-proxied chat endpoints have been removed (EAI-6323
-...                 moved AIM chat to a UI bypass; EAI-6313 dropped workload chat).
+...                 Both AIWB-proxied chat endpoints have been removed (AIM chat
+...                 moved to a UI bypass and workload chat was dropped).
 ...                 What remains here are the listing helpers that let the UI
 ...                 discover which inference deployments are ready for chat.
 Resource            api/aims.resource

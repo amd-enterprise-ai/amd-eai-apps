@@ -1,0 +1,121 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# The ext_authz data path, split out of the controller Deployment. It is the sole, fail-closed
+# authenticator for the workloads route and every header-less inference request, so it gets its own
+# availability contract: >1 replica, a PodDisruptionBudget, topology spread, and a readiness gate
+# that stays red until its cache is warm. Same image as the controller, different entrypoint (/authz).
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-authz
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}-authz
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: authz
+spec:
+  replicas: {{ .Values.authz.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Release.Name }}-authz
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Release.Name }}-authz
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: authz
+    spec:
+      serviceAccountName: {{ .Release.Name }}-authz-sa
+      # Must exceed the preStop drain plus the server's own graceful shutdown so the pod is not
+      # SIGKILLed mid-drain. See the preStop lifecycle hook on the container below.
+      terminationGracePeriodSeconds: {{ .Values.authz.terminationGracePeriodSeconds }}
+      {{- with .Values.controller.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.controller.podSecurityContext | nindent 8 }}
+      # Keep the two fail-closed replicas off the same node so a single node loss cannot drain the
+      # whole authenticator. Best-effort (ScheduleAnyway) so a small/single-node cluster still runs.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Release.Name }}-authz
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      containers:
+        - name: authz
+          # Same image as the controller — one build, two entrypoints kept in lockstep.
+          image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+          command: ["/authz"]
+          securityContext:
+            {{- toYaml .Values.controller.securityContext | nindent 12 }}
+          env:
+            - name: MANAGED_LABEL_NAME
+              value: {{ .Values.controller.labels.managedBy.name | quote }}
+            - name: MANAGED_LABEL_VALUE
+              value: {{ .Values.controller.labels.managedBy.value | quote }}
+            - name: MODEL_NAME_ANNOTATION
+              value: {{ .Values.controller.annotations.modelName | quote }}
+            - name: WORKLOAD_ID_LABEL
+              value: {{ .Values.controller.labels.workloadId | quote }}
+            - name: HEALTH_PORT
+              value: {{ .Values.controller.healthPort | quote }}
+            - name: AUTHZ_PORT
+              value: {{ .Values.controller.authzPort | quote }}
+            - name: WORKLOADS_AUTHZ_PORT
+              value: {{ .Values.controller.workloadsAuthzPort | quote }}
+            # The ceiling this binary reads request bodies at. MUST match what the controller
+            # renders into bodyToExtAuth.maxRequestBytes, or Envoy forwards bodies this handler
+            # then refuses. Both Deployments read the same value for that reason.
+            - name: BODY_AUTH_MAX_REQUEST_BYTES
+              value: {{ include "aigw.bodyAuthMaxRequestBytes" . | quote }}
+            # Required by the shared config loader even though the authz binary does not route. It
+            # gates the reconciler's host-filter; passed here only so config.Load() succeeds.
+            - name: AI_ROUTE_HOSTNAME
+              value: {{ .Values.controller.gateway.routeHostname | quote }}
+          ports:
+            - name: health
+              containerPort: {{ .Values.controller.healthPort }}
+              protocol: TCP
+            - name: authz
+              containerPort: {{ .Values.controller.authzPort }}
+              protocol: TCP
+            - name: workloads-authz
+              containerPort: {{ .Values.controller.workloadsAuthzPort }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          # Readiness stays red until the listeners are bound and the manager cache has synced, so a
+          # cold-starting pod joins the Service Endpoints only when it can actually authorize —
+          # otherwise, being fail-closed, it would 401 valid keys during startup.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # On graceful termination (rollout, drain, scale-down) the pod stops being routable only
+          # after it is removed from the Service EndpointSlice and Envoy's EDS — which is async and
+          # lags the SIGTERM. Sleeping here keeps the server accepting during that lag, so no request
+          # is routed to a pod that has already stopped. Being fail-closed, that lag would otherwise
+          # be a burst of 401s. Does not cover hard crashes/SIGKILL (no preStop runs then) — those
+          # are bounded by running two replicas. The binary itself drains in-flight connections on
+          # SIGTERM after this sleep returns.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sleep", "{{ .Values.authz.drainSeconds }}"]
+          resources:
+            {{- toYaml .Values.authz.resources | nindent 12 }}

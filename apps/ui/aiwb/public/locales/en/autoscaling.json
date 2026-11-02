@@ -67,10 +67,10 @@
   "list": {
     "replicas": {
       "headers": {
-        "name": { "title": "Replica Name" },
+        "name": { "title": "Replica name" },
         "status": { "title": "Status" },
         "gpuCount": { "title": "GPUs" },
-        "createdAt": { "title": "Created At" }
+        "createdAt": { "title": "Created at" }
       },
       "empty": {
         "description": "No replicas found."

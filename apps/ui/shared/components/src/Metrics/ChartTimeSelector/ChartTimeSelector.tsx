@@ -40,7 +40,7 @@ export const ChartTimeSelector: React.FC<ChartTimeSelectorProps> = ({
   translationPrefix = 'timeRange',
   periods = DEFAULT_CHART_TIME_PERIODS,
 }) => {
-  const { t } = useTranslation('common');
+  const { t } = useTranslation('sharedComponents');
 
   const tabItems = periods.map((id) => ({ id }));
 
@@ -53,7 +53,7 @@ export const ChartTimeSelector: React.FC<ChartTimeSelectorProps> = ({
   );
 
   return (
-    <div className="flex gap-3 items-center justify-end">
+    <div className="flex min-w-0 flex-wrap gap-3 items-center justify-end">
       <DataRefresher
         onRefresh={onChartsRefresh}
         lastFetchedTimestamp={lastFetchedTimestamp}
@@ -65,16 +65,16 @@ export const ChartTimeSelector: React.FC<ChartTimeSelectorProps> = ({
           (t(`${translationPrefix}.description` as any) as string) || ''
         }
         items={tabItems}
-        placement="top"
         classNames={{
-          base: 'justify-end w-full',
+          base: 'shrink-0 justify-end',
         }}
         defaultSelectedKey={initialTimePeriod}
         onSelectionChange={handleTimeBoundChange}
       >
-        {(item) => (
+        {(item: { id: TimeRangePeriod }) => (
           <Tab
             key={item.id}
+            id={item.id}
             title={t(`${translationPrefix}.range.${item.id}` as any) as string}
           ></Tab>
         )}

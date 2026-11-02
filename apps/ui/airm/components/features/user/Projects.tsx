@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 import {
-  Select,
+  FormSelect,
   SelectItem,
   ConfirmationModal,
   DrawerForm,
@@ -64,9 +64,8 @@ export const Projects: React.FC<Props> = ({ user, projects }) => {
           .string()
           .trim()
           .nonempty(
-            t(
-              'detail.projectsAndRoles.projects.validation.projects.selected',
-            ) || '',
+            t('detail.projectsAndRoles.projects.validation.project.selected') ||
+              '',
           ),
       }),
     [t],
@@ -141,7 +140,9 @@ export const Projects: React.FC<Props> = ({ user, projects }) => {
         </h3>
         <ActionButton
           tertiary
-          aria-label={t('detail.projectsAndRoles.projects.actions.add') || ''}
+          aria-label={
+            t('detail.projectsAndRoles.projects.actions.add.title') || ''
+          }
           color="primary"
           size="sm"
           isDisabled={candidateProjects.length == 0}
@@ -189,20 +190,14 @@ export const Projects: React.FC<Props> = ({ user, projects }) => {
                   ),
                   isRequired: true,
                   component: (props) => (
-                    <Select
-                      aria-label={props.label}
-                      variant="bordered"
-                      defaultSelectedKeys={[props.defaultValue]}
-                      {...props}
-                    >
+                    <FormSelect aria-label={props.label} {...props}>
                       {candidateProjects.map((project) => (
                         <SelectItem key={project.id}>{project.name}</SelectItem>
                       ))}
-                    </Select>
+                    </FormSelect>
                   ),
                 }}
-                register={form.register}
-                errorMessage={form.formState.errors.project?.message}
+                form={form}
               />
             </div>
           );

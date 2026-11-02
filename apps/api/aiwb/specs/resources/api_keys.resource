@@ -101,47 +101,6 @@ Create api key
         Set test variable    ${TEST_API_KEY_VALUE}    ${key_info}[fullKey]
     END
 
-# API Key Renewal Keywords
-Api key is renewed
-    [Documentation]    BDD wrapper: Renews the current API key's lease
-    ${project}=    Get Project Namespace
-    ${response}=    api_keys_api.Renew api key    ${TEST_API_KEY}[id]    project=${project}    expected_status=any
-
-    Set test variable    ${TEST_RESPONSE}    ${response}
-
-Api key renewal should succeed
-    [Documentation]    Verifies that API key renewal was successful
-    Should be equal as integers    ${TEST_RESPONSE.status_code}    200
-    ${response_data}=    Set variable    ${TEST_RESPONSE.json()}
-    Should contain    ${response_data}    leaseDuration
-
-Api key renewal should fail
-    [Documentation]    Verifies that API key renewal failed with non-200 status
-    Should not be equal as integers    ${TEST_RESPONSE.status_code}    200
-
-Create non-renewable api key
-    [Documentation]    Creates an API key with renewable=False
-    Create api key    renewable=${False}
-
-Non-renewable api key is created
-    [Documentation]    BDD wrapper: Creates a non-renewable API key
-    Create non-renewable api key
-
-Non-renewable api key renewal is attempted
-    [Documentation]    BDD wrapper: Attempts to renew the current (non-renewable) API key
-    Api key is renewed
-
-Api key renewal should fail with expected error
-    [Documentation]    Verifies that API key renewal failed for a non-renewable key
-    Api key renewal should fail
-
-Renew non-existent api key
-    [Documentation]    Attempts renewal of a non-existent API key ID
-    ${project}=    Get Project Namespace
-    ${response}=    api_keys_api.Renew api key    non-existent-key-id-12345    project=${project}    expected_status=any
-
-    Set test variable    ${TEST_RESPONSE}    ${response}
-
 Api key is revoked
     [Documentation]    Revokes/deletes the current API key (AIWB API)
     ${project}=    Get Project Namespace
@@ -207,9 +166,10 @@ Error message should indicate missing api key
     [Documentation]    Verifies error message indicates missing API key
     ...    Handles both JSON responses (from service) and non-JSON responses (from Envoy gateway)
     ${status}=    Set variable    ${TEST_RESPONSE.status_code}
-    # 403 from Envoy gateway may not have JSON body - status code verification is sufficient
-    IF    ${status} == 403
-        Log    Envoy gateway returned 403 Forbidden (expected for missing API key)    INFO
+    # Missing credentials are rejected with 401/403. A 404 can mean the route is absent,
+    # so it must not satisfy this scenario without a credential-specific invariant.
+    IF    ${status} in [401, 403]
+        Log    Gateway returned ${status} (expected for missing API key)    INFO
         RETURN
     END
     # For other error codes, verify JSON error message

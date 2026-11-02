@@ -8,6 +8,7 @@ import {
   FormFieldComponent,
   FormSelect,
   Textarea,
+  cn,
 } from '@amdenterpriseai/components';
 import { useMutation } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
@@ -215,19 +216,19 @@ export const AddSecret: React.FC<Props> = ({
         placeholder: t('form.add.field.projectIds.placeholder'),
         description: t('form.add.field.projectIds.description'),
         isRequired: scope === SecretScope.PROJECT,
-        component: (formElemProps) => (
+        component: ({ className: fieldClassName, ...rest }) => (
           <FormSelect
             selectionMode={
               scope === SecretScope.PROJECT ? 'single' : 'multiple'
             }
             disallowEmptySelection={scope === SecretScope.PROJECT}
-            classNames={{ label: 'pb-2' }}
             defaultSelectedKeys={
               scope === SecretScope.PROJECT && projects.length >= 1
                 ? [projects[0].id]
                 : []
             }
-            {...formElemProps}
+            {...rest}
+            className={cn('**:data-[slot=label]:pb-2', fieldClassName)}
             disabledKeys={disabledProjectIds}
             isDisabled={projectSelectDisabled}
           >
@@ -250,10 +251,7 @@ export const AddSecret: React.FC<Props> = ({
       isRequired: true,
       component: (formElemProps) => (
         <Textarea
-          labelPlacement="outside"
           minRows={15}
-          maxRows={30}
-          variant="bordered"
           {...formElemProps}
           onChange={(event) => {
             formElemProps.onChange({
@@ -286,10 +284,7 @@ export const AddSecret: React.FC<Props> = ({
       isRequired: true,
       component: (formElemProps) => (
         <Textarea
-          labelPlacement="outside"
           minRows={15}
-          maxRows={30}
-          variant="bordered"
           {...formElemProps}
           onChange={(event) => {
             formElemProps.onChange({

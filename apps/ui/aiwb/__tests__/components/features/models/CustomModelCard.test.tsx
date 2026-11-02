@@ -26,6 +26,14 @@ vi.mock('next-i18next', () => ({
       ) {
         return `+${options.count}`;
       }
+      if (
+        key === 'customModels.card.profileCount' &&
+        typeof options?.count === 'number'
+      ) {
+        return options.count === 1
+          ? `${options.count} profile`
+          : `${options.count} profiles`;
+      }
       return key;
     },
   }),
@@ -35,7 +43,7 @@ vi.mock('@amdenterpriseai/components', async (importOriginal) => ({
   ...(await importOriginal()),
   // Render dropdown actions inline so the test can interact with them
   // without going through HeroUI's portalled menu.
-  NestedDropdown: ({
+  ActionsDropdown: ({
     children,
     actions,
   }: {
@@ -74,6 +82,7 @@ const readyAim = withPhase('Ready');
 describe('CustomModelCard', () => {
   const handlers = {
     onModelSettings: vi.fn(),
+    onProfiles: vi.fn(),
     onDelete: vi.fn(),
     onDeploy: vi.fn(),
   };
@@ -82,11 +91,14 @@ describe('CustomModelCard', () => {
     vi.clearAllMocks();
   });
 
-  it('renders the action menu items (settings, delete)', () => {
+  it('renders the action menu items (settings, profiles, delete)', () => {
     render(<CustomModelCard aggregatedAim={baseAim} {...handlers} />);
 
     expect(screen.getByTestId('menu-item-settings')).toHaveTextContent(
       'customModels.card.actions.settings.label',
+    );
+    expect(screen.getByTestId('menu-item-profiles')).toHaveTextContent(
+      'customModels.card.actions.profiles.label',
     );
     expect(screen.getByTestId('menu-item-delete')).toHaveTextContent(
       'customModels.card.actions.delete.label',
@@ -98,6 +110,9 @@ describe('CustomModelCard', () => {
 
     fireEvent.click(screen.getByTestId('menu-item-settings'));
     expect(handlers.onModelSettings).toHaveBeenCalledWith(baseAim);
+
+    fireEvent.click(screen.getByTestId('menu-item-profiles'));
+    expect(handlers.onProfiles).toHaveBeenCalledWith(baseAim);
 
     fireEvent.click(screen.getByTestId('menu-item-delete'));
     expect(handlers.onDelete).toHaveBeenCalledWith(baseAim);
@@ -160,5 +175,77 @@ describe('CustomModelCard', () => {
     expect(
       screen.getByText('customModels.card.status.onboarding'),
     ).toBeInTheDocument();
+  });
+
+  it('renders the profile count and Default summary without a per-model query', () => {
+    const withProfiles: AggregatedAIM = {
+      ...readyAim,
+      aggregated: {
+        ...readyAim.aggregated,
+        profileCount: 2,
+        defaultProfile: {
+          name: 'default',
+          displayName: 'Default',
+          isDefault: true,
+          resourceName: 'model-default',
+          profile: {
+            spec: {
+              metric: 'throughput',
+              acceleratorModel: 'MI300X',
+              acceleratorCount: 1,
+              acceleratorType: 'gpu',
+              precision: 'fp8',
+            },
+          },
+        } as AggregatedAIM['aggregated']['defaultProfile'],
+      },
+    };
+    render(<CustomModelCard aggregatedAim={withProfiles} {...handlers} />);
+    expect(
+      screen.getByTestId('custom-model-card-profile-count'),
+    ).toHaveTextContent('2 profiles');
+    const summary = screen.getByTestId('custom-model-card-default-profile');
+    expect(summary).toHaveTextContent('MI300X');
+    expect(summary).toHaveTextContent('fp8');
+  });
+
+  it('omits the Default summary when the Default has no effective profile yet', () => {
+    // A just-onboarded model can carry a Default row whose effective profile is
+    // not emitted yet. The summary would be all-null, so the card must not render
+    // an empty summary container.
+    const withoutEffectiveProfile: AggregatedAIM = {
+      ...readyAim,
+      aggregated: {
+        ...readyAim.aggregated,
+        profileCount: 1,
+        defaultProfile: {
+          name: 'default',
+          displayName: 'Default',
+          isDefault: true,
+          resourceName: 'model-default',
+        } as AggregatedAIM['aggregated']['defaultProfile'],
+      },
+    };
+    render(
+      <CustomModelCard aggregatedAim={withoutEffectiveProfile} {...handlers} />,
+    );
+    expect(
+      screen.getByTestId('custom-model-card-profile-count'),
+    ).toHaveTextContent('1 profile');
+    expect(
+      screen.queryByTestId('custom-model-card-default-profile'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('omits the profile count and Default summary for catalog-style aggregated AIMs', () => {
+    // A stock catalog AggregatedAIM leaves profileCount/defaultProfile unset;
+    // the card must still render without profile metadata.
+    render(<CustomModelCard aggregatedAim={readyAim} {...handlers} />);
+    expect(
+      screen.queryByTestId('custom-model-card-profile-count'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('custom-model-card-default-profile'),
+    ).not.toBeInTheDocument();
   });
 });

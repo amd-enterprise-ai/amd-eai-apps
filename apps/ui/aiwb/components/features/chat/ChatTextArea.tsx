@@ -61,7 +61,7 @@ export const ChatTextArea = ({
           data-testid="chat-input"
           ref={textareaRef}
           disabled={disabled}
-          className="py-4 w-full max-h-27.5 md:max-h-50 lg:max-h-100 shadow-lg focus:ring-0 border-0 outline-none bg-default-100 disabled:hover:bg-default-200/75 rounded-3xl resize-none pl-6 pr-32 text-default-800"
+          className="py-4 w-full max-h-27.5 md:max-h-50 lg:max-h-100 shadow-lg focus:ring-0 border-0 outline-none bg-default disabled:hover:bg-default-hover/75 rounded-3xl resize-none pl-6 pr-32 text-foreground"
           style={{
             resize: 'none',
             bottom: `${textareaRef?.current?.scrollHeight}px`,
@@ -136,7 +136,7 @@ export const ChatTextArea = ({
 
         {showScrollDownButton && (
           <Button
-            className="absolute -top-16 right-1.5 md:top-2 md:-right-16 bg-default-200/75"
+            className="absolute -top-16 right-1.5 md:top-2 md:-right-16 bg-default-hover/75"
             onPress={onScrollDownClick}
             isIconOnly
             radius="full"

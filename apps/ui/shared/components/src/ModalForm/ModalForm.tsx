@@ -17,7 +17,7 @@ import {
   Resolver,
   UseFormReturn,
 } from 'react-hook-form';
-import { ActionButton, CloseButton } from '../Buttons';
+import { ActionButton } from '../Buttons';
 import ManagedForm from '../ManagedForm/ManagedForm';
 
 import { type ZodType, type ZodTypeDef } from 'zod';
@@ -92,25 +92,16 @@ export const ModalForm = <T extends FieldValues>({
     <ModalPrimitive
       isOpen={isOpen}
       onOpenChange={onOpenChange}
-      classNames={{
-        base: 'overflow-y-auto overflow-x-hidden',
-        header: 'border-b-1 border-default-200 w-full pr-[64px]',
-        body: 'py-6',
-        closeButton: 'top-2.5 right-2.5',
-        footer: 'justify-center w-full',
-      }}
       onClose={() => {
         if (onCancel) {
           onCancel();
         }
       }}
-      closeButton={<CloseButton />}
-      hideCloseButton={isActioning}
       isDismissable={!isActioning}
     >
-      <ModalPrimitiveContent>
+      <ModalPrimitiveContent hideCloseButton={isActioning}>
         <ModalPrimitiveHeader>{title}</ModalPrimitiveHeader>
-        <ModalPrimitiveBody className="w-full">
+        <ModalPrimitiveBody>
           <ManagedForm<T>
             isActioning={isActioning}
             onFormSuccess={handleFormSuccess}

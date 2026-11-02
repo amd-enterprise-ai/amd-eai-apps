@@ -125,15 +125,17 @@ describe('InvitedUsers', () => {
       render(<InvitedUsers project={mockProject} />, { wrapper });
     });
     const addButton = screen.getByLabelText(
-      'settings.membersAndInvitedUsers.invitedUsers.actions.add',
+      'settings.membersAndInvitedUsers.invitedUsers.actions.add.title',
     ) as HTMLInputElement;
 
     await waitFor(() => expect(mockFetchProjects).toBeCalled());
 
     await fireEvent.click(addButton);
 
-    const { getByText } = within(screen.getByTestId('project-select'));
-    expect(getByText('project-1')).toBeInTheDocument();
+    const projectSelect = within(screen.getByTestId('project-select'));
+    expect(projectSelect.getAllByText(mockProject.name).length).toBeGreaterThan(
+      0,
+    );
   });
 });
 
@@ -161,7 +163,7 @@ describe('Invite User button enabled/disabled state', () => {
     });
 
     const inviteButton = screen.getByLabelText(
-      'settings.membersAndInvitedUsers.invitedUsers.actions.add',
+      'settings.membersAndInvitedUsers.invitedUsers.actions.add.title',
     ) as HTMLInputElement;
     await waitFor(() => {
       expect(inviteButton).toBeDisabled();
@@ -177,7 +179,7 @@ describe('Invite User button enabled/disabled state', () => {
       render(<InvitedUsers project={mockProject} />, { wrapper });
     });
     const inviteButton = screen.getByLabelText(
-      'settings.membersAndInvitedUsers.invitedUsers.actions.add',
+      'settings.membersAndInvitedUsers.invitedUsers.actions.add.title',
     ) as HTMLInputElement;
     await waitFor(() => {
       expect(inviteButton).toBeEnabled();
@@ -190,7 +192,7 @@ describe('Invite User button enabled/disabled state', () => {
       render(<InvitedUsers project={mockProject} />, { wrapper });
     });
     const inviteButton = screen.getByLabelText(
-      'settings.membersAndInvitedUsers.invitedUsers.actions.add',
+      'settings.membersAndInvitedUsers.invitedUsers.actions.add.title',
     ) as HTMLInputElement;
     await waitFor(() => {
       expect(inviteButton).toBeEnabled();

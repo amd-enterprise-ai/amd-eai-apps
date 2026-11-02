@@ -3,21 +3,27 @@
 # SPDX-License-Identifier: MIT
 
 from contextlib import asynccontextmanager
+from pathlib import Path
+from uuid import UUID
 
 import yaml
 from loguru import logger
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_common.database import get_session
 from workloads_manager.core.workloads import get_registerable_workloads
 from workloads_manager.models import OverlayData
 
-from ..overlays.repository import list_overlays
+from ..overlays.repository import delete_overlays_absent_from_chart, list_overlays
 from ..overlays.schemas import OverlayUpdate
 from ..overlays.service import create_overlay, update_overlay
 from .repository import create_chart, select_chart, update_chart
 from .schemas import ChartCreate, ChartUpdate
 
 session_ctx = asynccontextmanager(get_session)
+
+# Marks rows this registration pass owns, so pruning never removes API-authored overlays.
+REGISTRATION_CREATOR = "system"
 
 
 async def register_workloads() -> None:
@@ -48,52 +54,69 @@ async def register_workloads() -> None:
                 if chart:
                     updated += 1
                     schema = ChartUpdate(**form_data)
-                    chart = await update_chart(session, chart_id=chart.id, update_schema=schema, creator="system")
-                    pass
+                    chart = await update_chart(
+                        session, chart_id=chart.id, update_schema=schema, creator=REGISTRATION_CREATOR
+                    )
                 else:
                     created += 1
                     schema = ChartCreate(**form_data)
-                    chart = await create_chart(session, chart_schema=schema, creator="system")
-                    pass
-                # Register workload files
-                overlay_files = workload.get_overlay_files()
-                for file_path, rel_path_str in overlay_files:
-                    content = file_path.read_text(encoding="utf-8")
-                    canonical_name = None
-                    raw_data = yaml.safe_load(content)
-                    if raw_data and isinstance(raw_data, dict):
-                        overlay_data = OverlayData(**raw_data)
-                        canonical_name = overlay_data.canonical_name
-                    # Find existing overlay by chart_id AND canonical_name
-                    existing_overlays = await list_overlays(
-                        session=session, chart_id=chart.id, canonical_name=canonical_name
-                    )
-                    overlay_schema = {"chart_id": chart.id}
-                    if raw_data:
-                        overlay_schema["overlay"] = raw_data
-                    if existing_overlays:
-                        # Update the existing overlay with matching canonical_name
-                        overlay = existing_overlays[0]  # Should only be one due to unique constraint
-                        await update_overlay(
-                            session=session,
-                            overlay_id=overlay.id,
-                            overlay_update=OverlayUpdate(**overlay_schema, updated_by="system"),
-                        )
-                    else:
-                        if not raw_data:
-                            raise ValueError("Overlay data is required for creating an overlay.")
-                        await create_overlay(
-                            session=session,
-                            chart_id=chart.id,
-                            overlay_data=raw_data,
-                            canonical_name=canonical_name,
-                            creator="system",
-                        )
+                    chart = await create_chart(session, chart_schema=schema, creator=REGISTRATION_CREATOR)
+
+                registered_ids = [
+                    await register_overlay(session, chart_id=chart.id, file_path=file_path)
+                    for file_path, _rel_path_str in workload.get_overlay_files()
+                ]
+                # Finding no recipe files is ambiguous: the chart may ship none, or the overlay
+                # directories may never have been read (ALLOWED_CHART_PATHS carrying no
+                # `overrides/` entry, a missing chart checkout). Both look identical here, and
+                # pruning on the second reading deletes the chart's entire registered catalog.
+                if not registered_ids:
+                    continue
+                pruned_ids = await delete_overlays_absent_from_chart(
+                    session, chart_id=chart.id, keep_ids=registered_ids, creator=REGISTRATION_CREATOR
+                )
+                if pruned_ids:
+                    logger.info(f"Pruned {len(pruned_ids)} overlays no longer shipped by '{workload.chart_name}'.")
             logger.info(f"Registration complete: {created} created, {updated} updated")
         except Exception as e:
             await session.rollback()
             logger.exception("Registration failed")
             raise e
+
+
+async def register_overlay(session: AsyncSession, chart_id: UUID, file_path: Path) -> UUID:
+    """Create or refresh the overlay row backing a single recipe file, returning its ID."""
+    raw_data = yaml.safe_load(file_path.read_text(encoding="utf-8"))
+    canonical_name = OverlayData(**raw_data).canonical_name if raw_data and isinstance(raw_data, dict) else None
+
+    # list_overlays returns every overlay for the chart when canonical_name is None, so filter
+    # explicitly: a generic file must never adopt an unrelated canonical-named overlay's row.
+    existing_overlays = [
+        overlay
+        for overlay in await list_overlays(session=session, chart_id=chart_id, canonical_name=canonical_name)
+        if overlay.canonical_name == canonical_name
+    ]
+    overlay_schema: dict = {"chart_id": chart_id}
+    if raw_data:
+        overlay_schema["overlay"] = raw_data
+
+    if existing_overlays:
+        overlay = await update_overlay(
+            session=session,
+            overlay_id=existing_overlays[0].id,
+            overlay_update=OverlayUpdate(**overlay_schema, updated_by=REGISTRATION_CREATOR),
+        )
+    else:
+        if not raw_data:
+            raise ValueError("Overlay data is required for creating an overlay.")
+        overlay = await create_overlay(
+            session=session,
+            chart_id=chart_id,
+            overlay_data=raw_data,
+            canonical_name=canonical_name,
+            creator=REGISTRATION_CREATOR,
+        )
+    return overlay.id
 
 
 def normalize_api_files(files: dict) -> dict[str, str]:

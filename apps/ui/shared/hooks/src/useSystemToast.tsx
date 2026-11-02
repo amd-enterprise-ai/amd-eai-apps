@@ -2,36 +2,33 @@
 //
 // SPDX-License-Identifier: MIT
 
-import {
-  IconAlertTriangle,
-  IconCircleCheck,
-  IconInfoCircle,
-} from '@tabler/icons-react';
+import { toast as heroToast } from '@heroui/react';
 import { ReactNode } from 'react';
-import { ToastOptions, toast } from 'react-toastify';
 
 import { APIRequestError } from '@amdenterpriseai/utils/app';
 
 import { ErrorToast } from './ErrorToast';
 
+const TOAST_TIMEOUT_MS = 5000;
+
+type SystemToastOptions = Parameters<typeof heroToast>[1];
+
 export const useSystemToast = () => {
-  const _toast = (
+  const toast = (
     toastContent: ReactNode | string,
-    toastOptions: ToastOptions<unknown> | undefined,
+    toastOptions?: SystemToastOptions,
   ) => {
-    toast(toastContent, toastOptions);
+    return heroToast(toastContent, {
+      timeout: TOAST_TIMEOUT_MS,
+      ...toastOptions,
+    });
   };
 
-  /** Error toast **/
-  const errorIcon = () => <IconAlertTriangle className="text-danger" />;
-
-  const errorStyle = {
-    background: 'var(--toastify-background-error)',
-    color: 'var(--toastify-text-error)',
-    lineHeight: '1.3',
+  toast.close = (key: string) => {
+    heroToast.close(key);
   };
 
-  _toast.error = (
+  toast.error = (
     toastContent: ReactNode | string,
     error?: APIRequestError | Error,
   ) => {
@@ -42,43 +39,31 @@ export const useSystemToast = () => {
     // (e.g. a LinkToast) is shown without a copy affordance.
     const copyText = typeof message === 'string' ? message : undefined;
 
-    toast.error(<ErrorToast content={message} copyText={copyText} />, {
-      icon: errorIcon,
-      style: errorStyle,
+    heroToast.danger(<ErrorToast content={message} copyText={copyText} />, {
+      timeout: TOAST_TIMEOUT_MS,
     });
   };
 
-  _toast.info = (toastContent: ReactNode | string) => {
-    toast.info(toastContent, {
-      icon: <IconInfoCircle className="text-primary" />,
-      style: {
-        lineHeight: '1.3',
-      },
-    });
+  toast.info = (toastContent: ReactNode | string) => {
+    heroToast.info(toastContent, { timeout: TOAST_TIMEOUT_MS });
   };
 
-  _toast.warning = (toastContent: ReactNode | string) => {
-    toast.warning(toastContent, {
-      icon: <IconAlertTriangle className="text-warning" />,
-      style: {
-        background: 'var(--toastify-background-warning)',
-        color: 'var(--toastify-text-warning)',
-        lineHeight: '1.3',
-      },
-    });
+  toast.warning = (toastContent: ReactNode | string) => {
+    heroToast.warning(toastContent, { timeout: TOAST_TIMEOUT_MS });
   };
 
-  _toast.success = (toastContent: ReactNode | string) => {
-    toast.success(toastContent, {
-      icon: <IconCircleCheck className="text-success" />,
-      style: {
-        lineHeight: '1.3',
-      },
+  toast.success = (
+    toastContent: ReactNode | string,
+    toastOptions?: Omit<SystemToastOptions, 'variant'>,
+  ) => {
+    heroToast.success(toastContent, {
+      timeout: TOAST_TIMEOUT_MS,
+      ...toastOptions,
     });
   };
 
   return {
-    toast: _toast,
+    toast,
   };
 };
 

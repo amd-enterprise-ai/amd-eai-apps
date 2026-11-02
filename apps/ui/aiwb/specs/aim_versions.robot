@@ -79,8 +79,8 @@ Actions menu shows deployment version info
     Then actions menu should be visible
     And actions menu should show version info
 
-Deploy drawer includes AIM version selector
-    [Documentation]    Verify that the deployment drawer includes a version selector
+Deploy wizard includes AIM version selector
+    [Documentation]    Verify that the deployment wizard includes a version selector
     ...                allowing the user to choose which AIM version to deploy.
     [Tags]    ui    aims    versions    deploy
 
@@ -89,12 +89,12 @@ Deploy drawer includes AIM version selector
     And user is logged in
     And project "${TEST_PROJECT}[name]" is selected
     And user is on models page
-    When user opens deploy drawer for "${TEST_AIM_DISPLAY_NAME}"
-    Then deploy drawer should be open
-    And version selector should be visible in deploy drawer
+    When user opens deploy wizard for "${TEST_AIM_DISPLAY_NAME}"
+    Then deploy wizard should be open
+    And version selector should be visible in deploy wizard
 
-Deploy drawer defaults to latest AIM version
-    [Documentation]    Verify that when opening the deploy drawer, the version selector
+Deploy wizard defaults to latest AIM version
+    [Documentation]    Verify that when opening the deploy wizard, the version selector
     ...                defaults to the latest available version.
     [Tags]    ui    aims    versions    deploy    selection
 
@@ -103,6 +103,6 @@ Deploy drawer defaults to latest AIM version
     And user is logged in
     And project "${TEST_PROJECT}[name]" is selected
     And user is on models page
-    When user opens deploy drawer for "${TEST_AIM_DISPLAY_NAME}"
-    Then deploy drawer should be open
+    When user opens deploy wizard for "${TEST_AIM_DISPLAY_NAME}"
+    Then deploy wizard should be open
     And selected version should contain "Latest"

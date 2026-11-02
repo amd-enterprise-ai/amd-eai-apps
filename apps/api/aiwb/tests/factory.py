@@ -23,9 +23,11 @@ from fastapi import UploadFile
 from kubernetes_asyncio.client import V1Namespace
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.aims.constants import AIM_MODEL_LABEL, PROFILE_ORIGIN_AIWB, PROFILE_ORIGIN_LABEL
 from app.aims.crds import (
     AIMModelResource,
     AIMProfileResource,
+    AIMProfileSetResource,
     AIMServiceResource,
     AIMServiceSpec,
     AIMServiceStatusFields,
@@ -394,6 +396,37 @@ def make_aim_cluster_profile(
     )
 
 
+def make_aim_profile_set(
+    name: str = "llama3-8b-profiles-abc123",
+    model_name: str = "llama3-8b",
+    namespace: str = "test-namespace",
+    is_aiwb_authored: bool = False,
+    base_model_name: str = "aim-base",
+    extra_spec: dict[str, Any] | None = None,
+) -> AIMProfileSetResource:
+    """Create an AIMProfileSetResource for testing.
+
+    ``is_aiwb_authored=False`` (default) yields a Default set — the engine's
+    auto-created set carries the model.name label but not the AIWB origin label.
+    """
+    labels = {AIM_MODEL_LABEL: model_name}
+    if is_aiwb_authored:
+        labels[PROFILE_ORIGIN_LABEL] = PROFILE_ORIGIN_AIWB
+    spec: dict[str, Any] = {
+        "selector": {"role": "base", "modelRef": {"name": base_model_name, "scope": "Namespace"}},
+        "overrides": {"aimId": "org/model", "modelId": "org/model"},
+        "versionPolicy": "all",
+    }
+    if extra_spec:
+        spec.update(extra_spec)
+    return AIMProfileSetResource.model_validate(
+        {
+            "metadata": {"name": name, "namespace": namespace, "labels": labels},
+            "spec": spec,
+        }
+    )
+
+
 def make_httproute(
     name: str = "test-route",
     namespace: str = "test-namespace",
@@ -486,11 +519,10 @@ async def create_api_key(
     display_name: str = "test-api-key",
     namespace: str = "test-namespace",
     truncated_key: str = "aiwb_api_key_••••••••1234",
-    cluster_auth_key_id: str | None = None,
     created_by: str = "test@example.com",
 ) -> ApiKey:
     """
-    Create a test API key.
+    Create a test API key (OpenBao/ESO store path — no cluster-auth).
 
     Args:
         session: Database session
@@ -498,36 +530,20 @@ async def create_api_key(
         display_name: Human-readable name for the key
         namespace: Namespace the key belongs to
         truncated_key: Truncated key for display
-        cluster_auth_key_id: Cluster Auth accessor ID. IMPORTANT: This has a unique
-            constraint in the database. If None, a unique value is auto-generated
-            using UUID. When creating multiple keys in a test, either:
-            1. Let it auto-generate (default, recommended)
-            2. Provide explicit unique values (e.g., "key-1", "key-2")
         created_by: Email of the user creating the key
 
     Returns:
         The created ApiKey instance
 
     Example:
-        # Auto-generate unique cluster_auth_key_id (recommended)
         key1 = await create_api_key(session, display_name="Key 1")
         key2 = await create_api_key(session, display_name="Key 2")
-
-        # Or be explicit about unique values
-        key1 = await create_api_key(session, cluster_auth_key_id="explicit-id-1")
-        key2 = await create_api_key(session, cluster_auth_key_id="explicit-id-2")
     """
-    # Auto-generate unique cluster_auth_key_id to avoid constraint violations
-    # when creating multiple keys in a single test
-    if cluster_auth_key_id is None:
-        cluster_auth_key_id = f"cluster-auth-{uuid4()}"
-
     api_key = ApiKey(
         id=id or uuid4(),
         display_name=display_name,
         namespace=namespace,
         truncated_key=truncated_key,
-        cluster_auth_key_id=cluster_auth_key_id,
         created_by=created_by,
         updated_by=created_by,
     )
@@ -879,8 +895,10 @@ def make_workload_mock(
     mock.namespace = namespace
     mock.type = workload_type
     mock.status = status
+    mock.annotations = {}
     mock.chart_id = chart_id or uuid4()
     mock.dataset_id = dataset_id
+    mock.dataset_refs = []
     mock.created_by = created_by
     mock.updated_by = created_by
     mock.manifest = manifest

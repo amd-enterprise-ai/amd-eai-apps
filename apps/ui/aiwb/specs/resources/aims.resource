@@ -10,6 +10,10 @@ Documentation       BDD keywords for AIM UI features.
 ...                 Layer: Feature (tests import this, NOT page resources directly)
 Resource            common/session.resource
 Resource            pages/models_page.resource
+Resource            resources/aiwb_adapter_serving.resource
+Resource            resources/aiwb_aims.resource
+Resource            resources/aiwb_secrets.resource
+Library             TestPrefix
 
 
 *** Variables ***
@@ -33,11 +37,30 @@ User is on deployed models page
 
     Navigate to deployed models page    ${UI_BASE_URL}    ${TEST_PROJECT}[name]
 
+An image pull secret "${name}" exists in the project
+    [Documentation]    Creates an image pull secret via the AIWB API.
+    ...                Sets: TEST_AIWB_SECRET_NAME (display name), TEST_AIWB_SECRET_K8S_NAME
+
+    A secret "${name}" with use case "ImagePullSecret" is created via AIWB
+
 # =============================================================================
 # When keywords (actions)
 # =============================================================================
 
-User opens deploy drawer for "${aim_name}"
+User deploys "${aim_name}" with image pull secret "${secret_name}"
+    [Documentation]    Deploys the model through the catalog wizard, choosing the image pull
+    ...                secret by the display name the user gave it, and tracks the deployment
+    ...                for cleanup.
+    ...                Requires: TEST_AIM_NAME. Sets: TEST_AIM_ID, TEST_DEPLOYED_SERVICE_NAME
+
+    Click deploy button on card    ${aim_name}
+    Wait for deploy wizard
+    ${display_name}=    Test Name    ${secret_name}
+    Select deploy wizard image pull secret    ${display_name}
+    Advance deploy wizard to review and submit
+    The deployment created through the wizard is tracked
+
+User opens deploy wizard for "${aim_name}"
     [Documentation]    Clicks the Deploy button on a specific AIM card.
 
     Click deploy button on card    ${aim_name}
@@ -48,9 +71,9 @@ User opens actions menu for "${aim_name}"
     Click actions menu button on card    ${aim_name}
 
 User views deployed models
-    [Documentation]    Switches to the Deployed Models tab on the models page.
+    [Documentation]    Navigates to the Deployed Models page.
 
-    Click deployed models tab
+    Navigate to deployed models page    ${UI_BASE_URL}    ${TEST_PROJECT}[name]
 
 User searches for "${search_text}" in catalog
     [Documentation]    Enters a search term in the catalog search filter.
@@ -66,38 +89,56 @@ User filters catalog by accelerator "${label}"
     Select accelerator filter option "${label}"
     Close accelerator filter
 
-User expands advanced profile parameters in the deploy drawer
-    [Documentation]    Expands the deploy drawer's advanced profile parameters section,
-    ...                where partitioned-cluster runtime overrides (precision, accelerator,
-    ...                count) are set.
+User expands advanced profile parameters in the deploy wizard
+    [Documentation]    Navigates to the performance step and expands advanced profile parameters.
 
+    Click deploy wizard next
     Expand advanced profile parameters
 
 User selects deploy precision override "${precision}"
-    [Documentation]    Picks a precision in the advanced override section of the deploy drawer.
+    [Documentation]    Picks a precision in the advanced override section of the deploy wizard.
 
     Select deploy precision override    ${precision}
+
+User completes the performance step in the deploy wizard
+    [Documentation]    Advances the deploy wizard past the Target (performance) step so
+    ...                its collapsed summary is rendered.
+
+    Click deploy wizard next
 
 # =============================================================================
 # Then keywords (verification)
 # =============================================================================
 
-Deploy drawer should be open
-    [Documentation]    Verifies the Deploy AIM drawer is visible.
+Deploy wizard should be open
+    [Documentation]    Verifies the Deploy AIM wizard is visible.
 
-    Wait for deploy drawer
+    Wait for deploy wizard
 
-Version selector should be visible in deploy drawer
-    [Documentation]    Verifies the version selector dropdown is present in the deploy drawer.
+The deployed model should use the selected image pull secret
+    [Documentation]    Verifies the running model was given the registry credential the user
+    ...                picked, identified by its Kubernetes name rather than its display name.
+    ...                Requires: TEST_AIM_ID, TEST_AIWB_SECRET_K8S_NAME
+
+    The running inference pod should use image pull secret "${TEST_AIWB_SECRET_K8S_NAME}"
+
+Version selector should be visible in deploy wizard
+    [Documentation]    Verifies the version selector dropdown is present in the deploy wizard.
 
     ${text}=    Get version selector text
     Should Not Be Empty    ${text}
 
-The deploy drawer should offer advanced profile overrides
-    [Documentation]    Verifies the deploy drawer's advanced section surfaces the runtime
+The deploy wizard should offer advanced profile overrides
+    [Documentation]    Verifies the deploy wizard's advanced section surfaces the runtime
     ...                override fields (precision select) used for partitioned-cluster deploys.
 
     Advanced profile parameters should be visible
+
+The deployment summary should show an unoptimized profile warning
+    [Documentation]    Verifies the collapsed Target step summary warns the user that
+    ...                no optimized profile is available for the current selection.
+
+    Target step summary should show unoptimized profile warning
 
 Selected version should contain "${text}"
     [Documentation]    Verifies the selected version text contains the expected value.
@@ -159,17 +200,16 @@ AIM card "${aim_name}" should show metadata
     ${length}=    Get Length    ${text}
     Should Be True    ${length} > 20    msg=AIM card should display meaningful metadata
 
-Deploy drawer should show model info for "${aim_name}"
-    [Documentation]    Verifies the deploy drawer shows model title and deployment settings.
+Deploy wizard should show model info for "${aim_name}"
+    [Documentation]    Verifies the deploy wizard shows the model title.
 
-    Deploy drawer should show model title    ${aim_name}
-    Deploy drawer should show deployment settings
+    Deploy wizard should show model title    ${aim_name}
 
-Deploy drawer should show version and settings
-    [Documentation]    Verifies the deploy drawer contains version selector and deployment settings.
+Deploy wizard should show version and steps
+    [Documentation]    Verifies the deploy wizard contains the version selector and deployment steps.
 
-    Version selector should be visible in deploy drawer
-    Deploy drawer should show deployment settings
+    Version selector should be visible in deploy wizard
+    Deploy wizard steps should be visible
 
 Unsupported models should be visually distinguished
     [Documentation]    Verifies that any unsupported models have the unsupported banner.
@@ -186,16 +226,16 @@ Deployed models table should have entries
 
 Deployed model should be listed by its display name
     [Documentation]    Verifies the Deployed Models page presents the model by its
-    ...                user-facing display name rather than an internal identifier,
-    ...                matching what the dashboard workloads table shows.
-    ...                Requires: TEST_AIM_DISPLAY_NAME and TEST_AIM_NAME set by "AIM is deployed".
+    ...                user-facing deployment label rather than an internal identifier,
+    ...                matching what the dashboard workloads table shows for a no-custom deployment.
+    ...                Requires: TEST_AIM_CANONICAL_NAME and TEST_AIM_NAME set by "AIM is deployed".
 
-    ${row_text}=    Get deployed model row text    ${TEST_AIM_DISPLAY_NAME}
-    Should Contain    ${row_text}    ${TEST_AIM_DISPLAY_NAME}
-    ...    msg=Deployed Models page should show the model display name '${TEST_AIM_DISPLAY_NAME}'
+    ${row_text}=    Get deployed model row text    ${TEST_AIM_CANONICAL_NAME}
+    Should Contain    ${row_text}    ${TEST_AIM_CANONICAL_NAME}
+    ...    msg=Deployed Models page should show the deployment label '${TEST_AIM_CANONICAL_NAME}'
     # Only assert the internal identifier is hidden when it actually differs from the
-    # display name; some AIMs legitimately use their resource name as the display name.
-    IF    '${TEST_AIM_NAME}' != '${TEST_AIM_DISPLAY_NAME}'
+    # canonical fallback; some AIMs legitimately use their resource name as the canonical name.
+    IF    '${TEST_AIM_NAME}' != '${TEST_AIM_CANONICAL_NAME}'
         Should Not Contain    ${row_text}    ${TEST_AIM_NAME}
         ...    msg=Deployed Models page should not expose the internal identifier '${TEST_AIM_NAME}'
     END

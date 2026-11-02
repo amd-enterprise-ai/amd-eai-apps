@@ -150,7 +150,7 @@ Secret "${name}" should show type "${expected_type}"
     ...    msg=Expected type "${expected_type}" for secret "${name}", but got "${type}"
 
 The project count for the secret is updated
-    [Documentation]    Verifies the Assigned To column for the secret shows a project assignment.
+    [Documentation]    Verifies the Assigned to column for the secret shows a project assignment.
     ...                Expects ${TEST_SECRET_NAME} to be set.
     Wait Until Keyword Succeeds    30s    3s
     ...    Verify secret assignment is visible    ${TEST_SECRET_NAME}
@@ -163,7 +163,7 @@ Verify secret assignment is visible
     Should Not Be Equal    ${assigned}    —
     ...    msg=Secret ${secret_name} should have a project assignment but shows dash
     Should Not Be Empty    ${assigned}
-    ...    msg=Secret ${secret_name} Assigned To column is empty
+    ...    msg=Secret ${secret_name} Assigned to column is empty
     Log    Secret ${secret_name} is assigned to: ${assigned}    INFO
 
 The secrets table should only show secrets matching "${search_text}"
@@ -206,7 +206,7 @@ The kubectl secret name
 Verify secrets table has expected columns
     [Documentation]    Verifies the secrets table header contains the expected column names.
     ${headers}=    Get secrets table column headers
-    ${expected}=    Create List    Name    Type    Use Case    Status    Scope    Assigned To    Updated At
+    ${expected}=    Create List    Name    Type    Use case    Status    Scope    Assigned to    Updated at
     FOR    ${col}    IN    @{expected}
         List Should Contain Value    ${headers}    ${col}
         ...    msg=Expected column "${col}" not found in table headers: ${headers}

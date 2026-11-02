@@ -23,17 +23,26 @@ import {
 import { deleteWorkspace } from '@/lib/app/workloads';
 import { cancelFineTuningJob } from '@/lib/app/models';
 
-import { ResourceType } from '@/types/enums/workloads';
-import { WorkloadType } from '@amdenterpriseai/types';
-import { WorkloadStatus } from '@/types/enums/workloads';
-import type { ResourceMetrics } from '@/types/projects';
-import { AIM_CANONICAL_NAME_ANNOTATION, AIMServiceStatus } from '@/types/aims';
+import type { EnrichedWorkloadMetrics } from '@/types/projects';
+import {
+  AIM_CANONICAL_NAME_ANNOTATION,
+  NAMESPACE_AIM_MODEL_LABEL,
+} from '@/types/aims';
 import type { AIMService } from '@/types/aims';
-
-import { NamespaceWorkloadsTable } from '@/components/features/projects/NamespaceWorkloadsTable';
 
 import wrapper from '@/__tests__/ProviderWrapper';
 import { Mock, vi } from 'vitest';
+
+const mockUseCustomProfileDeployments = vi.hoisted(() =>
+  vi.fn(() => ({
+    profileByServiceId: new Map(),
+    isLoading: false,
+  })),
+);
+
+vi.mock('@/hooks/useCustomProfileDeployments', () => ({
+  useCustomProfileDeployments: mockUseCustomProfileDeployments,
+}));
 
 vi.mock('@/lib/app/projects', async (importOriginal) => {
   return {
@@ -61,6 +70,8 @@ vi.mock('@/lib/app/inference', () => ({
   deleteInferenceDeployment: vi.fn(),
 }));
 
+import { NamespaceWorkloadsTable } from '@/components/features/projects/NamespaceWorkloadsTable';
+
 const mockPush = vi.fn();
 vi.mock('next/router', () => ({
   useRouter: () => ({
@@ -82,10 +93,16 @@ vi.mock('@amdenterpriseai/hooks', async (importOriginal) => ({
   }),
 }));
 
+// Special-cases the max-rank key so tests can assert on the interpolated
+// rank; every other key keeps the plain passthrough the rest of this suite
+// already relies on.
 vi.mock('next-i18next', () => ({
   Trans: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string, opts?: { rank?: number }) =>
+      key === 'profileSummary.maxRank'
+        ? `profileSummary.maxRank:${opts?.rank}`
+        : key,
     i18n: { language: 'en' },
   }),
 }));
@@ -104,13 +121,13 @@ vi.mock('@tabler/icons-react', async (importOriginal) => {
 });
 
 const createMockResourceMetrics = (
-  overrides: Partial<ResourceMetrics> = {},
-): ResourceMetrics => ({
+  overrides: Partial<EnrichedWorkloadMetrics> = {},
+): EnrichedWorkloadMetrics => ({
   id: 'workload-1',
   name: 'workload-1',
   displayName: 'Test Workload',
-  type: WorkloadType.INFERENCE,
-  status: WorkloadStatus.RUNNING,
+  type: 'INFERENCE',
+  status: 'Running',
   gpuCount: 1,
   templateGpuCount: null,
   gpu: null,
@@ -120,7 +137,7 @@ const createMockResourceMetrics = (
   vram: 2 * 1024 * 1024 * 1024,
   createdAt: '2024-01-01T00:00:00Z',
   createdBy: 'test-user',
-  resourceType: ResourceType.DEPLOYMENT,
+  resourceType: 'Deployment',
   ...overrides,
 });
 
@@ -129,12 +146,12 @@ const mockNamespaceMetricsResponse = {
     createMockResourceMetrics({
       id: 'workload-1',
       displayName: 'Regular Workload',
-      resourceType: ResourceType.DEPLOYMENT,
+      resourceType: 'Deployment',
     }),
     createMockResourceMetrics({
       id: 'aim-service-1',
       displayName: 'AIM Service',
-      resourceType: ResourceType.AIM_SERVICE,
+      resourceType: 'AIMService',
     }),
   ],
   pagination: { page: 1, pageSize: 20, total: 2 },
@@ -151,6 +168,10 @@ describe('NamespaceWorkloadsTable', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseCustomProfileDeployments.mockReturnValue({
+      profileByServiceId: new Map(),
+      isLoading: false,
+    });
     mockFetchNamespaceMetrics.mockResolvedValue(mockNamespaceMetricsResponse);
     mockListInferenceDeployments.mockResolvedValue([]);
     // Default: per-name catalog lookups 404. Tests that exercise cluster-catalog
@@ -305,6 +326,80 @@ describe('NamespaceWorkloadsTable', () => {
     });
   });
 
+  it('suppresses chat and uses the transcription snippet for a transcription AIM row', async () => {
+    const whisperService: AIMService = {
+      id: 'aim-service-1',
+      metadata: {
+        name: 'whisper-service',
+        namespace: 'test-ns',
+        uid: 'uid-whisper',
+        labels: {},
+        annotations: {},
+        creationTimestamp: '2024-01-01T00:00:00Z',
+        ownerReferences: [],
+      },
+      spec: {
+        model: { name: 'whisper' },
+        replicas: 1,
+        runtimeConfigName: 'default',
+      },
+      status: { status: 'Running', resolvedModel: { name: 'whisper' } },
+      statusValue: '',
+      endpoints: {
+        external: 'https://whisper.example.com',
+        internal: 'http://whisper.test-ns.svc.cluster.local',
+      },
+    };
+    mockGetInferenceModel.mockRejectedValue(
+      new APIRequestError('not found', 404),
+    );
+    mockListInferenceDeployments.mockResolvedValue([whisperService]);
+    // The catalog model backing this row advertises a transcription tag.
+    mockResolveAIMServiceDisplay.mockImplementation(() => ({
+      canonicalName: 'openai/whisper-large-v3',
+      imageVersion: '1.0',
+      metric: 'default',
+      title: 'Whisper',
+      name: 'whisper',
+      tags: ['transcription'],
+    }));
+
+    await act(async () => {
+      render(<NamespaceWorkloadsTable namespace="test-ns" />, { wrapper });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('AIM Service')).toBeInTheDocument();
+    });
+
+    const rows = screen.getAllByRole('row');
+    const aimRow = rows.find((r) => r.textContent?.includes('AIM Service'));
+    const trigger = within(aimRow!).getByRole('button', {
+      name: 'list.actions.label',
+    });
+    await act(async () => {
+      fireEvent.click(trigger);
+    });
+
+    // Connect stays available; the chat action is suppressed for transcription.
+    const connectAction = await screen.findByTestId('connect');
+    expect(screen.queryByTestId('chat')).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(connectAction);
+    });
+
+    // The modal receives the transcription capability, so the snippet targets
+    // the audio endpoint and offers no chat playground.
+    await waitFor(() => {
+      expect(document.body).toHaveTextContent('/v1/audio/transcriptions');
+    });
+    expect(document.body).not.toHaveTextContent('/v1/chat/completions');
+    expect(
+      screen.queryByText('actions.connect.modal.openChat'),
+    ).not.toBeInTheDocument();
+  });
+
   it('renders the served model id (status.resolvedModel.name) in the connect snippet', async () => {
     // The served id lives on the AIMService's status.resolvedModel.name and is
     // populated for fine-tuned services too. The connect snippet emits that id
@@ -327,15 +422,13 @@ describe('NamespaceWorkloadsTable', () => {
       spec: {
         model: { name: 'fine-tuned-model-ref' },
         replicas: 1,
-        overrides: {},
-        cacheModel: false,
         runtimeConfigName: 'default',
       },
       status: {
-        status: AIMServiceStatus.RUNNING,
+        status: 'Running',
         resolvedModel: { name: 'fine-tuned-model-ref' },
       },
-      clusterAuthGroupId: null,
+      statusValue: '',
       endpoints: {
         internal: 'http://fine-tuned-service.test-ns.svc.cluster.local',
       },
@@ -502,8 +595,8 @@ describe('NamespaceWorkloadsTable', () => {
         createMockResourceMetrics({
           id: 'workspace-1',
           displayName: 'Workspace Workload',
-          type: WorkloadType.WORKSPACE,
-          resourceType: ResourceType.DEPLOYMENT,
+          type: 'WORKSPACE',
+          resourceType: 'Deployment',
         }),
       ],
       pagination: { page: 1, pageSize: 20, total: 1 },
@@ -581,76 +674,6 @@ describe('NamespaceWorkloadsTable', () => {
     });
   });
 
-  it('does not offer Delete action for MODEL_DOWNLOAD rows', async () => {
-    // MODEL_DOWNLOAD has no owning capability surface, so the row Delete action
-    // must be filtered out instead of routed into the defensive throw.
-    mockFetchNamespaceMetrics.mockResolvedValue({
-      data: [
-        createMockResourceMetrics({
-          id: 'model-download-1',
-          displayName: 'Model Download',
-          type: WorkloadType.MODEL_DOWNLOAD,
-          resourceType: ResourceType.DEPLOYMENT,
-        }),
-      ],
-      pagination: { page: 1, pageSize: 20, total: 1 },
-    });
-
-    await act(async () => {
-      render(<NamespaceWorkloadsTable namespace="test-ns" />, { wrapper });
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('Model Download')).toBeInTheDocument();
-    });
-
-    const row = screen.getByText('Model Download').closest('tr');
-    const trigger = within(row!).getByRole('button', {
-      name: 'list.actions.label',
-    });
-    await act(async () => {
-      fireEvent.click(trigger);
-    });
-
-    // logs is the last action that should still appear; delete must not.
-    await screen.findByTestId('logs');
-    expect(screen.queryByTestId('delete')).not.toBeInTheDocument();
-  });
-
-  it('does not offer Delete action for CUSTOM rows', async () => {
-    // CUSTOM rows reach this table too — same reasoning as MODEL_DOWNLOAD.
-    mockFetchNamespaceMetrics.mockResolvedValue({
-      data: [
-        createMockResourceMetrics({
-          id: 'custom-1',
-          displayName: 'Custom Workload',
-          type: WorkloadType.CUSTOM,
-          resourceType: ResourceType.DEPLOYMENT,
-        }),
-      ],
-      pagination: { page: 1, pageSize: 20, total: 1 },
-    });
-
-    await act(async () => {
-      render(<NamespaceWorkloadsTable namespace="test-ns" />, { wrapper });
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('Custom Workload')).toBeInTheDocument();
-    });
-
-    const row = screen.getByText('Custom Workload').closest('tr');
-    const trigger = within(row!).getByRole('button', {
-      name: 'list.actions.label',
-    });
-    await act(async () => {
-      fireEvent.click(trigger);
-    });
-
-    await screen.findByTestId('logs');
-    expect(screen.queryByTestId('delete')).not.toBeInTheDocument();
-  });
-
   it('calls cancelFineTuningJob when confirming delete for fine-tuning workload', async () => {
     mockCancelFineTuningJob.mockResolvedValue(undefined);
     mockFetchNamespaceMetrics.mockResolvedValue({
@@ -658,8 +681,8 @@ describe('NamespaceWorkloadsTable', () => {
         createMockResourceMetrics({
           id: 'ft-workload-1',
           displayName: 'Fine-tuning Job',
-          type: WorkloadType.FINE_TUNING,
-          resourceType: ResourceType.DEPLOYMENT,
+          type: 'FINE_TUNING',
+          resourceType: 'Deployment',
         }),
       ],
       pagination: { page: 1, pageSize: 20, total: 1 },
@@ -710,7 +733,7 @@ describe('NamespaceWorkloadsTable', () => {
         createMockResourceMetrics({
           id: 'aim-service-1',
           displayName: 'Fine-tuned AIM',
-          resourceType: ResourceType.AIM_SERVICE,
+          resourceType: 'AIMService',
           createdAt: metricsCreatedAt,
           createdBy: metricsCreatedBy,
         }),
@@ -737,15 +760,13 @@ describe('NamespaceWorkloadsTable', () => {
       spec: {
         model: { name: 'fine-tuned-model-ref' },
         replicas: 1,
-        overrides: {},
-        cacheModel: false,
         runtimeConfigName: 'default',
       },
       status: {
-        status: AIMServiceStatus.RUNNING,
+        status: 'Running',
         resolvedModel: { name: 'fine-tuned-model-ref' },
       },
-      clusterAuthGroupId: null,
+      statusValue: '',
       endpoints: {
         internal: 'http://fine-tuned-service.test-ns.svc.cluster.local',
       },
@@ -785,7 +806,7 @@ describe('NamespaceWorkloadsTable', () => {
           id: 'aim-service-1',
           name: 'cluster-aim-service',
           displayName: 'cluster-aim-service',
-          resourceType: ResourceType.AIM_SERVICE,
+          resourceType: 'AIMService',
         }),
       ],
       pagination: { page: 1, pageSize: 20, total: 1 },
@@ -804,15 +825,13 @@ describe('NamespaceWorkloadsTable', () => {
       spec: {
         model: { name: 'cluster-model' },
         replicas: 1,
-        overrides: {},
-        cacheModel: false,
         runtimeConfigName: 'default',
       },
       status: {
-        status: AIMServiceStatus.RUNNING,
+        status: 'Running',
         resolvedModel: { name: 'cluster-model' },
       },
-      clusterAuthGroupId: null,
+      statusValue: '',
       endpoints: {
         internal: 'http://cluster-aim-service.test-ns.svc.cluster.local',
       },
@@ -852,5 +871,148 @@ describe('NamespaceWorkloadsTable', () => {
       .find((r) => r.textContent?.includes('test/model (1.0)'));
     expect(aimRow).toBeDefined();
     expect(within(aimRow!).getByText('test/model (1.0)')).toBeInTheDocument();
+  });
+
+  it('shows the custom model profile display name beneath the deployment name', async () => {
+    const profileLabel = 'High speed';
+    mockFetchNamespaceMetrics.mockResolvedValue({
+      data: [
+        createMockResourceMetrics({
+          id: 'custom-aim-service-1',
+          name: 'custom-aim-service-1',
+          displayName: 'My Custom Model',
+          resourceType: 'AIMService',
+        }),
+      ],
+      pagination: { page: 1, pageSize: 20, total: 1 },
+    });
+    const customAimService: AIMService = {
+      id: 'custom-aim-service-1',
+      metadata: {
+        name: 'custom-aim-service-1',
+        namespace: 'test-ns',
+        uid: 'uid-custom-1',
+        labels: { [NAMESPACE_AIM_MODEL_LABEL]: 'true' },
+        annotations: {},
+        creationTimestamp: '2024-01-01T00:00:00Z',
+        ownerReferences: [],
+      },
+      spec: {
+        model: { name: 'custom-model-ref' },
+        replicas: 1,
+        runtimeConfigName: 'default',
+      },
+      status: {
+        status: 'Running',
+        resolvedModel: { name: 'custom-model-ref' },
+      },
+      statusValue: '',
+      endpoints: {
+        internal: 'http://custom-aim-service.test-ns.svc.cluster.local',
+      },
+    };
+    mockListInferenceDeployments.mockResolvedValue([customAimService]);
+    mockUseCustomProfileDeployments.mockReturnValue({
+      profileByServiceId: new Map([
+        [
+          'custom-aim-service-1',
+          {
+            displayName: profileLabel,
+            profile: {
+              metric: null,
+              gpu: 'MI300X',
+              templateGpuCount: 1,
+              acceleratorType: 'gpu',
+              precision: 'fp16',
+            },
+          },
+        ],
+      ]),
+      isLoading: false,
+    });
+
+    await act(async () => {
+      render(<NamespaceWorkloadsTable namespace="test-ns" />, { wrapper });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('My Custom Model')).toBeInTheDocument();
+      expect(screen.getByText(profileLabel)).toBeInTheDocument();
+    });
+    expect(screen.queryByText('MI300X')).not.toBeInTheDocument();
+  });
+
+  it('shows the deployment max LoRA rank alongside the custom profile display name', async () => {
+    // Custom-profile axes (profileSummaryFields in lib/app/custom-profiles.ts)
+    // never carry maxLoraRank — only the deployment's own spec does — so this
+    // proves the row still composes it in rather than losing it behind the
+    // custom profile.
+    const profileLabel = 'High speed';
+    mockFetchNamespaceMetrics.mockResolvedValue({
+      data: [
+        createMockResourceMetrics({
+          id: 'custom-aim-service-2',
+          name: 'custom-aim-service-2',
+          displayName: 'My Custom Model With Rank',
+          resourceType: 'AIMService',
+        }),
+      ],
+      pagination: { page: 1, pageSize: 20, total: 1 },
+    });
+    const customAimService: AIMService = {
+      id: 'custom-aim-service-2',
+      metadata: {
+        name: 'custom-aim-service-2',
+        namespace: 'test-ns',
+        uid: 'uid-custom-2',
+        labels: { [NAMESPACE_AIM_MODEL_LABEL]: 'true' },
+        annotations: {},
+        creationTimestamp: '2024-01-01T00:00:00Z',
+        ownerReferences: [],
+      },
+      spec: {
+        model: { name: 'custom-model-ref-2' },
+        replicas: 1,
+        runtimeConfigName: 'default',
+        adapterRuntime: { maxRank: 64 },
+      },
+      status: {
+        status: 'Running',
+        resolvedModel: { name: 'custom-model-ref-2' },
+      },
+      statusValue: '',
+      endpoints: {
+        internal: 'http://custom-aim-service-2.test-ns.svc.cluster.local',
+      },
+    };
+    mockListInferenceDeployments.mockResolvedValue([customAimService]);
+    mockUseCustomProfileDeployments.mockReturnValue({
+      profileByServiceId: new Map([
+        [
+          'custom-aim-service-2',
+          {
+            displayName: profileLabel,
+            profile: {
+              metric: null,
+              gpu: 'MI300X',
+              templateGpuCount: 1,
+              acceleratorType: 'gpu',
+              precision: 'fp16',
+            },
+          },
+        ],
+      ]),
+      isLoading: false,
+    });
+
+    await act(async () => {
+      render(<NamespaceWorkloadsTable namespace="test-ns" />, { wrapper });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('My Custom Model With Rank')).toBeInTheDocument();
+      expect(screen.getByText(profileLabel)).toBeInTheDocument();
+    });
+    expect(screen.getByText('profileSummary.maxRank:64')).toBeInTheDocument();
   });
 });

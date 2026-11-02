@@ -14,16 +14,26 @@ Resource            pages/projects_page.resource
 
 
 *** Keywords ***
-Skip the suite if team member is not provisioned
-    [Documentation]    Marks the suite as skipped (with a clear reason) when the
+Require the team member account
+    [Documentation]    Fails the suite, naming the missing prerequisite, when the
     ...    team-member account does not exist in the target environment's Keycloak.
-    ...    Lets the RBAC suite run cleanly against environments without a
-    ...    provisioned team-member user (e.g. int-test) instead of failing during
-    ...    the first browser login.
+    ...
+    ...    Every test below logs in as that account, so its absence is a setup failure
+    ...    rather than a result. Reporting it as a skip is what let a whole RBAC surface
+    ...    disappear into a total that read green: a skipped test is never a pass.
+    ...
+    ...    A run that cannot carry a second password at all -- user passthrough with no
+    ...    explicit override -- is a different thing and still skips: no account is
+    ...    missing there, the run simply cannot log in as one.
+    ${applicable}=    Team Member Is Applicable
+    IF    not ${applicable}
+        ${reason}=    Team Member Not Applicable Reason
+        Skip    ${reason}
+    END
     ${provisioned}=    Team Member Is Provisioned
     IF    not ${provisioned}
-        ${reason}=    Team Member Skip Reason
-        Skip    ${reason}
+        ${reason}=    Team Member Unavailable Reason
+        Fail    ${reason}
     END
 
 A team member user is logged in

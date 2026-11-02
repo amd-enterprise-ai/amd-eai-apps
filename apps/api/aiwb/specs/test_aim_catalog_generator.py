@@ -9,6 +9,10 @@ from pathlib import Path
 
 import pytest
 
+# Aliased, not `from ... import TestSuite`: pytest would try to collect a
+# top-level name starting with "Test" as a test class.
+from robot.running import TestSuite as RobotTestSuite
+
 # Add libraries to path so AimCatalogGenerator is importable
 sys.path.insert(0, str(Path(__file__).parent / "libraries"))
 
@@ -477,3 +481,400 @@ def test_name_filter_file_not_found():
     """FileNotFoundError is raised for non-existent name filter path."""
     with pytest.raises(FileNotFoundError, match="not found"):
         AimCatalogGenerator("/nonexistent/path/models.txt", "full")
+
+
+# -- Dynamic test generation --
+
+
+def test_generated_catalog_tests_keep_the_suite_timeout(api_generator):
+    """Every runtime-generated test gets the catalog suite's 100-minute bound."""
+    api_generator.models = [
+        {
+            "model_name": "org/TestModel",
+            "image_name": "aim-test-model",
+            "docker_image": "registry.example.com/org/aim-test-model:1.0.0",
+            "gpu_count": 1,
+            "requires_hf_token": False,
+            "version": "1.0.0",
+        }
+    ]
+    suite = RobotTestSuite(name="Aim Catalog")
+
+    api_generator._generate_test_cases(suite)
+
+    assert len(suite.tests) == 5
+    assert {test.timeout for test in suite.tests} == {"100 minutes"}
+
+
+# -- start_suite EXCLUDE_TAGS short-circuit --
+
+
+class _MockSuiteData:
+    """Minimal running.TestSuite stand-in for start_suite."""
+
+    def __init__(self, name, variables):
+        self.name = name
+        self.parent = None
+        self.tests = []
+
+        class _Resource:
+            pass
+
+        self._resource = _Resource()
+        self._resource.variables = [_MockVariable(f"${{{k}}}", v) for k, v in variables.items()]
+
+    @property
+    def resource(self):
+        return self._resource
+
+
+def test_start_suite_short_circuits_when_aim_catalog_excluded(api_generator, monkeypatch):
+    """EXCLUDE_TAGS:aim-catalog removes every static test without API discovery.
+
+    Opting out must not call the API (which would raise 'no Ready AIMs' on clusters
+    without them), and must leave the suite genuinely empty — the placeholder has to
+    go too, or an excluded catalog reports a passing test it never ran.
+    """
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("_load_models_from_api must not be called when aim-catalog is excluded")
+
+    monkeypatch.setattr(api_generator, "_load_models_from_api", _boom)
+    monkeypatch.setattr(
+        api_generator,
+        "_get_variable",
+        lambda _suite, name: "aim-catalog" if name == "EXCLUDE_TAGS" else None,
+    )
+    suite = RobotTestSuite.from_file_system(Path(__file__).parent / "aim_catalog.robot")
+
+    api_generator.start_suite(suite, None)
+
+    assert len(suite.tests) == 0
+    assert api_generator.models == []
+
+
+def test_every_static_test_carries_the_aim_catalog_tag():
+    """`--exclude aim-catalog` can only prune the suite if no static test escapes the tag.
+
+    This is a contract, not an implementation detail, and nothing else guards it. RF
+    prunes a suite at build time only when *every* test in it is excluded, so a single
+    static test missing `aim-catalog` silently turns the exclusion into a no-op — the
+    listener fires and runs a full GPU catalog against the cluster instead of skipping
+    it. Asserting over all static tests (rather than just the placeholder) is what makes
+    this catch a newly added test that forgets the tag.
+    """
+    suite = RobotTestSuite.from_file_system(Path(__file__).parent / "aim_catalog.robot")
+
+    assert suite.tests, "aim_catalog.robot must ship at least one static test"
+    untagged = [test.name for test in suite.tests if "aim-catalog" not in [str(tag) for tag in test.tags]]
+    assert not untagged, f"static tests missing the aim-catalog tag: {untagged}"
+
+
+def test_placeholder_keeps_its_control_tag():
+    """`DYNAMIC_TEST_PLACEHOLDER` keeps RF from pruning the suite as empty before the
+    listener runs, and is how `_remove_tests_with_tag` finds the test to drop."""
+    suite = RobotTestSuite.from_file_system(Path(__file__).parent / "aim_catalog.robot")
+
+    placeholders = [t for t in suite.tests if "DYNAMIC_TEST_PLACEHOLDER" in [str(tag) for tag in t.tags]]
+    assert len(placeholders) == 1, f"expected exactly one placeholder test, found {len(placeholders)}"
+
+
+def test_start_suite_non_catalog_suite_is_noop(api_generator, monkeypatch):
+    """For a non-catalog suite the listener does nothing (and never calls the API)."""
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("_load_models_from_api must not be called for a non-catalog suite")
+
+    monkeypatch.setattr(api_generator, "_load_models_from_api", _boom)
+
+    data = _MockSuiteData("Some Other Suite", {})
+    api_generator.start_suite(data, None)
+
+    assert data.tests == []
+
+
+class _FakeResponse:
+    def __init__(self, body):
+        self._body = body
+        self.text = ""
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._body
+
+
+def _aim(image_name, gpu_count):
+    return {
+        "resource_name": image_name,
+        "image_reference": f"registry.example.com/{image_name}:1.0.0",
+        "status_value": "Ready",
+        "status": {
+            "imageMetadata": {
+                "model": {
+                    "canonicalName": f"example/{image_name}",
+                    "recommendedDeployments": [{"gpuCount": gpu_count}],
+                }
+            }
+        },
+    }
+
+
+def test_api_discovery_fetches_all_ready_pages(api_generator, monkeypatch):
+    """A selected AIM remains discoverable when it appears after the first API page."""
+    page_one = [_aim(f"aim-placeholder-{index}", 8) for index in range(100)]
+    selected = _aim("aim-selected-placeholder", 1)
+    calls = []
+
+    def _get(_url, **kwargs):
+        calls.append(kwargs["params"])
+        if kwargs["params"]["page"] == 1:
+            return _FakeResponse({"data": page_one, "pagination": {"page": 1, "pageSize": 100, "total": 101}})
+        return _FakeResponse({"data": [selected], "pagination": {"page": 2, "pageSize": 100, "total": 101}})
+
+    monkeypatch.setattr("requests.get", _get)
+    monkeypatch.setattr(api_generator, "_resolve_api_url", lambda: "https://api.example.test")
+    monkeypatch.setattr(api_generator, "_get_auth_token", lambda: None)
+
+    models = api_generator._load_models_from_api()
+
+    assert [call["page"] for call in calls] == [1, 2]
+    assert all(call["pageSize"] == 100 and call["statusFilter"] == "Ready" for call in calls)
+    assert any(model["image_name"] == "aim-selected-placeholder" for model in models)
+
+
+def test_selected_model_runs_authored_robot_lifecycle(api_generator, monkeypatch):
+    """The selector keeps the executable BDD lifecycle and skips generated tests."""
+    suite_path = Path(__file__).parent / "aim_catalog.robot"
+    suite = RobotTestSuite.from_file_system(suite_path)
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("selected-AIM scenario must resolve its model through Robot keywords")
+
+    monkeypatch.setattr(api_generator, "_load_models_from_api", _boom)
+    monkeypatch.setattr(
+        api_generator,
+        "resolve_ready_aim",
+        lambda _name: {
+            "image_name": "aim-selected-placeholder",
+            "docker_image": "registry.example.com/aim-selected-placeholder:1.0.0",
+            "gpu_count": 1,
+            "requires_hf_token": False,
+        },
+    )
+    monkeypatch.setattr(
+        api_generator,
+        "_get_variable",
+        lambda _suite, name: {
+            "EXCLUDE_TAGS": None,
+            "AIM_CATALOG_MODEL": "aim-selected-placeholder",
+        }.get(name),
+    )
+
+    api_generator.start_suite(suite, None)
+
+    assert [test.name for test in suite.tests] == ["One selected Ready AIM completes its lifecycle"]
+    assert [keyword.name for keyword in suite.tests[0].body] == [
+        "Given a selected Ready AIM from the catalog",
+        "When the selected AIM is deployed",
+        "Then the selected AIM should reach Running state",
+        "And the selected AIM should serve inference",
+        "And the selected AIM should be removed when undeployed",
+    ]
+
+
+def test_selected_listener_publishes_exact_resolved_state(api_generator, monkeypatch):
+    """The selected lifecycle reuses the listener's exact resolved AIM state."""
+    suite = RobotTestSuite.from_file_system(Path(__file__).parent / "aim_catalog.robot")
+    selected = {
+        "aim": _aim("aim-selected-placeholder", 4),
+        "image_name": "aim-selected-placeholder",
+        "docker_image": "registry.example.com/aim-selected-placeholder:2.0.0",
+        "gpu_count": 4,
+        "requires_hf_token": True,
+    }
+    published = {}
+
+    class _BuiltIn:
+        def set_suite_variable(self, name, value):
+            published[name] = value
+
+    monkeypatch.setattr(api_generator, "resolve_ready_aim", lambda _name: selected)
+    monkeypatch.setattr(
+        api_generator,
+        "_get_variable",
+        lambda _suite, name: {
+            "EXCLUDE_TAGS": None,
+            "AIM_CATALOG_MODEL": "aim-selected-placeholder",
+            "INCLUDE_TAGS": None,
+        }.get(name),
+    )
+    monkeypatch.setattr("robot.libraries.BuiltIn.BuiltIn", _BuiltIn)
+
+    api_generator.start_suite(suite, None)
+
+    assert published == {
+        "${SELECTED_AIM_RECORD}": selected["aim"],
+        "${SELECTED_AIM_IMAGE}": selected["docker_image"],
+        "${SELECTED_AIM_HF}": True,
+        "${MAX_GPU_COUNT}": 4,
+    }
+
+
+@pytest.mark.parametrize(
+    ("include_tags", "exclude_tags", "expected_count"),
+    [
+        ("smoke", None, 1),
+        ("model:aim-selected-placeholder", None, 1),
+        ("gpus:4", None, 1),
+        ("version:2.0.0", None, 1),
+        ("requires-hf-token", None, 1),
+        ("metrics", None, 0),
+        ("model:another-aim", None, 0),
+        (None, "lifecycle", 0),
+        (None, "requires-hf-token", 0),
+    ],
+)
+def test_selected_model_applies_variable_tag_filters(
+    api_generator, monkeypatch, include_tags, exclude_tags, expected_count
+):
+    """Selected-model runs honor static and model-derived tag filters."""
+    suite_path = Path(__file__).parent / "aim_catalog.robot"
+    suite = RobotTestSuite.from_file_system(suite_path)
+    monkeypatch.setattr(
+        api_generator,
+        "resolve_ready_aim",
+        lambda _name: {
+            "image_name": "aim-selected-placeholder",
+            "docker_image": "registry.example.com/aim-selected-placeholder:2.0.0",
+            "gpu_count": 4,
+            "requires_hf_token": True,
+        },
+    )
+    monkeypatch.setattr(
+        api_generator,
+        "_get_variable",
+        lambda _suite, name: {
+            "EXCLUDE_TAGS": exclude_tags,
+            "AIM_CATALOG_MODEL": "aim-selected-placeholder",
+            "INCLUDE_TAGS": include_tags,
+        }.get(name),
+    )
+
+    api_generator.start_suite(suite, None)
+
+    assert len(suite.tests) == expected_count
+    if expected_count:
+        assert {
+            "model:aim-selected-placeholder",
+            "gpus:4",
+            "version:2.0.0",
+            "requires-hf-token",
+        }.issubset(set(suite.tests[0].tags))
+
+
+def test_empty_selector_preserves_generated_full_catalog(api_generator, monkeypatch):
+    """Without a selector, the authored opt-in scenario is replaced by catalog tests."""
+    suite_path = Path(__file__).parent / "aim_catalog.robot"
+    suite = RobotTestSuite.from_file_system(suite_path)
+    model = api_generator._map_aim_to_model(_aim("aim-catalog-placeholder", 2))
+
+    monkeypatch.setattr(api_generator, "_load_models_from_api", lambda **_kwargs: [model])
+    monkeypatch.setattr(
+        api_generator,
+        "_get_variable",
+        lambda _suite, name: {
+            "EXCLUDE_TAGS": None,
+            "AIM_CATALOG_MODEL": None,
+            "AIM_CATALOG_FILTER": None,
+            "TEST_MODE": "quick",
+            "INCLUDE_TAGS": None,
+        }.get(name),
+    )
+
+    api_generator.start_suite(suite, None)
+
+    assert [test.name for test in suite.tests] == [
+        "Deploy example/aim-catalog-placeholder",
+        "Verify example/aim-catalog-placeholder reaches Running state",
+        "Undeploy example/aim-catalog-placeholder",
+    ]
+    assert all("SELECTED_AIM_LIFECYCLE" not in test.tags for test in suite.tests)
+
+
+def test_resolve_ready_aim_pages_to_exact_selected_basename(api_generator, monkeypatch):
+    """Resolution reaches page two, ignores prefix collisions, and stops at total."""
+    page_one = [_aim(f"aim-placeholder-{index}", 1) for index in range(99)]
+    page_one.append(_aim("aim-selected-placeholder-large", 8))
+    selected = _aim("aim-selected-placeholder", 2)
+    calls = []
+
+    def _get(_url, **kwargs):
+        calls.append(kwargs["params"])
+        if kwargs["params"]["page"] == 1:
+            return _FakeResponse({"data": page_one, "pagination": {"page": 1, "pageSize": 100, "total": 101}})
+        return _FakeResponse({"data": [selected], "pagination": {"page": 2, "pageSize": 100, "total": 101}})
+
+    monkeypatch.setattr("requests.get", _get)
+    monkeypatch.setattr(api_generator, "_resolve_api_url", lambda: "https://api.example.test")
+    monkeypatch.setattr(api_generator, "_get_auth_token", lambda: None)
+
+    result = api_generator.resolve_ready_aim("registry.example.com/aim-selected-placeholder:1.0.0")
+
+    assert result["aim"] is selected
+    assert result["image_name"] == "aim-selected-placeholder"
+    assert result["docker_image"] == "registry.example.com/aim-selected-placeholder:1.0.0"
+    assert result["gpu_count"] == 2
+    assert [call["page"] for call in calls] == [1, 2]
+
+
+@pytest.mark.parametrize(
+    ("deployments", "expected"),
+    [
+        ([{"num_gpus": 4}], 4),
+        ([{"gpus": 8}], 8),
+        (["invalid", {"gpuCount": "bad"}, {"gpu_count": 0}], 1),
+    ],
+)
+def test_resolve_ready_aim_reuses_robust_gpu_mapping(api_generator, monkeypatch, deployments, expected):
+    """Selected lifecycle metadata uses the generator's established GPU parser."""
+    aim = _aim("aim-selected-placeholder", 1)
+    aim["status"]["imageMetadata"]["model"]["recommendedDeployments"] = deployments
+    monkeypatch.setattr(api_generator, "_fetch_ready_aim_records", lambda: [aim])
+
+    assert api_generator.resolve_ready_aim("aim-selected-placeholder")["gpu_count"] == expected
+
+
+def test_resolve_ready_aim_bare_name_takes_highest_version(api_generator, monkeypatch):
+    """A bare selector follows the catalog's highest-version rule, as discovery does."""
+    first = _aim("aim-selected-placeholder", 1)
+    second = _aim("aim-selected-placeholder", 1)
+    second["image_reference"] = "registry.example.com/aim-selected-placeholder:2.0.0"
+    monkeypatch.setattr(api_generator, "_fetch_ready_aim_records", lambda: [first, second])
+
+    result = api_generator.resolve_ready_aim("aim-selected-placeholder")
+
+    assert result["aim"] is second
+    assert result["docker_image"] == "registry.example.com/aim-selected-placeholder:2.0.0"
+
+
+def test_resolve_ready_aim_pinned_version_selects_that_version(api_generator, monkeypatch):
+    """A tag-pinned selector resolves to exactly that version, never a newer one."""
+    first = _aim("aim-selected-placeholder", 1)
+    second = _aim("aim-selected-placeholder", 1)
+    second["image_reference"] = "registry.example.com/aim-selected-placeholder:2.0.0"
+    monkeypatch.setattr(api_generator, "_fetch_ready_aim_records", lambda: [first, second])
+
+    result = api_generator.resolve_ready_aim("registry.example.com/aim-selected-placeholder:1.0.0")
+
+    assert result["aim"] is first
+    assert result["docker_image"] == "registry.example.com/aim-selected-placeholder:1.0.0"
+
+
+def test_resolve_ready_aim_pinned_missing_version_is_rejected(api_generator, monkeypatch):
+    """A pinned version that is not Ready fails instead of falling back to another."""
+    monkeypatch.setattr(api_generator, "_fetch_ready_aim_records", lambda: [_aim("aim-selected-placeholder", 1)])
+
+    with pytest.raises(RuntimeError, match="not Ready or does not exist"):
+        api_generator.resolve_ready_aim("registry.example.com/aim-selected-placeholder:9.9.9")

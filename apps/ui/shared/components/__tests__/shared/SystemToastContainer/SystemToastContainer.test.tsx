@@ -6,47 +6,41 @@ import { render, screen } from '@testing-library/react';
 
 import { SystemToastContainer } from '@amdenterpriseai/components';
 
-// Mock next-themes useTheme
-vi.mock('next-themes', () => ({
-  useTheme: () => ({ theme: 'light' }),
-}));
+vi.mock('@heroui/react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@heroui/react')>();
 
-// Mock react-toastify ToastContainer
-vi.mock('react-toastify', async () => {
-  const actual = await vi.importActual<any>('react-toastify');
   return {
     ...actual,
-    ToastContainer: (props: any) => (
-      <div data-testid="toast-container" {...props}>
-        {props.closeButton}
-      </div>
-    ),
-    Bounce: 'Bounce',
-  };
-});
-
-vi.mock('@tabler/icons-react', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@tabler/icons-react')>();
-  return {
-    ...actual,
-    IconX: (props: any) => <svg data-testid="icon-x" {...props} />,
+    toastQueue: { getQueue: vi.fn() },
+    Toast: {
+      ...actual.Toast,
+      Provider: ({
+        placement,
+        width,
+        queue,
+      }: {
+        placement: string;
+        width: number;
+        queue: unknown;
+      }) => (
+        <div
+          data-testid="toast-provider"
+          data-placement={placement}
+          data-width={width}
+          data-has-queue={queue ? 'true' : 'false'}
+        />
+      ),
+    },
   };
 });
 
 describe('SystemToastContainer', () => {
-  it('renders ToastContainer with correct props', () => {
+  it('renders Toast.Provider with correct placement and width', () => {
     render(<SystemToastContainer />);
-    const toastContainer = screen.getByTestId('toast-container');
-    expect(toastContainer).toBeInTheDocument();
-    expect(toastContainer).toHaveAttribute('position', 'top-right');
-    expect(toastContainer).toHaveAttribute('autoClose', '5000');
-    expect(toastContainer).toHaveAttribute('draggable');
-    expect(toastContainer).toHaveAttribute('transition', 'Bounce');
-    expect(toastContainer).toHaveAttribute('theme', 'light');
-  });
-
-  it('renders custom close button', () => {
-    render(<SystemToastContainer />);
-    expect(screen.getByTestId('icon-x')).toBeInTheDocument();
+    const toastProvider = screen.getByTestId('toast-provider');
+    expect(toastProvider).toBeInTheDocument();
+    expect(toastProvider).toHaveAttribute('data-placement', 'top end');
+    expect(toastProvider).toHaveAttribute('data-width', '460');
+    expect(toastProvider).toHaveAttribute('data-has-queue', 'true');
   });
 });

@@ -41,6 +41,15 @@ Dashboard displays GPU utilization charts
     And GPU device utilization chart should be displayed
     And time range selector should offer expected options
 
+Shared component labels on the dashboard show readable text
+    [Documentation]    Verify that shared chart controls show human-readable labels
+    ...                instead of untranslated key strings.
+    [Tags]    ui    airm    dashboard    i18n    shared-components    smoke
+
+    Given an admin user is logged in
+    And the user is on the dashboard
+    Then the chart time range control should be labeled for selection
+
 Dashboard shows per-project resource consumption
     [Documentation]    Verify that the consumption-by-project table displays project names
     ...                with GPU allocation, utilization, and workload counts.

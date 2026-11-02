@@ -2,9 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-import type { Workload } from './workloads';
-import { AIMService } from './aims';
-
 export interface TextContent {
   type: 'text';
   text: string;
@@ -21,11 +18,9 @@ export interface ImageUrlContent {
 export type ContentItem = TextContent | ImageUrlContent;
 
 export interface Message {
-  role: Role;
+  role: 'assistant' | 'user' | 'system' | 'function';
   content: string | ContentItem[];
 }
-
-export type Role = 'assistant' | 'user' | 'system' | 'function';
 
 // Type definition for the chat request body
 // This type must be compatible with both our API and OpenAI's API
@@ -58,11 +53,6 @@ export interface ChatMessageWithDebug extends Message {
   debugInfo?: DebugInfo;
 }
 
-export interface ChatMessage {
-  role: Role;
-  content: string;
-}
-
 export interface ChatConversation {
   messages: ChatMessageWithDebug[];
   streaming: boolean; // Is the conversation still streaming
@@ -93,8 +83,3 @@ export interface StreamingChatResponse {
 }
 
 export const INFERENCE_CHUNK_DELIMITER = 'data: ';
-
-export type ChattableResponse = {
-  aimServices: AIMService[];
-  workloads: Workload[];
-};
