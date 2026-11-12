@@ -4,6 +4,7 @@
 
 import asyncio
 import os
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -27,6 +28,7 @@ from ..charts.config import FINETUNING_CHART_NAME, MLFLOW_CHART_NAME
 from ..charts.service import get_chart
 from ..charts.utils import render_helm_template
 from ..cluster.service import get_cluster_gpu_device_info
+from ..cluster.utils import normalize_gpu_device_id
 from ..config import SUBMITTER_ANNOTATION
 from ..custom_models.constants import SOURCE_DESCRIPTION_ANNOTATION
 from ..datasets.repository import list_datasets
@@ -34,6 +36,7 @@ from ..dispatch.kube_client import KubernetesClient
 from ..dispatch.utils import parse_uuid, sanitize_label_value
 from ..minio.client import MinioClient
 from ..minio.config import MINIO_BUCKET, MINIO_URL
+from ..overlays.models import Overlay
 from ..overlays.repository import list_overlays
 from ..secrets.service import get_secret_details
 from ..workloads.constants import (
@@ -49,7 +52,7 @@ from ..workloads.constants import (
 from ..workloads.enums import ModelSourceType, TrainingOutput, WorkloadStatus, WorkloadType
 from ..workloads.repository import create_workload, get_workloads, update_workload_status
 from ..workloads.schemas import WorkloadResponse
-from ..workloads.utils import apply_manifest
+from ..workloads.utils import apply_manifest, pin_jobs_to_gpu_devices
 from .hyperparameters import (
     BATCH_SIZE_PATH,
     EPOCHS_PATH,
@@ -107,16 +110,87 @@ async def get_aim_model(
     raise NotFoundException(f"Model {resource_name} not found")
 
 
+def _declared_accelerators(overlay: Overlay) -> list | None:
+    """Return the GPU device IDs a recipe declares, or None when it declares none and fits any GPU."""
+    overlay_data = overlay.overlay if isinstance(overlay.overlay, dict) else {}
+    metadata = overlay_data.get("metadata")
+    return metadata.get("compatibleAccelerators") if isinstance(metadata, dict) else None
+
+
+def _section(values: Mapping[str, Any], key: str) -> dict:
+    """Return a mapping nested in overlay data, or an empty one when it is absent or malformed."""
+    section = values.get(key)
+    return section if isinstance(section, dict) else {}
+
+
+def _fits_cluster(overlay: Overlay, cluster_gpu_ids: Collection[str]) -> bool:
+    """Whether the overlay declares no GPUs or names one of the cluster's.
+
+    `cluster_gpu_ids` are bare lowercase hex, and declared IDs are compared in that form so
+    `0x75a8` matches a `75a8` node label.
+    """
+    declared = _declared_accelerators(overlay)
+    return declared is None or not {normalize_gpu_device_id(acc_id) for acc_id in declared}.isdisjoint(cluster_gpu_ids)
+
+
+def select_recipe(overlays: list[Overlay], canonical_name: str, cluster_gpu_ids: Collection[str]) -> Overlay | None:
+    """Pick the recipe for `canonical_name` that fits the cluster's GPUs, or None when none does.
+
+    A chart may ship one recipe per GPU family for the same model, each backed by a file. Overlays
+    authored through the API carry no file and may be partial overrides, so they are candidates only
+    when the model has no file-backed recipe; otherwise they layer over the choice, see
+    `select_supplemental_overlays`. A recipe naming one of the cluster's GPUs beats one that declares
+    none, since its settings were written for that hardware. When several still qualify, as on a
+    cluster with more than one GPU family, the first by source path wins: listing and running a
+    fine-tune both choose through here, so they must reach the same recipe.
+    """
+    model_overlays = [overlay for overlay in overlays if overlay.canonical_name == canonical_name]
+    candidates = [overlay for overlay in model_overlays if overlay.source_path is not None] or model_overlays
+    ranked = [
+        (_declared_accelerators(overlay) is None, overlay.source_path or "", overlay)
+        for overlay in candidates
+        if _fits_cluster(overlay, cluster_gpu_ids)
+    ]
+    if not ranked:
+        return None
+    return min(ranked, key=lambda entry: entry[:2])[2]
+
+
+def select_supplemental_overlays(
+    overlays: list[Overlay], recipe: Overlay, cluster_gpu_ids: Collection[str]
+) -> list[Overlay]:
+    """Return the API-authored overlays for the recipe's model that layer over it on this cluster.
+
+    The run may land on any of the cluster's GPUs the recipe fits, so an overlay applies only when
+    it declares no GPUs or declares every one of them. One written for only some of that hardware
+    would otherwise run its settings on GPUs they do not describe, so it is left out.
+    """
+    declared_by_recipe = _declared_accelerators(recipe)
+    run_gpu_ids = set(cluster_gpu_ids)
+    if declared_by_recipe is not None:
+        run_gpu_ids &= {normalize_gpu_device_id(acc_id) for acc_id in declared_by_recipe}
+
+    supplements = []
+    for overlay in overlays:
+        if overlay is recipe or overlay.canonical_name != recipe.canonical_name or overlay.source_path is not None:
+            continue
+        declared = _declared_accelerators(overlay)
+        if declared is None or run_gpu_ids <= {normalize_gpu_device_id(acc_id) for acc_id in declared}:
+            supplements.append(overlay)
+    return supplements
+
+
 async def get_finetunable_models(
     session: AsyncSession, kube_client: KubernetesClient, chart_name: str = FINETUNING_CHART_NAME
 ) -> list[FinetunableModelResponse]:
     """Get models that can be finetuned on the cluster's current AIM and GPU profile.
 
-    A recipe is returned only when both:
+    Each model is offered once, through the recipe `select_recipe` picks for the cluster's GPUs.
+    It is returned only when both:
+    - that recipe exists: its `metadata.compatibleAccelerators` intersect the cluster's GPU device
+      IDs, or it declares none and is treated as compatible with all hardware, and
     - its `aimManifest.aimId` matches an AIMClusterProfile present on the cluster
-      (via `spec.aimId`), and
-    - its `metadata.compatibleAccelerators` intersect the cluster's GPU device IDs
-      (recipes without `compatibleAccelerators` are treated as compatible with all hardware).
+      (via `spec.aimId`).
 
     Both sides of the join use `modelId` (the base-weights / artifact identity) rather than
     `aimId` (the family identity that is shared across packagings like FP8 inference
@@ -131,33 +205,39 @@ async def get_finetunable_models(
 
     chart = await get_chart(session, chart_name=chart_name)
     overlays = await list_overlays(session, chart_id=chart.id, include_generic=True)
-    cluster_gpu_info = await get_cluster_gpu_device_info(kube_client)
-    cluster_gpu_ids = set(cluster_gpu_info)
+    cluster_gpu_names = {
+        normalize_gpu_device_id(device_id): name
+        for device_id, name in (await get_cluster_gpu_device_info(kube_client)).items()
+    }
     signature = chart.signature if isinstance(chart.signature, dict) else {}
+    generic_values = [overlay.overlay for overlay in overlays if overlay.canonical_name is None]
 
+    model_names = dict.fromkeys(overlay.canonical_name for overlay in overlays if overlay.canonical_name is not None)
     result = []
-    for overlay in overlays:
-        if overlay.canonical_name is None:
+    for model_name in model_names:
+        overlay = select_recipe(overlays, model_name, cluster_gpu_names.keys())
+        if overlay is None:
             continue
+        supplements = select_supplemental_overlays(overlays, overlay, cluster_gpu_names.keys())
         overlay_data = overlay.overlay if isinstance(overlay.overlay, dict) else {}
         aim_manifest = overlay_data.get("aimManifest")
         aim_id = aim_manifest.get("aimId") if isinstance(aim_manifest, dict) else None
         if not aim_id or aim_id not in cluster_aim_ids:
             continue
-        metadata = overlay_data.get("metadata")
-        metadata = metadata if isinstance(metadata, dict) else {}
-        compatible_accelerators = metadata.get("compatibleAccelerators")
-        if compatible_accelerators is not None and cluster_gpu_ids.isdisjoint(compatible_accelerators):
-            continue
+        # Layered as a launch layers them, so what is advertised is what a run gets.
+        launch_values = merge_helm_values(
+            [signature, *generic_values, overlay_data, *(supplement.overlay for supplement in supplements)]
+        )
+        metadata = _section(launch_values, "metadata")
+        # The GPUs come from the recipe alone: an override that applies may name more hardware than
+        # the recipe's settings were written for.
+        compatible_accelerators = _section(overlay_data, "metadata").get("compatibleAccelerators")
+        normalized_accelerators = [normalize_gpu_device_id(acc_id) for acc_id in compatible_accelerators or []]
         # Resolve display names only for GPUs present in this cluster; deduplicate preserving order
-        accelerator_names = (
-            list(
-                dict.fromkeys(
-                    cluster_gpu_info[acc_id] for acc_id in compatible_accelerators if acc_id in cluster_gpu_ids
-                )
+        accelerator_names = list(
+            dict.fromkeys(
+                cluster_gpu_names[acc_id] for acc_id in normalized_accelerators if acc_id in cluster_gpu_names
             )
-            if compatible_accelerators
-            else []
         )
         # Default to gated when the recipe omits the flag or declares a non-boolean. Reporting an
         # unreadable value as open costs the user a job that dies at weight download; reporting it
@@ -172,12 +252,13 @@ async def get_finetunable_models(
             FinetunableModelResponse(
                 canonical_name=overlay.canonical_name,
                 # finetuningGpus is an integer in well-formed overlays; Pydantic coerces numeric strings
-                gpu_count=overlay_data.get("finetuningGpus"),
-                compatible_accelerators=compatible_accelerators or [],
+                gpu_count=launch_values.get("finetuningGpus"),
+                # An unquoted YAML ID such as 7448 arrives as an int, which the str-typed field rejects
+                compatible_accelerators=[str(acc_id) for acc_id in compatible_accelerators or []],
                 compatible_accelerator_names=accelerator_names,
                 hf_token_required=hf_token_required if isinstance(hf_token_required, bool) else True,
                 training_type=training_type if training_type in TrainingType else TrainingType.FULL,
-                hyperparameters=resolve_hyperparameters(merge_helm_values([signature, overlay_data])),
+                hyperparameters=resolve_hyperparameters(launch_values),
             )
         )
 
@@ -677,6 +758,43 @@ async def _list_cluster_profiles_for_selection(
         return []
 
 
+async def _select_recipe_for_cluster(
+    kube_client: KubernetesClient, overlays: list[Overlay], model_canonical_name: str
+) -> tuple[Overlay | None, list[Overlay], list[str]]:
+    """Choose the model's recipe for this cluster, the overlays layered over it, and the GPU device
+    labels its job must run on.
+
+    No recipe is returned when the chart ships none for the model, leaving the run to the chart and
+    its generic overlays; the run is refused when every recipe it ships targets GPUs the cluster
+    lacks. The labels are empty when the recipe declares no GPUs. Otherwise they are
+    the cluster's own label values for the GPUs the recipe names: on a cluster with more than one
+    GPU family, a job left unpinned could land on hardware its settings were not written for.
+    """
+    candidates = [overlay for overlay in overlays if overlay.canonical_name == model_canonical_name]
+    if not candidates:
+        return None, [], []
+
+    labels_by_gpu_id: dict[str, set[str]] = {}
+    if any(_declared_accelerators(overlay) is not None for overlay in candidates):
+        for label in await get_cluster_gpu_device_info(kube_client):
+            labels_by_gpu_id.setdefault(normalize_gpu_device_id(label), set()).add(label)
+    recipe = select_recipe(candidates, model_canonical_name, labels_by_gpu_id.keys())
+    if recipe is None:
+        raise ValidationException(
+            f"No fine-tuning recipe for base model '{model_canonical_name}' supports this cluster's GPUs."
+        )
+    supplements = select_supplemental_overlays(candidates, recipe, labels_by_gpu_id.keys())
+    declared = _declared_accelerators(recipe)
+    if declared is None:
+        return recipe, supplements, []
+    declared_ids = {normalize_gpu_device_id(acc_id) for acc_id in declared}
+    return (
+        recipe,
+        supplements,
+        sorted(label for gpu_id in declared_ids & labels_by_gpu_id.keys() for label in labels_by_gpu_id[gpu_id]),
+    )
+
+
 async def run_finetune_model_workload(
     session: AsyncSession,
     kube_client: KubernetesClient,
@@ -730,7 +848,14 @@ async def run_finetune_model_workload(
     overlays = await list_overlays(
         session, chart_id=chart.id, canonical_name=model_canonical_name, include_generic=True
     )
-    overlay_values = [chart.signature] + [overlay.overlay for overlay in overlays]
+    recipe, supplements, recipe_gpu_labels = await _select_recipe_for_cluster(
+        kube_client, overlays, model_canonical_name
+    )
+    # The recipe layers over the generic overlays, so its model-specific settings win, and the
+    # model's API-authored overlays layer over the recipe, since they adjust what it ships.
+    overlay_values = [chart.signature] + [overlay.overlay for overlay in overlays if overlay.canonical_name is None]
+    if recipe is not None:
+        overlay_values += [recipe.overlay, *(supplement.overlay for supplement in supplements)]
 
     # Extract the aimId needed to resolve the correct AIMClusterModel to use as the
     # derivation source for the fine-tuned model. The AIMClusterModel name is passed as
@@ -739,14 +864,7 @@ async def run_finetune_model_workload(
     # overlay's aimManifest (the authoritative source for string-based / HF models). For
     # UUID-based re-finetunes the overlay may not carry it, so fall back to the base
     # AIMModel's status.aim_id.
-    recipe_overlay: dict = next(
-        (
-            overlay.overlay
-            for overlay in overlays
-            if overlay.canonical_name == model_canonical_name and isinstance(overlay.overlay, dict)
-        ),
-        {},
-    )
+    recipe_overlay: dict = recipe.overlay if recipe is not None and isinstance(recipe.overlay, dict) else {}
 
     # A re-finetune's own identity wins over the recipe's: the overlay is matched on canonical
     # name, which for a fine-tuned model resolves to the base it was derived from rather than the
@@ -781,9 +899,9 @@ async def run_finetune_model_workload(
     # training for hours and silently discarding what was asked for.
     wants_adapter = finetuning_data.output is FineTuningOutput.ADAPTER
     # Anything not explicitly declared lora trains full-parameter, matching the chart default.
-    recipe_metadata = recipe_overlay.get("metadata")
-    recipe_metadata = recipe_metadata if isinstance(recipe_metadata, dict) else {}
-    training_type = recipe_metadata.get("trainingType")
+    # Read from every layer the job renders with, so an override switching the recipe to LoRA is
+    # judged as the run it launches.
+    training_type = _section(merge_helm_values(overlay_values), "metadata").get("trainingType")
     training_output = _get_training_output(
         wants_adapter=wants_adapter,
         training_type=training_type,
@@ -962,6 +1080,10 @@ async def run_finetune_model_workload(
         "labels": manifest_labels,
         "annotations": model_annotations,
     }
+    # The chart refuses to render a model manifest from a LoRA run whose merge is skipped, and a
+    # recipe may switch the merge off, so the requested output decides it rather than the recipe:
+    # merged into a model, or kept as a separate adapter. Full-parameter runs never merge.
+    helm_overrides["mergeAdapter"] = not wants_adapter
 
     # Identity has to be stamped here rather than left to the recipe: the chart reads it under
     # `modelManifest`, while the recipe overlays still declare it one level up, where nothing
@@ -1010,9 +1132,6 @@ async def run_finetune_model_workload(
         }
         if finetuning_data.description is not None:
             adapter_manifest["description"] = finetuning_data.description
-        # The chart refuses to render a model manifest while the merge is skipped, so keeping the
-        # adapter, disabling the model manifest, and disabling the merge move together.
-        helm_overrides["mergeAdapter"] = False
 
         # The deploy gate attaches an adapter only when compatibleWith matches the base model's own
         # aimId, and compatibleWith renders from `model` below — so the two identities have to agree.
@@ -1052,6 +1171,8 @@ async def run_finetune_model_workload(
             namespace=namespace,
             overlays_values=overlay_values,
         )
+        if recipe_gpu_labels:
+            manifest = pin_jobs_to_gpu_devices(manifest, recipe_gpu_labels)
         workload.manifest = manifest
         await session.flush()
         # Stamp the description onto the workload's own Job/Deployment so it is readable from

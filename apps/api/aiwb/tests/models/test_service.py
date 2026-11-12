@@ -4,6 +4,7 @@
 
 import copy
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -41,6 +42,7 @@ from app.dispatch.crds import K8sMetadata
 from app.dispatch.kube_client import KubernetesClient
 from app.minio.client import MinioClient
 from app.minio.config import MINIO_BUCKET
+from app.models.hyperparameters import merge_helm_values
 from app.models.schemas import (
     FinetunableModelResponse,
     FinetuneCreate,
@@ -75,6 +77,7 @@ from app.workloads.constants import (
 )
 from app.workloads.enums import TrainingOutput, WorkloadStatus, WorkloadType
 from app.workloads.models import Workload
+from app.workloads.repository import get_workloads as list_stored_workloads
 from app.workloads.schemas import WorkloadResponse
 from tests import factory
 
@@ -443,11 +446,12 @@ _DEFAULT = object()
 
 def make_overlay(
     canonical_name: str | None = None,
-    compatible_accelerators: list[str] | None = None,
+    compatible_accelerators: list[str | int] | None = None,
     aim_id: str | None | object = _DEFAULT,
     model_id: str | None | object = _DEFAULT,
     hf_token_required: bool | str | int | None = None,
     training_type: str | None = None,
+    source_path: str | None = None,
     **extra_overlay_fields: object,
 ) -> MagicMock:
     """Build a mock Overlay.
@@ -466,9 +470,13 @@ def make_overlay(
 
     `training_type` mirrors `metadata.trainingType`, the recipe's sole declaration of how
     it trains. Omitted when None so tests can exercise the "not declared" case.
+
+    `source_path` is the chart file the recipe was registered from, which tells apart recipes
+    sharing a canonical name.
     """
     overlay = MagicMock(spec=Overlay)
     overlay.canonical_name = canonical_name
+    overlay.source_path = source_path
     overlay_data: dict = {**extra_overlay_fields}
     metadata: dict = {}
     if compatible_accelerators is not None:
@@ -663,6 +671,202 @@ async def test_get_finetunable_models_filters_incompatible_gpus(db_session: Asyn
         result = await get_finetunable_models(db_session, kube_client)
 
     assert [m.canonical_name for m in result] == ["meta-llama/Llama-3.1-8B"]
+
+
+@pytest.mark.asyncio
+async def test_get_finetunable_models_matches_hex_prefixed_accelerator_ids(db_session: AsyncSession) -> None:
+    """A recipe declaring `0x75a8` is offered on a node labelled `75a8`, with the node's GPU name."""
+    finetune_chart = await factory.create_chart(db_session, name=FINETUNING_CHART_NAME)
+    overlays = [make_overlay("Qwen/Qwen3.8-27B", compatible_accelerators=["0x75a8"])]
+    kube_client = make_kube_client()
+
+    with (
+        patch("app.models.service.get_chart", return_value=finetune_chart),
+        patch("app.models.service.list_overlays", return_value=overlays),
+        patch("app.models.service.get_cluster_gpu_device_info", return_value={"75a8": "AMD Instinct MI350P"}),
+        patch_cluster_profiles(["Qwen/Qwen3.8-27B"]),
+    ):
+        result = await get_finetunable_models(db_session, kube_client)
+
+    assert [m.canonical_name for m in result] == ["Qwen/Qwen3.8-27B"]
+    assert result[0].compatible_accelerators == ["0x75a8"]
+    assert result[0].compatible_accelerator_names == ["AMD Instinct MI350P"]
+
+
+def make_per_gpu_recipes() -> list[MagicMock]:
+    """One model with a recipe for the MI300X family and a separate one for MI350P."""
+    return [
+        make_overlay(
+            "Qwen/Qwen3-32B",
+            compatible_accelerators=["74a1", "75a0"],
+            source_path="overrides/models/Qwen_Qwen3-32B.yaml",
+            finetuningGpus=8,
+        ),
+        make_overlay(
+            "Qwen/Qwen3-32B",
+            compatible_accelerators=["0x75a8"],
+            source_path="overrides/models/Qwen_Qwen3-32B-mi350p-sft.yaml",
+            finetuningGpus=1,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cluster_gpus", "expected_gpu_count", "expected_accelerators"),
+    [
+        ({"75a8": "AMD Instinct MI350P"}, 1, ["0x75a8"]),
+        ({"74a1": "AMD Instinct MI300X"}, 8, ["74a1", "75a0"]),
+    ],
+)
+async def test_get_finetunable_models_offers_the_recipe_written_for_the_cluster_gpus(
+    db_session: AsyncSession,
+    cluster_gpus: dict[str, str],
+    expected_gpu_count: int,
+    expected_accelerators: list[str],
+) -> None:
+    """A model with a recipe per GPU family is offered once, with the recipe for the cluster's GPUs."""
+    finetune_chart = await factory.create_chart(db_session, name=FINETUNING_CHART_NAME)
+
+    with (
+        patch("app.models.service.get_chart", return_value=finetune_chart),
+        patch("app.models.service.list_overlays", return_value=make_per_gpu_recipes()),
+        patch("app.models.service.get_cluster_gpu_device_info", return_value=cluster_gpus),
+        patch_cluster_profiles(["Qwen/Qwen3-32B"]),
+    ):
+        result = await get_finetunable_models(db_session, make_kube_client())
+
+    assert [(m.canonical_name, m.gpu_count, m.compatible_accelerators) for m in result] == [
+        ("Qwen/Qwen3-32B", expected_gpu_count, expected_accelerators)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_finetunable_models_prefers_a_gpu_specific_recipe_over_a_generic_one(
+    db_session: AsyncSession,
+) -> None:
+    """A recipe written for the cluster's GPUs wins over one that declares no GPUs at all."""
+    finetune_chart = await factory.create_chart(db_session, name=FINETUNING_CHART_NAME)
+    overlays = [
+        make_overlay("org/model", source_path="overrides/models/a-generic.yaml", finetuningGpus=4),
+        make_overlay(
+            "org/model",
+            compatible_accelerators=["75a8"],
+            source_path="overrides/models/b-mi350p.yaml",
+            finetuningGpus=1,
+        ),
+    ]
+
+    with (
+        patch("app.models.service.get_chart", return_value=finetune_chart),
+        patch("app.models.service.list_overlays", return_value=overlays),
+        patch("app.models.service.get_cluster_gpu_device_info", return_value={"75a8": "AMD Instinct MI350P"}),
+        patch_cluster_profiles(["org/model"]),
+    ):
+        result = await get_finetunable_models(db_session, make_kube_client())
+
+    assert [(m.canonical_name, m.gpu_count) for m in result] == [("org/model", 1)]
+
+
+@pytest.mark.asyncio
+async def test_get_finetunable_models_picks_one_recipe_on_a_cluster_with_both_gpu_families(
+    db_session: AsyncSession,
+) -> None:
+    """With both families present the model is still offered once, through the first recipe by file."""
+    finetune_chart = await factory.create_chart(db_session, name=FINETUNING_CHART_NAME)
+
+    with (
+        patch("app.models.service.get_chart", return_value=finetune_chart),
+        patch("app.models.service.list_overlays", return_value=make_per_gpu_recipes()),
+        patch(
+            "app.models.service.get_cluster_gpu_device_info",
+            return_value={"74a1": "AMD Instinct MI300X", "75a8": "AMD Instinct MI350P"},
+        ),
+        patch_cluster_profiles(["Qwen/Qwen3-32B"]),
+    ):
+        result = await get_finetunable_models(db_session, make_kube_client())
+
+    assert [(m.canonical_name, m.gpu_count) for m in result] == [("Qwen/Qwen3-32B", 1)]
+
+
+@pytest.mark.asyncio
+async def test_get_finetunable_models_offers_the_recipe_with_an_api_override_layered_over_it(
+    db_session: AsyncSession,
+) -> None:
+    """A partial override authored through the API adjusts the recipe instead of displacing it."""
+    finetune_chart = await factory.create_chart(db_session, name=FINETUNING_CHART_NAME)
+    api_override = make_overlay(
+        "Qwen/Qwen3-32B", aim_id=None, model_id=None, finetuning_config={"training_args": {"num_train_epochs": 7}}
+    )
+
+    with (
+        patch("app.models.service.get_chart", return_value=finetune_chart),
+        patch("app.models.service.list_overlays", return_value=[api_override, *make_per_gpu_recipes()]),
+        patch("app.models.service.get_cluster_gpu_device_info", return_value={"75a8": "AMD Instinct MI350P"}),
+        patch_cluster_profiles(["Qwen/Qwen3-32B"]),
+    ):
+        result = await get_finetunable_models(db_session, make_kube_client())
+
+    assert [(m.canonical_name, m.gpu_count, m.hyperparameters.epochs) for m in result] == [("Qwen/Qwen3-32B", 1, 7)]
+
+
+@pytest.mark.asyncio
+async def test_get_finetunable_models_advertises_the_gpu_count_an_api_override_launches_with(
+    db_session: AsyncSession,
+) -> None:
+    """An override raising the GPU count is reflected in the catalog, so the hardware a run needs is not understated."""
+    finetune_chart = await factory.create_chart(db_session, name=FINETUNING_CHART_NAME)
+    api_override = make_overlay("Qwen/Qwen3-32B", aim_id=None, model_id=None, finetuningGpus=2)
+
+    with (
+        patch("app.models.service.get_chart", return_value=finetune_chart),
+        patch("app.models.service.list_overlays", return_value=[api_override, *make_per_gpu_recipes()]),
+        patch("app.models.service.get_cluster_gpu_device_info", return_value={"75a8": "AMD Instinct MI350P"}),
+        patch_cluster_profiles(["Qwen/Qwen3-32B"]),
+    ):
+        result = await get_finetunable_models(db_session, make_kube_client())
+
+    assert [(m.canonical_name, m.gpu_count) for m in result] == [("Qwen/Qwen3-32B", 2)]
+
+
+@pytest.mark.asyncio
+async def test_get_finetunable_models_reports_the_training_type_an_api_override_sets(
+    db_session: AsyncSession,
+) -> None:
+    """An override switching a full-parameter recipe to LoRA is listed as LoRA, so adapter output is offered."""
+    finetune_chart = await factory.create_chart(db_session, name=FINETUNING_CHART_NAME)
+    recipe = make_overlay("org/model", training_type="full", source_path="overrides/models/org_model.yaml")
+    lora_override = make_overlay("org/model", training_type="lora", aim_id=None, model_id=None)
+
+    with (
+        patch("app.models.service.get_chart", return_value=finetune_chart),
+        patch("app.models.service.list_overlays", return_value=[recipe, lora_override]),
+        patch("app.models.service.get_cluster_gpu_device_info", return_value={"74a1": "AMD Instinct MI300X"}),
+        patch_cluster_profiles(["org/model"]),
+    ):
+        result = await get_finetunable_models(db_session, make_kube_client())
+
+    assert [(m.canonical_name, m.training_type) for m in result] == [("org/model", TrainingType.LORA)]
+
+
+@pytest.mark.asyncio
+async def test_get_finetunable_models_accepts_integer_accelerator_ids(db_session: AsyncSession) -> None:
+    """An unquoted numeric ID in a recipe is listed as a string rather than failing the whole listing."""
+    finetune_chart = await factory.create_chart(db_session, name=FINETUNING_CHART_NAME)
+    overlays = [make_overlay("meta-llama/Llama-3.1-8B", compatible_accelerators=[7448, "0x74a1"])]
+    kube_client = make_kube_client()
+
+    with (
+        patch("app.models.service.get_chart", return_value=finetune_chart),
+        patch("app.models.service.list_overlays", return_value=overlays),
+        patch("app.models.service.get_cluster_gpu_device_info", return_value={"7448": "AMD Instinct MI325X"}),
+        patch_cluster_profiles(["meta-llama/Llama-3.1-8B"]),
+    ):
+        result = await get_finetunable_models(db_session, kube_client)
+
+    assert [m.canonical_name for m in result] == ["meta-llama/Llama-3.1-8B"]
+    assert result[0].compatible_accelerators == ["7448", "0x74a1"]
+    assert result[0].compatible_accelerator_names == ["AMD Instinct MI325X"]
 
 
 @pytest.mark.asyncio
@@ -2220,12 +2424,14 @@ async def launch_finetune(
     overlay: MagicMock,
     model_id: str = "test/model",
     mlflow_workloads: list | None = None,
+    supplements: tuple[MagicMock, ...] = (),
 ) -> dict:
     """Run a fine-tune launch against a stubbed cluster and return the rendered helm values.
 
     The recipe overlay is the only interesting input for output-shape tests, so everything
     else on the launch path is stubbed to its success case. `mlflow_workloads` stands in for
     the project's running MLflow workspaces; the default of none skips tracking entirely.
+    `supplements` are API-authored overlays for the same model, layered over the recipe.
     """
     captured: list = []
 
@@ -2234,7 +2440,7 @@ async def launch_finetune(
         return ""
 
     with (
-        patch("app.models.service.list_overlays", return_value=[overlay]),
+        patch("app.models.service.list_overlays", return_value=[overlay, *supplements]),
         patch_cluster_model(overlay.canonical_name),
         patch("app.models.service.get_workloads", new_callable=AsyncMock, return_value=mlflow_workloads or []),
         patch("app.models.service.render_helm_template", side_effect=capture_render),
@@ -2283,8 +2489,189 @@ async def test_run_finetune_model_workload_defaults_to_model_output(
     assert overrides["aimManifest"]["modelManifest"]["annotations"][SUBMITTER_ANNOTATION] == "test@example.com"
     # An untouched peft_conf is what preserves the recipe's own rank/alpha/target_modules.
     assert "peft_conf" not in overrides["finetuning_config"]
-    # mergeAdapter is absent rather than True — the chart's own default governs the model arm.
-    assert "mergeAdapter" not in overrides
+    assert overrides["mergeAdapter"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_finetune_model_workload_merges_a_model_output_whose_recipe_disables_merging(
+    db_session: AsyncSession, test_namespace: str
+) -> None:
+    """A LoRA recipe that switches the merge off still yields a model when a model is requested.
+
+    The chart refuses to render a model manifest from an unmerged LoRA run, so leaving the
+    recipe's `mergeAdapter: false` in place fails every default job before it starts.
+    """
+    await factory.create_chart(db_session, name=FINETUNING_CHART_NAME)
+    dataset = await factory.create_dataset(db_session, namespace=test_namespace)
+    finetuning_data = FinetuneCreate(display_name="my-model", dataset_id=dataset.id)
+
+    overrides = await launch_finetune(
+        db_session,
+        test_namespace,
+        finetuning_data,
+        overlay=make_overlay("test/model", training_type="lora", mergeAdapter=False),
+    )
+
+    assert overrides["aimManifest"]["modelManifest"]["enabled"] is True
+    assert overrides["mergeAdapter"] is True
+
+
+FINETUNE_JOB_MANIFEST = (
+    "apiVersion: batch/v1\nkind: Job\nmetadata:\n  name: finetune-job\nspec:\n  template:\n    spec: {}\n"
+)
+
+
+@dataclass
+class ClusterLaunch:
+    values: list[dict]
+    manifest: str
+    gpu_info: MagicMock
+
+
+async def launch_finetune_on_cluster(
+    db_session: AsyncSession, namespace: str, overlays: list[MagicMock], cluster_gpus: dict[str, str]
+) -> ClusterLaunch:
+    """Launch a Qwen3-32B fine-tune on a cluster with the given GPUs, capturing what it rendered and applied."""
+    await factory.create_chart(db_session, name=FINETUNING_CHART_NAME)
+    dataset = await factory.create_dataset(db_session, namespace=namespace)
+    rendered: list[list[dict]] = []
+
+    async def capture_render(*, chart, name, namespace, overlays_values):  # noqa: ARG001
+        rendered.append(overlays_values)
+        return FINETUNE_JOB_MANIFEST
+
+    with (
+        patch("app.models.service.list_overlays", return_value=overlays),
+        patch("app.models.service.get_cluster_gpu_device_info", return_value=cluster_gpus) as mock_gpu_info,
+        patch_cluster_model("Qwen/Qwen3-32B"),
+        patch("app.models.service.get_workloads", new_callable=AsyncMock, return_value=[]),
+        patch("app.models.service.render_helm_template", side_effect=capture_render),
+        patch("app.models.service.apply_manifest", new_callable=AsyncMock) as mock_apply,
+    ):
+        await run_finetune_model_workload(
+            session=db_session,
+            kube_client=make_kube_client(),
+            model_id="Qwen/Qwen3-32B",
+            finetuning_data=FinetuneCreate(display_name="my-model", dataset_id=dataset.id),
+            submitter="test@example.com",
+            namespace=namespace,
+        )
+
+    return ClusterLaunch(values=rendered[0], manifest=mock_apply.call_args.args[1], gpu_info=mock_gpu_info)
+
+
+def required_gpu_device_ids(manifest: str) -> list[list[str]]:
+    """The GPU device IDs each node selector term of the manifest's Job requires."""
+    job = next(doc for doc in yaml.safe_load_all(manifest) if doc and doc.get("kind") == "Job")
+    terms = job["spec"]["template"]["spec"]["affinity"]["nodeAffinity"][
+        "requiredDuringSchedulingIgnoredDuringExecution"
+    ]["nodeSelectorTerms"]
+    return [expression["values"] for term in terms for expression in term["matchExpressions"]]
+
+
+@pytest.mark.asyncio
+async def test_run_finetune_model_workload_trains_with_the_recipe_for_the_cluster_gpus(
+    db_session: AsyncSession, test_namespace: str
+) -> None:
+    """On an MI350P cluster the MI350P recipe drives the run, and the other GPU family's recipe is not layered in."""
+    general, mi350p = make_per_gpu_recipes()
+
+    launch = await launch_finetune_on_cluster(
+        db_session, test_namespace, [general, mi350p], {"75a8": "AMD Instinct MI350P"}
+    )
+
+    assert mi350p.overlay in launch.values
+    assert general.overlay not in launch.values
+    assert merge_helm_values(launch.values)["finetuningGpus"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_finetune_model_workload_layers_an_api_override_over_the_recipe(
+    db_session: AsyncSession, test_namespace: str
+) -> None:
+    """An override authored through the API still applies when the cluster's GPUs select a specific recipe."""
+    general, mi350p = make_per_gpu_recipes()
+    api_override = make_overlay("Qwen/Qwen3-32B", aim_id=None, model_id=None, finetuningGpus=2)
+
+    launch = await launch_finetune_on_cluster(
+        db_session, test_namespace, [api_override, general, mi350p], {"75a8": "AMD Instinct MI350P"}
+    )
+
+    assert launch.values.index(mi350p.overlay) < launch.values.index(api_override.overlay)
+    assert merge_helm_values(launch.values)["finetuningGpus"] == 2
+    assert required_gpu_device_ids(launch.manifest) == [["75a8"], ["75a8"]]
+
+
+@pytest.mark.parametrize(
+    ("override_gpus", "applied"),
+    [
+        pytest.param(["74a1"], False, id="other-family-only"),
+        pytest.param(["74a1", "0x75a8"], True, id="covers-the-recipe-gpus"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_run_finetune_model_workload_applies_an_api_override_only_on_hardware_it_covers(
+    db_session: AsyncSession, test_namespace: str, override_gpus: list[str | int], applied: bool
+) -> None:
+    """On a mixed cluster, an override written for the other GPU family never tunes a run pinned to this one."""
+    general, mi350p = make_per_gpu_recipes()
+    api_override = make_overlay(
+        "Qwen/Qwen3-32B", compatible_accelerators=override_gpus, aim_id=None, model_id=None, finetuningGpus=2
+    )
+
+    launch = await launch_finetune_on_cluster(
+        db_session,
+        test_namespace,
+        [api_override, general, mi350p],
+        {"74a1": "AMD Instinct MI300X", "75a8": "AMD Instinct MI350P"},
+    )
+
+    assert (api_override.overlay in launch.values) is applied
+    assert merge_helm_values(launch.values)["finetuningGpus"] == (2 if applied else 1)
+    assert required_gpu_device_ids(launch.manifest) == [["75a8"], ["75a8"]]
+
+
+@pytest.mark.asyncio
+async def test_run_finetune_model_workload_pins_the_job_to_the_recipe_gpus(
+    db_session: AsyncSession, test_namespace: str
+) -> None:
+    """On a cluster with both GPU families, the job may only land on the GPUs its recipe was written for."""
+    general, mi350p = make_per_gpu_recipes()
+
+    launch = await launch_finetune_on_cluster(
+        db_session,
+        test_namespace,
+        [general, mi350p],
+        {"74a1": "AMD Instinct MI300X", "75a8": "AMD Instinct MI350P"},
+    )
+
+    assert required_gpu_device_ids(launch.manifest) == [["75a8"], ["75a8"]]
+
+
+@pytest.mark.asyncio
+async def test_run_finetune_model_workload_refuses_when_no_recipe_fits_the_cluster_gpus(
+    db_session: AsyncSession, test_namespace: str
+) -> None:
+    """A model whose recipes all target other GPUs is refused before any workload is created."""
+    with pytest.raises(ValidationException, match="supports this cluster's GPUs"):
+        await launch_finetune_on_cluster(
+            db_session, test_namespace, make_per_gpu_recipes(), {"7448": "AMD Instinct MI325X"}
+        )
+
+    assert await list_stored_workloads(db_session, namespace=test_namespace) == []
+
+
+@pytest.mark.asyncio
+async def test_run_finetune_model_workload_leaves_a_recipe_without_gpus_unpinned(
+    db_session: AsyncSession, test_namespace: str
+) -> None:
+    """A recipe declaring no GPUs fits any hardware, so the cluster's nodes are not consulted."""
+    recipe = make_overlay("Qwen/Qwen3-32B", source_path="overrides/models/Qwen_Qwen3-32B.yaml")
+
+    launch = await launch_finetune_on_cluster(db_session, test_namespace, [recipe], {})
+
+    launch.gpu_info.assert_not_called()
+    assert launch.manifest == FINETUNE_JOB_MANIFEST
 
 
 @pytest.mark.asyncio
@@ -2615,6 +3002,24 @@ async def test_run_finetune_model_workload_rejects_adapter_from_full_parameter_r
         await launch_finetune(
             db_session, test_namespace, finetuning_data, overlay=make_overlay("test/model", training_type="full")
         )
+
+
+@pytest.mark.asyncio
+async def test_run_finetune_model_workload_keeps_an_adapter_when_an_api_override_switches_the_recipe_to_lora(
+    db_session: AsyncSession, test_namespace: str
+) -> None:
+    """The training type a run is judged by is the one it renders with, including an API override's."""
+    await factory.create_chart(db_session, name=FINETUNING_CHART_NAME)
+    dataset = await factory.create_dataset(db_session, namespace=test_namespace)
+    finetuning_data = FinetuneCreate(display_name="my-adapter", dataset_id=dataset.id, output=FineTuningOutput.ADAPTER)
+    recipe = make_overlay("test/model", training_type="full", source_path="overrides/models/test_model.yaml")
+    lora_override = make_overlay("test/model", training_type="lora", aim_id=None, model_id=None)
+
+    overrides = await launch_finetune(
+        db_session, test_namespace, finetuning_data, overlay=recipe, supplements=(lora_override,)
+    )
+
+    assert overrides["mergeAdapter"] is False
 
 
 @pytest.mark.asyncio

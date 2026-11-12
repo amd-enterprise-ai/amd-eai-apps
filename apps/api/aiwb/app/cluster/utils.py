@@ -84,6 +84,16 @@ def node_device_id_and_product_name(node: V1Node) -> tuple[str, str] | None:
     return device_id, display
 
 
+def normalize_gpu_device_id(device_id: str | int) -> str:
+    """Reduce an AMD GPU device ID to bare lowercase hex for comparison.
+
+    Node labels carry the bare form (``74a1``), while recipes are external data and may
+    write ``0x75a8``, uppercase, or an unquoted YAML number that parses as an int.
+    """
+    normalized = str(device_id).strip().lower()
+    return normalized.removeprefix("0x")
+
+
 def preferred_accelerator_product_name(device_id: str, *candidates: str) -> str:
     """Pick the best display name when aggregating nodes that share a device id."""
     for candidate in candidates:

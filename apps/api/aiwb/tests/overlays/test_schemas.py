@@ -2,8 +2,22 @@
 #
 # SPDX-License-Identifier: MIT
 
-from app.overlays.models import Overlay
-from app.overlays.schemas import OverlayResponse
+import pytest
+from pydantic import ValidationError
+
+from app.overlays.models import SOURCE_PATH_MAX_LENGTH, Overlay
+from app.overlays.schemas import OverlayResponse, OverlayUpdate
+
+
+def test_overlay_update_accepts_source_path_at_column_limit() -> None:
+    update = OverlayUpdate(source_path="a" * SOURCE_PATH_MAX_LENGTH, updated_by="user@example.com")
+
+    assert update.source_path == "a" * SOURCE_PATH_MAX_LENGTH
+
+
+def test_overlay_update_rejects_source_path_beyond_column_limit() -> None:
+    with pytest.raises(ValidationError, match=f"at most {SOURCE_PATH_MAX_LENGTH} characters"):
+        OverlayUpdate(source_path="a" * (SOURCE_PATH_MAX_LENGTH + 1), updated_by="user@example.com")
 
 
 def test_generic_overlay_response_from_model(sample_generic_overlay: Overlay) -> None:

@@ -15,6 +15,7 @@ from workloads_manager.core.registration import (
     get_chart_id,
     get_overlay_id,
     process_single_overlay,
+    prune_overlays_absent_from_workload,
     register_workload,
 )
 from workloads_manager.models import (
@@ -179,23 +180,75 @@ def test_get_chart_id_api_error(mock_api_request):
 
 
 @patch("workloads_manager.core.registration.make_api_request")
-def test_get_overlay_id_success(mock_api_request):
-    """Test get_overlay_id with successful response."""
-    # Mock API response
+def test_get_overlay_id_matches_the_recipe_file(mock_api_request):
+    """Recipes for the same model are told apart by the file they were registered from."""
     mock_api_request.return_value = (
         True,
         {
             "data": [
-                {"id": "overlay-123", "canonicalName": "model/test"},
-                {"id": "overlay-456", "canonicalName": "model/other"},
+                {"id": "overlay-123", "canonicalName": "model/test", "sourcePath": "overrides/models/general.yaml"},
+                {"id": "overlay-456", "canonicalName": "model/test", "sourcePath": "overrides/models/mi350p.yaml"},
             ]
         },
     )
 
-    result = get_overlay_id("chart-123", "model/test", httpx.URL("http://api.test"))
+    result = get_overlay_id("chart-123", "overrides/models/mi350p.yaml", "model/test", httpx.URL("http://api.test"))
+
+    assert result == "overlay-456"
+    mock_api_request.assert_called_once_with("GET", "overlays?chartId=chart-123", httpx.URL("http://api.test"))
+
+
+@patch("workloads_manager.core.registration.make_api_request")
+def test_get_overlay_id_adopts_an_overlay_registered_without_a_file(mock_api_request):
+    """An overlay AIWB registered before source tracking is reused for its model rather than duplicated."""
+    mock_api_request.return_value = (
+        True,
+        {
+            "data": [
+                {"id": "overlay-123", "canonicalName": "model/test", "sourcePath": None, "createdBy": "system"},
+                {"id": "overlay-456", "canonicalName": "model/other", "sourcePath": None, "createdBy": "system"},
+            ]
+        },
+    )
+
+    result = get_overlay_id("chart-123", "overrides/models/test.yaml", "model/test", httpx.URL("http://api.test"))
 
     assert result == "overlay-123"
-    mock_api_request.assert_called_once_with("GET", "overlays?chartId=chart-123", httpx.URL("http://api.test"))
+
+
+@patch("workloads_manager.core.registration.make_api_request")
+def test_get_overlay_id_never_adopts_an_overlay_authored_through_the_api(mock_api_request):
+    """A user's override for the same model stays theirs: the recipe gets a row of its own."""
+    mock_api_request.return_value = (
+        True,
+        {
+            "data": [
+                {
+                    "id": "overlay-123",
+                    "canonicalName": "model/test",
+                    "sourcePath": None,
+                    "createdBy": "user@example.com",
+                }
+            ]
+        },
+    )
+
+    result = get_overlay_id("chart-123", "overrides/models/test.yaml", "model/test", httpx.URL("http://api.test"))
+
+    assert result is None
+
+
+@patch("workloads_manager.core.registration.make_api_request")
+def test_get_overlay_id_does_not_adopt_another_files_recipe(mock_api_request):
+    """A recipe registered from a different file is not reused just because it declares the same model."""
+    mock_api_request.return_value = (
+        True,
+        {"data": [{"id": "overlay-123", "canonicalName": "model/test", "sourcePath": "overrides/models/general.yaml"}]},
+    )
+
+    result = get_overlay_id("chart-123", "overrides/models/mi350p.yaml", "model/test", httpx.URL("http://api.test"))
+
+    assert result is None
 
 
 @patch("workloads_manager.core.registration.make_api_request")
@@ -204,7 +257,9 @@ def test_get_overlay_id_not_found(mock_api_request):
     # Mock API response
     mock_api_request.return_value = (True, [])
 
-    result = get_overlay_id("chart-123", "model/nonexistent", httpx.URL("http://api.test"))
+    result = get_overlay_id(
+        "chart-123", "overrides/models/nonexistent.yaml", "model/nonexistent", httpx.URL("http://api.test")
+    )
 
     assert result is None
 
@@ -215,9 +270,81 @@ def test_get_overlay_id_api_error(mock_api_request):
     # Mock API error
     mock_api_request.return_value = (False, {"error": "API error"})
 
-    result = get_overlay_id("chart-123", "model/test", httpx.URL("http://api.test"))
+    result = get_overlay_id("chart-123", "overrides/models/test.yaml", "model/test", httpx.URL("http://api.test"))
 
     assert result is None
+
+
+@patch("workloads_manager.core.registration.make_api_request")
+def test_prune_removes_only_file_backed_overlays_the_workload_no_longer_ships(mock_api_request):
+    """A renamed recipe's old row goes; API-authored overlays and AIWB's own registrations stay."""
+    overlays = [
+        {"id": "kept", "sourcePath": "overrides/models/current.yaml", "createdBy": "user@example.com"},
+        {"id": "renamed", "sourcePath": "overrides/models/old-name.yaml", "createdBy": "user@example.com"},
+        {"id": "service-owned", "sourcePath": "overrides/models/bundled.yaml", "createdBy": "system"},
+        {"id": "api-authored", "sourcePath": None, "createdBy": "user@example.com"},
+    ]
+    mock_api_request.side_effect = lambda method, *_args, **_kwargs: (
+        (True, {"data": overlays}) if method == "GET" else (True, {})
+    )
+
+    pruned = prune_overlays_absent_from_workload("chart-123", {"kept"}, httpx.URL("http://api.test"))
+
+    assert pruned == ["renamed"]
+    deletes = [call.args[1] for call in mock_api_request.call_args_list if call.args[0] == "DELETE"]
+    assert deletes == ["overlays/renamed"]
+
+
+def make_registerable_workload(overlay_count: int) -> Mock:
+    """A registerable workload shipping `overlay_count` recipe files and no other files."""
+    workload = Mock()
+    workload.dir_name = "test-workload"
+    workload.chart_name = "test-chart"
+    workload.is_registerable = True
+    workload.get_overlay_files.return_value = [
+        (Path(f"recipe-{index}.yaml"), f"overrides/models/recipe-{index}.yaml") for index in range(overlay_count)
+    ]
+    workload._iter_files.return_value = []
+    return workload
+
+
+@patch("workloads_manager.core.registration.prune_overlays_absent_from_workload")
+@patch("workloads_manager.core.registration.process_single_overlay")
+@patch("workloads_manager.core.registration.upload_chart", return_value="chart-123")
+@patch("workloads_manager.core.registration.check_api_server", return_value=True)
+@patch("workloads_manager.core.registration.get_workloads")
+@patch("workloads_manager.config.TOKEN", "test-token")
+def test_register_workload_prunes_against_the_recipes_it_registered(
+    mock_get_workloads, _mock_check_api, _mock_upload_chart, mock_process_overlay, mock_prune
+):
+    """Once every recipe is registered, overlays for files the workload no longer ships are removed."""
+    mock_get_workloads.return_value = [make_registerable_workload(2)]
+    mock_process_overlay.side_effect = [
+        (ProcessingStatus.SUCCESS, "overlay-0"),
+        (ProcessingStatus.SUCCESS, "overlay-1"),
+    ]
+
+    register_workload("test-workload", httpx.URL("http://api.test"))
+
+    mock_prune.assert_called_once_with("chart-123", {"overlay-0", "overlay-1"}, httpx.URL("http://api.test"))
+
+
+@patch("workloads_manager.core.registration.prune_overlays_absent_from_workload")
+@patch("workloads_manager.core.registration.process_single_overlay")
+@patch("workloads_manager.core.registration.upload_chart", return_value="chart-123")
+@patch("workloads_manager.core.registration.check_api_server", return_value=True)
+@patch("workloads_manager.core.registration.get_workloads")
+@patch("workloads_manager.config.TOKEN", "test-token")
+def test_register_workload_keeps_overlays_when_a_recipe_fails_to_register(
+    mock_get_workloads, _mock_check_api, _mock_upload_chart, mock_process_overlay, mock_prune
+):
+    """A failed upload leaves the run's recipes incomplete, so nothing is removed against them."""
+    mock_get_workloads.return_value = [make_registerable_workload(2)]
+    mock_process_overlay.side_effect = [(ProcessingStatus.SUCCESS, "overlay-0"), (ProcessingStatus.FAILED, "")]
+
+    register_workload("test-workload", httpx.URL("http://api.test"))
+
+    mock_prune.assert_not_called()
 
 
 @patch("workloads_manager.core.registration.temp_file_with_content")
@@ -249,6 +376,10 @@ def test_process_single_overlay_model_file_success(
     assert call_args[0][0] == "POST"  # POST for new overlay
     assert "chartId" in call_args[1]["data"]
     assert "canonicalName" in call_args[1]["data"]
+    assert call_args[1]["data"]["sourcePath"] == "overrides/models/gpt-4.yaml"
+    mock_get_overlay_id.assert_called_once_with(
+        "chart-123", "overrides/models/gpt-4.yaml", "gpt-4", httpx.URL("http://api.test")
+    )
 
 
 @patch("workloads_manager.core.registration.temp_file_with_content")

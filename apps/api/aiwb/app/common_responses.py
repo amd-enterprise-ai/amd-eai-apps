@@ -4,9 +4,10 @@
 
 """Reusable OpenAPI ``responses=`` fragments for FastAPI route decorators.
 
-These dicts describe the documented failure modes raised by common dependencies
-(``ensure_access_to_project`` / ``ensure_access_to_workbench_namespace``) and
-shared service-layer exception paths. Compose with the spread operator:
+These dicts describe the documented failure modes raised by common access-check
+dependencies and shared service-layer exception paths. The dependencies are
+``ensure_access_to_project``, ``ensure_access_to_workbench_namespace`` and
+``ensure_platform_administrator``. Compose with the spread operator:
 
     responses={
         **PROJECT_ACCESS_RESPONSES,
@@ -26,6 +27,12 @@ matching dict here rather than the individual route decorators.
 PROJECT_ACCESS_RESPONSES: dict[int | str, dict] = {
     403: {"description": "Caller does not have access to the project, or the project is not a workbench namespace."},
     404: {"description": "Project or namespace not found."},
+}
+
+# Raised by ensure_platform_administrator on routes that change cluster-wide state.
+# Spreading it replaces the AUTH_RESPONSES 403, so it names the missing-email case too.
+PLATFORM_ADMINISTRATOR_RESPONSES: dict[int | str, dict] = {
+    403: {"description": "Caller does not have the Platform Administrator role, or the token has no email claim."},
 }
 
 
@@ -52,8 +59,8 @@ UNHEALTHY_PLATFORM_RESPONSES: dict[int | str, dict] = {
 # Raised by ensure_user_logged_in (applied to all secured routes via api_secured_router).
 # 401: Authorization header is missing, expired, or JWT validation fails.
 # 403: JWT is valid but missing the email claim (misconfigured token / wrong audience).
-#      Endpoints that also spread PROJECT_ACCESS_RESPONSES will override this 403
-#      description with their own project-access wording.
+#      Endpoints that also spread PROJECT_ACCESS_RESPONSES or
+#      PLATFORM_ADMINISTRATOR_RESPONSES override this 403 description with their own wording.
 AUTH_RESPONSES: dict[int | str, dict] = {
     401: {"description": "Missing or invalid authentication token."},
     403: {"description": "Token is valid but missing required claims (e.g. email)."},

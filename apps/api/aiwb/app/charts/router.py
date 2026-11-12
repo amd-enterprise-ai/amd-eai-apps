@@ -8,11 +8,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Form, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api_common.auth.security import get_user_email
+from api_common.auth.security import ensure_platform_administrator, get_user_email
 from api_common.database import get_session
 from api_common.exceptions import NotFoundException, ValidationException
 from api_common.schemas import ListResponse
 
+from ..common_responses import PLATFORM_ADMINISTRATOR_RESPONSES
 from ..workloads.enums import WorkloadType
 from .repository import (
     create_chart,
@@ -42,17 +43,28 @@ router = APIRouter(tags=["Charts"])
 
         Charts are global (not project-scoped). Once created, projects can
         reference the chart when deploying workloads, optionally further
-        customised by an overlay (see the Overlays API).
+        customised by an overlay (see the Overlays API). Because every
+        project deploys from the catalog, only a Platform Administrator can
+        change it.
     """),
     status_code=status.HTTP_201_CREATED,
     response_model=ChartResponse,
     responses={
-        400: {"description": "Invalid YAML in the uploaded signature file."},
+        **PLATFORM_ADMINISTRATOR_RESPONSES,
+        400: {
+            "description": (
+                "Invalid YAML in the uploaded signature file, or a chart file path that is absolute "
+                "or points outside the chart."
+            )
+        },
         409: {"description": "A chart with this name already exists."},
     },
 )
 async def create_chart_endpoint(
-    chart: ChartCreate = Form(), session: AsyncSession = Depends(get_session), user: str = Depends(get_user_email)
+    _: None = Depends(ensure_platform_administrator),
+    chart: ChartCreate = Form(),
+    session: AsyncSession = Depends(get_session),
+    user: str = Depends(get_user_email),
 ) -> ChartResponse:
     try:
         chart_obj = await create_chart(session, chart, user)
@@ -75,17 +87,25 @@ async def create_chart_endpoint(
         re-submit the full template tree when uploading files. Providing
         `signature` replaces the signature YAML.
 
-        Charts are global (not project-scoped).
+        Charts are global (not project-scoped); only a Platform
+        Administrator can update them.
     """),
     status_code=status.HTTP_200_OK,
     response_model=ChartResponse,
     responses={
-        400: {"description": "Invalid YAML in the uploaded signature file."},
+        **PLATFORM_ADMINISTRATOR_RESPONSES,
+        400: {
+            "description": (
+                "Invalid YAML in the uploaded signature file, or a chart file path that is absolute "
+                "or points outside the chart."
+            )
+        },
         404: {"description": "Chart not found."},
     },
 )
 async def update_chart_endpoint(
     chart_id: UUID,
+    _: None = Depends(ensure_platform_administrator),
     chart_update: ChartUpdate = Form(),
     session: AsyncSession = Depends(get_session),
     user: str = Depends(get_user_email),
@@ -158,14 +178,20 @@ async def get_chart_endpoint(
         rendered from the chart are not affected, since they hold their
         own rendered manifests.
 
-        Charts are global (not project-scoped).
+        Charts are global (not project-scoped); only a Platform
+        Administrator can delete them.
     """),
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
+        **PLATFORM_ADMINISTRATOR_RESPONSES,
         404: {"description": "Chart not found."},
     },
 )
-async def delete_chart_endpoint(chart_id: UUID, session: AsyncSession = Depends(get_session)) -> None:
+async def delete_chart_endpoint(
+    chart_id: UUID,
+    _: None = Depends(ensure_platform_administrator),
+    session: AsyncSession = Depends(get_session),
+) -> None:
     deleted = await delete_chart(session, chart_id)
     if not deleted:
         raise NotFoundException("Chart not found")

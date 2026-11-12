@@ -13,6 +13,7 @@ Documentation       Test scenarios for AIM model API endpoints.
 Resource    resources/airm_keywords.resource
 Resource    resources/airm_projects.resource
 Resource    resources/aiwb_models.resource
+Resource    resources/aiwb_finetuning_recipes.resource
 Resource    resources/aiwb_test_data.resource
 Resource    resources/api/common.resource
 Test Teardown       Clean Up All Created Models
@@ -53,6 +54,19 @@ Finetunable models include GPU hardware compatibility information
     Given Project exists in system
     When finetunable models list is requested
     Then each finetunable model should include GPU hardware compatibility details
+
+Every recipe that supports the cluster's GPUs is offered for fine-tuning
+    [Documentation]    Verify every registered recipe for a model the cluster can serve, on GPUs the
+    ...    cluster has, is offered as a fine-tuning base model however it writes the GPU ID, such as
+    ...    ``0x75a8`` against a ``75a8`` node label. Recipes come from an external repository that
+    ...    uses both notations, and a mismatch silently hides the model from every user on that
+    ...    hardware.
+    [Tags]    models    finetunable    requires-gpu    needs-aim-images
+
+    Given Project exists in system
+    And the cluster has fine-tuning recipes for models it can serve on its GPUs
+    When finetunable models list is requested
+    Then every recipe that supports the cluster's GPUs should be offered as a base model
 
 Finetunable models report Hugging Face token gating
     [Documentation]    Verify every model offered for fine-tuning reports whether pulling its base

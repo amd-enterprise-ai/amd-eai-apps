@@ -205,6 +205,76 @@ async def test_parse_chart_files_valid_files() -> None:
     assert result[1]["content"] == "content 2"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "../escaped.yaml",
+        "templates/../../escaped.yaml",
+        "/etc/passwd",
+        "/app/app/__init__.py",
+        "..\\..\\escaped.yaml",
+        "templates\\deployment.yaml",
+        "bad\x00name.yaml",
+        "",
+        ".",
+    ],
+)
+async def test_parse_chart_files_rejects_unsafe_paths(filename: str) -> None:
+    """Client-supplied file paths that are absolute or traverse outside the chart are rejected at ingest."""
+    files = [UploadFile(filename=filename, file=BytesIO(b"pwned"))]
+
+    with pytest.raises(ValueError, match="(?i)chart file path"):
+        await _parse_chart_files(files)
+
+
+@pytest.mark.asyncio
+async def test_parse_chart_files_rejects_missing_filename() -> None:
+    """Uploads without a filename have no safe location in the chart."""
+    files = [UploadFile(filename=None, file=BytesIO(b"content"))]
+
+    with pytest.raises(ValueError, match="chart file path"):
+        await _parse_chart_files(files)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "Chart.yaml",
+        "templates/deployment.yaml",
+        "a/b/c/deep.yaml",
+        "./values.yaml",
+        "templates//service.yaml",
+        "templates/..hidden.yaml",
+        "release:notes.txt",
+        "C:escaped.yaml",
+        "templates/_helpers.tpl",
+    ],
+)
+async def test_parse_chart_files_accepts_relative_paths_unchanged(filename: str) -> None:
+    """Paths that stay inside the chart are stored exactly as the client sent them."""
+    files = [UploadFile(filename=filename, file=BytesIO(b"content"))]
+
+    result = await _parse_chart_files(files)
+
+    assert result == [{"path": filename, "content": "content"}]
+
+
+@pytest.mark.asyncio
+async def test_chart_create_to_data_rejects_traversal_path() -> None:
+    """The create flow surfaces traversal paths as ValueError, which the router maps to a 400."""
+    chart = ChartCreate(
+        name="Test Chart",
+        type=WorkloadType.WORKSPACE,
+        signature=UploadFile(filename="signature.yaml", file=BytesIO(b"key: value")),
+        files=[UploadFile(filename="../../app/main.py", file=BytesIO(b"pwned"))],
+    )
+
+    with pytest.raises(ValueError, match="stay within the chart"):
+        await chart.to_data()
+
+
 def make_chart_kwargs():
     return dict(name="Test Chart", type=WorkloadType.FINE_TUNING, signature="sig.yaml", files=["f.yaml"])
 

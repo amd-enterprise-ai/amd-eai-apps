@@ -104,6 +104,28 @@ The OIDC values. An empty oidc value derives from the keycloak block.
 {{- end -}}
 
 {{/*
+oidc.adminGroups rendered as a JSON list. JSON keeps a name that contains a comma, such as an LDAP
+distinguished name, as one group; a comma-joined value would split it into broader groups.
+*/}}
+{{- define "aiwb.oidcAdminGroups" -}}
+{{- $groups := .Values.oidc.adminGroups -}}
+{{- if $groups -}}
+{{- if not (kindIs "slice" $groups) -}}
+{{- fail "oidc.adminGroups must be a list of group names" -}}
+{{- end -}}
+{{- range $groups -}}
+{{- if not (kindIs "string" .) -}}
+{{- fail (printf "oidc.adminGroups entries must be group names, got %v" .) -}}
+{{- else if eq . "" -}}
+{{- fail "oidc.adminGroups entries must not be empty" -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := required "oidc.audience is required when oidc.adminGroups is set" .Values.oidc.audience -}}
+{{ toJson $groups }}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Construct the AIRM UI URL for cross-app navigation.
 Use .Values.airmAppUrl if specified, otherwise construct from appDomain.
 */}}

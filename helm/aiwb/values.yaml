@@ -177,6 +177,10 @@ oidc:
   jwksUrl: ""
   # The audience the API requires in the access token. Empty: not checked.
   audience: ""
+  # Groups of the token's `groups` claim whose members are Platform Administrators,
+  # for an issuer that emits no Keycloak realm roles. Requires audience. Empty: only
+  # the Keycloak realm role grants it. Example: ["platform-admins"]
+  adminGroups: []
   # The scopes the UI asks for. Empty: "openid profile email".
   scopes: ""
 

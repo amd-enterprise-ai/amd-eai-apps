@@ -64,6 +64,42 @@ Delete existing chart
     Then response status should be 204  # HTTP 204 No Content is correct for successful deletion
     And the chart should not exist in database
 
+Create chart with nested template files
+    [Documentation]    Verify that chart files organised in subdirectories are accepted and kept in place
+    [Tags]                  charts                  create                  smoke
+
+    Given valid chart data is prepared
+    When a chart is uploaded with a file in a subdirectory
+    Then the chart upload should be accepted
+    And the chart should keep the file in its subdirectory
+
+Reject chart upload with a file escaping the chart directory
+    [Documentation]    Verify that a chart cannot place files outside its own directory on the server
+    [Tags]                  charts                  create                  negative                security                smoke
+
+    Given valid chart data is prepared
+    When a chart is uploaded with a file that escapes the chart directory
+    Then the chart upload should be rejected
+    And the chart should not be in the catalog
+
+Reject chart upload with a file at an absolute location
+    [Documentation]    Verify that a chart cannot place files at arbitrary absolute locations on the server
+    [Tags]                  charts                  create                  negative                security                smoke
+
+    Given valid chart data is prepared
+    When a chart is uploaded with a file at an absolute location
+    Then the chart upload should be rejected
+    And the chart should not be in the catalog
+
+Reject chart update with a file escaping the chart directory
+    [Documentation]    Verify that updating a chart cannot place files outside its own directory on the server
+    [Tags]                  charts                  update                  negative                security                smoke
+
+    Given a chart exists
+    When the chart is updated with a file that escapes the chart directory
+    Then the chart update should be rejected
+    And the chart files should be unchanged
+
 Delete non-existent chart
     [Documentation]    Verify proper error when deleting non-existent chart
     ...    Steps:

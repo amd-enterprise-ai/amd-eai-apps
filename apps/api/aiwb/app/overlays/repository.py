@@ -22,16 +22,19 @@ async def insert_overlay(
     canonical_name: str | None = None,
     display_name: str | None = None,
     creator: str | None = None,
+    source_path: str | None = None,
 ) -> Overlay:
     """
     Insert a new overlay record into the database.
 
     Raises:
         NotFoundException: If the chart_id references a non-existent chart
-        ConflictException: If an overlay with the same chart_id and canonical_name already exists
+        ConflictException: If the chart already has an overlay from the same source file, or, for an
+            overlay without one, an overlay for the same canonical name
     """
     overlay = Overlay(
         canonical_name=canonical_name,
+        source_path=source_path,
         display_name=display_name,
         chart_id=chart_id,
         overlay=overlay_data,
@@ -47,6 +50,10 @@ async def insert_overlay(
         error_message = str(e)
         if "ForeignKeyViolationError" in error_message and 'is not present in table "charts"' in error_message:
             raise NotFoundException(f"Chart with ID {chart_id} not found")
+        elif source_path is not None:
+            raise ConflictException(
+                f"Overlay with chart ID '{chart_id}' and source path '{source_path}' already exists."
+            )
         else:
             raise ConflictException(
                 f"Overlay with chart ID '{chart_id}' and canonical name '{canonical_name}' already exists."
@@ -84,14 +91,15 @@ async def delete_overlays_absent_from_chart(
     renamed, relocated, or dropped upstream keeps being served from whatever content it held when it
     was last registered.
 
-    Scoped to `creator` so overlays added through the API are never touched, and to rows carrying a
-    canonical name: an overlay that declares no model identifier cannot be traced back to the file
-    that produced it, so its absence from `keep_ids` proves nothing.
+    Scoped to `creator` so overlays added through the API are never touched, and to rows that can be
+    traced back to a file — by the source path they were registered from, or by the model they
+    declare. A row with neither predates source tracking and cannot be matched to any file, so its
+    absence from `keep_ids` proves nothing.
     """
     query = delete(Overlay).where(
         Overlay.chart_id == chart_id,
         Overlay.created_by == creator,
-        Overlay.canonical_name.is_not(None),
+        or_(Overlay.source_path.is_not(None), Overlay.canonical_name.is_not(None)),
     )
     if keep_ids:
         query = query.where(Overlay.id.not_in(keep_ids))

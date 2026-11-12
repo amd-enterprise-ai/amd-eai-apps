@@ -13,6 +13,7 @@ Resource    resources/resource_tracking.resource
 Library             String
 Library             uuid
 Library             TestPrefix
+Library             ChartCatalog
 
 
 *** Variables ***
@@ -146,31 +147,85 @@ Chart should be updated
     Get chart               ${chart_id}             expected_status=200
 
 Find chart ID by name
-    [Documentation]    Find chart ID by chart name through API and set as variable
+    [Documentation]    Find chart ID by chart name through API and set as variable.
+    ...    Returns None when no chart has that name.
     [Arguments]             ${chart_name}           ${variable_name}=TEST_CHART_ID
-    Create api session    aiwb
-    ${endpoint}=            Charts endpoint
-    ${response}=            Safe Get Request         ${endpoint}             expected_status=200
+    ${response}=            List charts request     expected_status=200
+    ${chart_id}=            Find chart id           ${response.json()}      ${chart_name}
+    IF    $chart_id is not None
+        VAR    ${${variable_name}}    ${chart_id}    scope=TEST
+    END
+    RETURN                  ${chart_id}
 
-    ${json}=                Set Variable            ${response.json()}
+A chart is uploaded with a file that escapes the chart directory
+    [Documentation]    Uploads a new chart whose template file is placed above the chart root
+    Upload chart with template at    ../../escaped-template.yaml
 
-    # Handle different response formats (direct list or object with charts property)
-    IF    $json.__class__.__name__ == 'list'
-        @{charts}=              Set Variable            ${json}
-    ELSE
-        @{charts}=              Get From Dictionary     ${json}                 charts                  default=@{EMPTY}
+A chart is uploaded with a file at an absolute location
+    [Documentation]    Uploads a new chart whose template file is placed at an absolute filesystem location
+    Upload chart with template at    /tmp/escaped-template.yaml
+
+A chart is uploaded with a file in a subdirectory
+    [Documentation]    Uploads a new chart whose template file is nested inside the chart
+    Upload chart with template at    templates/deployment.yaml
+
+Upload chart with template at
+    [Documentation]    Uploads the prepared chart with its template file sent under the given location.
+    ...    Any chart the API accepts is tracked so it is cleaned up even when the test expected a rejection.
+    ...    Uploads with the given token, or with the run's admin token when none is given.
+    [Arguments]    ${template_location}    ${access_token}=${None}
+    ${response}=    Create chart request    ${TEST_CHART_NAME}    ${TEMPLATE_FILE}    ${VALUES_FILE}    ${SCHEMA_FILE}
+    ...    ${SIGNATURE_FILE}    template_name=${template_location}    access_token=${access_token}
+    VAR    ${TEST_RESPONSE}    ${response}    scope=TEST
+    ${chart_id}=    Created chart id    ${response}
+    IF    $chart_id is not None
+        VAR    ${TEST_CHART_ID}    ${chart_id}    scope=TEST
+        Track Chart For Cleanup    ${chart_id}
     END
 
-    FOR    ${chart}    IN    @{charts}
-        ${name}=                Get From Dictionary     ${chart}                name                    default=${None}
-        IF    "${name}" == "${chart_name}"
-            ${chart_id}=            Get From Dictionary     ${chart}                id
-            Set Test Variable       ${${variable_name}}     ${chart_id}
-            RETURN                  ${chart_id}
-        END
-    END
+The chart is updated with a file that escapes the chart directory
+    [Documentation]    Records the chart's current files, then replaces them with a template placed above the chart root
+    ${before}=    Get chart    ${TEST_CHART_ID}    expected_status=200
+    VAR    ${TEST_CHART_FILES_BEFORE}    ${before.json()}[files]    scope=TEST
+    ${response}=    Update chart request    ${TEST_CHART_ID}    template_file=${TEMPLATE_FILE}
+    ...    template_name=../../escaped-template.yaml
+    VAR    ${TEST_RESPONSE}    ${response}    scope=TEST
 
-    RETURN                  ${None}
+The chart upload should be accepted
+    [Documentation]    Verifies the upload was stored as a new chart
+    Response status should be 201
+
+The chart upload should be rejected
+    [Documentation]    Verifies the upload was refused as invalid input
+    Response status should be 400
+
+The chart update should be rejected
+    [Documentation]    Verifies the update was refused as invalid input
+    Response status should be 400
+
+The chart should not be in the catalog
+    [Documentation]    Verifies no chart with the prepared name was stored
+    ${response}=    List charts request    expected_status=200
+    Catalog should not contain chart    ${response.json()}    ${TEST_CHART_NAME}
+
+The catalog listing should include the chart
+    [Documentation]    Verifies the last catalog listing includes the chart with the prepared name
+    Catalog should contain chart    ${TEST_RESPONSE.json()}    ${TEST_CHART_NAME}
+
+The chart should still be in the catalog
+    [Documentation]    Verifies the chart with the prepared name is still listed in the catalog
+    ${response}=    List charts request    expected_status=200
+    Catalog should contain chart    ${response.json()}    ${TEST_CHART_NAME}
+
+The chart files should be unchanged
+    [Documentation]    Verifies the chart still holds exactly the files it had before the rejected update
+    ${after}=    Get chart    ${TEST_CHART_ID}    expected_status=200
+    Should Be Equal    ${after.json()}[files]    ${TEST_CHART_FILES_BEFORE}
+
+The chart should keep the file in its subdirectory
+    [Documentation]    Verifies the nested template file was stored at its location within the chart
+    ${response}=    Get chart    ${TEST_CHART_ID}    expected_status=200
+    Chart should contain file    ${response.json()}    templates/deployment.yaml
 
 Clean Up All Created Charts
     [Documentation]    Clean up all created chart resources using generic pattern

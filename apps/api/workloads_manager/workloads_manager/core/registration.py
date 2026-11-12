@@ -22,6 +22,9 @@ from ..models import (
 from .api import check_api_server, make_api_request
 from .utils import temp_file_with_content
 
+# The creator AIWB records on the overlays it registers itself at startup.
+SERVICE_REGISTRATION_CREATOR = "system"
+
 
 def register_workload(workload_name: str, api_url: httpx.URL) -> WorkloadRegistrationResult:
     """Register a workload template to the service."""
@@ -68,6 +71,11 @@ def register_workload(workload_name: str, api_url: httpx.URL) -> WorkloadRegistr
         result = FileProcessingResult(path=rel_path_str, status=ProcessingStatus(status), id=file_id)
         processed_files.append(result)
         stats.increment(ProcessingStatus(status))
+
+    # A failed upload leaves this run's set of recipes incomplete, and pruning against it would
+    # delete recipes that still ship.
+    if processed_files and all(result.status == ProcessingStatus.SUCCESS for result in processed_files):
+        prune_overlays_absent_from_workload(chart_id, {result.id for result in processed_files}, api_url)
 
     # Process all other files for reporting (chart files + skipped files)
     processed_paths = {result.path for result in processed_files}
@@ -188,18 +196,74 @@ def get_chart_id(chart_name: str, api_url: httpx.URL) -> str | None:
     return None
 
 
-def get_overlay_id(chart_id: str, canonical_name: str | None, api_url: httpx.URL) -> str | None:
-    """Get the ID of an overlay by chart_id and optional canonical_name."""
+def list_chart_overlays(chart_id: str, api_url: httpx.URL) -> list[dict] | None:
+    """Return the overlays registered on the chart, or None when they could not be listed."""
     success, response = make_api_request("GET", f"overlays?chartId={chart_id}", api_url)
     if not success:
         logger.debug(f"Failed to get overlays: {response.get('error', 'Unknown error')}")
         return None
+    return [
+        overlay
+        for overlay in (
+            response.get("data", []) if isinstance(response, dict) else response if isinstance(response, list) else []
+        )
+        if isinstance(overlay, dict)
+    ]
 
-    overlays = (
-        response.get("data", []) if isinstance(response, dict) else response if isinstance(response, list) else []
-    )
+
+def prune_overlays_absent_from_workload(chart_id: str, keep_ids: set[str], api_url: httpx.URL) -> list[str]:
+    """Delete the chart's file-backed overlays this registration did not register, returning their IDs.
+
+    A recipe file renamed or removed in the workload otherwise leaves its row behind, still offered
+    as a recipe. Only overlays registered from a file qualify: one authored through the API has no
+    source path and is its author's to manage. Overlays AIWB registered itself are left to its own
+    startup registration, which prunes them against the chart it ships.
+    """
+    overlays = list_chart_overlays(chart_id, api_url)
+    if overlays is None:
+        logger.warning("Could not list the chart's overlays; skipping removal of overlays it no longer ships.")
+        return []
+
+    pruned_ids: list[str] = []
     for overlay in overlays:
-        if isinstance(overlay, dict) and canonical_name == overlay.get("canonicalName"):
+        overlay_id = overlay.get("id")
+        if (
+            overlay_id is None
+            or overlay_id in keep_ids
+            or overlay.get("sourcePath") is None
+            or overlay.get("createdBy") == SERVICE_REGISTRATION_CREATOR
+        ):
+            continue
+        success, response = make_api_request("DELETE", f"overlays/{overlay_id}", api_url)
+        if success:
+            logger.info(f"Removed overlay {overlay_id} for {overlay['sourcePath']}, which the workload no longer ships")
+            pruned_ids.append(overlay_id)
+        else:
+            logger.error(f"Failed to remove overlay {overlay_id}: {response.get('error', 'Unknown error')}")
+    return pruned_ids
+
+
+def get_overlay_id(chart_id: str, source_path: str, canonical_name: str | None, api_url: httpx.URL) -> str | None:
+    """Get the ID of the overlay registered from `source_path` on the chart.
+
+    Several recipe files may declare the same model, so the file path is the overlay's identity.
+    An overlay AIWB registered before overlays recorded their file has no source path; one declaring
+    the same canonical name is adopted instead, so re-registering does not duplicate it. An overlay
+    without a source path that anyone else created may be a user's API-authored override, so it is
+    never adopted and the recipe gets a row of its own.
+    """
+    overlays = list_chart_overlays(chart_id, api_url)
+    if overlays is None:
+        return None
+    for overlay in overlays:
+        if overlay.get("sourcePath") == source_path:
+            return overlay.get("id")
+    for overlay in overlays:
+        if (
+            overlay.get("sourcePath") is None
+            and overlay.get("createdBy") == SERVICE_REGISTRATION_CREATOR
+            and overlay.get("canonicalName") == canonical_name
+        ):
             return overlay.get("id")
     return None
 
@@ -231,13 +295,14 @@ def process_single_overlay(overlay_file: Path, rel_path_str: str, api_url: httpx
                 logger.error(f"Failed to create temporary file for overlay: {overlay_file.name}")
                 return (ProcessingStatus.FAILED, "Error creating temp file")
 
-            data = {"chartId": chart_id}
+            source_path = Path(rel_path_str).as_posix()
+            data = {"chartId": chart_id, "sourcePath": source_path}
             if canonical_name:
                 data["canonicalName"] = canonical_name
 
             files = {"overlayFile": [Path(temp_path)]}
 
-            existing_id = get_overlay_id(chart_id, canonical_name, api_url)
+            existing_id = get_overlay_id(chart_id, source_path, canonical_name, api_url)
             endpoint = f"overlays/{existing_id}" if existing_id else "overlays"
             method = "PUT" if existing_id else "POST"
 

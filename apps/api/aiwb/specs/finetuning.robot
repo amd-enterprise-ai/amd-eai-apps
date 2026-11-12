@@ -45,6 +45,18 @@ Finetuning workload starts running
     And a finetuning workload exists
     Then Finetuning workload should reach status "Running"
 
+Fine-tuning job runs on a GPU its base model supports
+    [Documentation]    A base model may offer different training settings for each GPU family.
+    ...    A run has to land on hardware its settings were written for, or it can run out of
+    ...    memory or never start on a cluster with more than one GPU family.
+    [Tags]    finetuning    workload    placement    requires-gpu    kubectl    needs-aim-images    requires-finetunable-model    requires-gpu-unallocated:1
+
+    Given a ready project with user access exists
+    And the project has fine-tuning quota available
+    And finetuning storage credentials are available to the project
+    And a finetuning workload exists
+    Then the fine-tuning job should run on a GPU its base model supports
+
 Running fine-tuning job reports its planned output
     [Documentation]    A fine-tuning job tells users whether it will produce a full model,
     ...    merged model, or reusable adapter while work is still in progress.

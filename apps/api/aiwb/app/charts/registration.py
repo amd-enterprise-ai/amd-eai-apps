@@ -14,6 +14,7 @@ from api_common.database import get_session
 from workloads_manager.core.workloads import get_registerable_workloads
 from workloads_manager.models import OverlayData
 
+from ..overlays.models import Overlay
 from ..overlays.repository import delete_overlays_absent_from_chart, list_overlays
 from ..overlays.schemas import OverlayUpdate
 from ..overlays.service import create_overlay, update_overlay
@@ -62,9 +63,17 @@ async def register_workloads() -> None:
                     schema = ChartCreate(**form_data)
                     chart = await create_chart(session, chart_schema=schema, creator=REGISTRATION_CREATOR)
 
+                overlay_files = workload.get_overlay_files()
+                chart_overlays = list(await list_overlays(session=session, chart_id=chart.id)) if overlay_files else []
                 registered_ids = [
-                    await register_overlay(session, chart_id=chart.id, file_path=file_path)
-                    for file_path, _rel_path_str in workload.get_overlay_files()
+                    await register_overlay(
+                        session,
+                        chart_id=chart.id,
+                        file_path=file_path,
+                        source_path=Path(rel_path_str).as_posix(),
+                        chart_overlays=chart_overlays,
+                    )
+                    for file_path, rel_path_str in overlay_files
                 ]
                 # Finding no recipe files is ambiguous: the chart may ship none, or the overlay
                 # directories may never have been read (ALLOWED_CHART_PATHS carrying no
@@ -84,38 +93,63 @@ async def register_workloads() -> None:
             raise e
 
 
-async def register_overlay(session: AsyncSession, chart_id: UUID, file_path: Path) -> UUID:
-    """Create or refresh the overlay row backing a single recipe file, returning its ID."""
+async def register_overlay(
+    session: AsyncSession, chart_id: UUID, file_path: Path, source_path: str, chart_overlays: list[Overlay]
+) -> UUID:
+    """Create or refresh the overlay row backing a single recipe file, returning its ID.
+
+    `source_path` is the file's path relative to the chart; it is the row's identity, since several
+    files may declare the same model. `chart_overlays` is the chart's overlays, loaded once per
+    chart and kept current here as rows are written, so each file need not reload them.
+    """
     raw_data = yaml.safe_load(file_path.read_text(encoding="utf-8"))
-    canonical_name = OverlayData(**raw_data).canonical_name if raw_data and isinstance(raw_data, dict) else None
+    # An emptied file must not refresh its row: the row would keep the old model-specific body while
+    # losing its canonical name, turning it into a generic overlay merged into every model's launch.
+    if not raw_data or not isinstance(raw_data, dict):
+        raise ValueError(f"Overlay data is required for recipe file '{source_path}'.")
+    canonical_name = OverlayData(**raw_data).canonical_name
 
-    # list_overlays returns every overlay for the chart when canonical_name is None, so filter
-    # explicitly: a generic file must never adopt an unrelated canonical-named overlay's row.
-    existing_overlays = [
-        overlay
-        for overlay in await list_overlays(session=session, chart_id=chart_id, canonical_name=canonical_name)
-        if overlay.canonical_name == canonical_name
-    ]
-    overlay_schema: dict = {"chart_id": chart_id}
-    if raw_data:
-        overlay_schema["overlay"] = raw_data
+    existing = next((overlay for overlay in chart_overlays if overlay.source_path == source_path), None)
+    if existing is None:
+        # Rows registered before overlays recorded their file carry no source path. The first file
+        # declaring the same model adopts one, so the upgrade neither duplicates a recipe nor leaves
+        # a stale copy that pruning cannot trace. Only rows this registration created qualify: a
+        # generic file must never adopt an unrelated canonical-named row, nor any row an API user
+        # authored.
+        existing = next(
+            (
+                overlay
+                for overlay in chart_overlays
+                if overlay.source_path is None
+                and overlay.created_by == REGISTRATION_CREATOR
+                and overlay.canonical_name == canonical_name
+            ),
+            None,
+        )
 
-    if existing_overlays:
+    if existing is not None:
         overlay = await update_overlay(
             session=session,
-            overlay_id=existing_overlays[0].id,
-            overlay_update=OverlayUpdate(**overlay_schema, updated_by=REGISTRATION_CREATOR),
+            overlay_id=existing.id,
+            overlay_update=OverlayUpdate(
+                chart_id=chart_id,
+                canonical_name=canonical_name,
+                source_path=source_path,
+                overlay=raw_data,
+                updated_by=REGISTRATION_CREATOR,
+            ),
         )
+        chart_overlays.remove(existing)
     else:
-        if not raw_data:
-            raise ValueError("Overlay data is required for creating an overlay.")
         overlay = await create_overlay(
             session=session,
             chart_id=chart_id,
             overlay_data=raw_data,
             canonical_name=canonical_name,
             creator=REGISTRATION_CREATOR,
+            source_path=source_path,
         )
+    chart_overlays.append(overlay)
     return overlay.id
 
 

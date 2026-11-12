@@ -23,7 +23,7 @@ from unittest.mock import AsyncMock, MagicMock
 from prometheus_api_client import PrometheusConnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api_common.auth.security import get_user_email
+from api_common.auth.security import auth_token_claimset, ensure_platform_administrator, get_user_email
 from api_common.database import get_session
 from app import app  # type: ignore[attr-defined]
 from app.dispatch.kube_client import KubernetesClient, get_kube_client
@@ -86,6 +86,19 @@ BASE_OVERRIDES: dict[Callable[..., Any], Callable[..., Any]] = {
 SESSION_OVERRIDES: dict[Callable[..., Any], Callable[..., Any]] = {
     **BASE_OVERRIDES,
     get_session: lambda: AsyncMock(spec=AsyncSession),
+}
+
+# Session + Platform Administrator role (for routes that change cluster-wide state)
+PLATFORM_ADMIN_OVERRIDES: dict[Callable[..., Any], Callable[..., Any]] = {
+    **SESSION_OVERRIDES,
+    ensure_platform_administrator: lambda: None,
+}
+
+# Session + a verified token that lacks the Platform Administrator role. The role check
+# itself is not overridden, so it runs against these claims.
+TEAM_MEMBER_OVERRIDES: dict[Callable[..., Any], Callable[..., Any]] = {
+    **SESSION_OVERRIDES,
+    auth_token_claimset: lambda: {"email": "test@example.com", "realm_access": {"roles": ["Team Member"]}},
 }
 
 # Session + MinIO client (for dataset and model operations)

@@ -52,7 +52,7 @@ def security(monkeypatch, jwks):
     """Load the auth modules with the given environment and a fake JWKS."""
 
     def load(**env):
-        for name in ("OIDC_JWKS_URL", "OIDC_ISSUER", "OIDC_AUDIENCE", "DISABLE_JWT_VALIDATION"):
+        for name in ("OIDC_JWKS_URL", "OIDC_ISSUER", "OIDC_AUDIENCE", "OIDC_ADMIN_GROUPS", "DISABLE_JWT_VALIDATION"):
             monkeypatch.delenv(name, raising=False)
         env.setdefault("OIDC_ISSUER", ISSUER)
         for name, value in env.items():
@@ -193,6 +193,107 @@ def test_groups_default_to_empty_list(security):
 
     assert module.get_user_groups({}) == []
     assert module.get_user_groups({"groups": "not-a-list"}) == []
+
+
+def test_platform_administrator_role_is_accepted(security):
+    module = security()
+
+    assert (
+        module.ensure_platform_administrator({"realm_access": {"roles": ["Team Member", "Platform Administrator"]}})
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "claimset",
+    [
+        {},
+        {"realm_access": {}},
+        {"realm_access": {"roles": ["Team Member"]}},
+        {"realm_access": {"roles": "Platform Administrator"}},
+        {"realm_access": "Platform Administrator"},
+        {"groups": ["Platform Administrator"]},
+    ],
+)
+def test_platform_administrator_role_is_required(security, claimset):
+    """A missing or malformed role claim, or the role name arriving as a group, never grants the role."""
+    module = security()
+
+    with pytest.raises(HTTPException) as exc:
+        module.ensure_platform_administrator(claimset)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Missing required role: Platform Administrator"
+
+
+def test_configured_admin_group_grants_the_role(security):
+    """An issuer without realm roles can name the group whose members are administrators."""
+    module = security(OIDC_ADMIN_GROUPS='["platform-admins", "ops"]', OIDC_AUDIENCE="aiwb")
+
+    assert module.ensure_platform_administrator({"groups": ["team-a", "ops"]}) is None
+
+
+def test_admin_group_name_with_a_comma_stays_one_group(security):
+    """A comma inside a name, as in an LDAP distinguished name, must not split it into broader groups."""
+    module = security(OIDC_ADMIN_GROUPS='["cn=admins,ou=groups"]', OIDC_AUDIENCE="aiwb")
+
+    assert module.ensure_platform_administrator({"groups": ["cn=admins,ou=groups"]}) is None
+    for partial in ("cn=admins", "ou=groups"):
+        with pytest.raises(HTTPException) as exc:
+            module.ensure_platform_administrator({"groups": [partial]})
+        assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["platform-admins", "platform-admins,ops", '"platform-admins"', '{"group": "x"}', '[""]', '["ok", 1]', "[null]"],
+)
+def test_malformed_admin_groups_refuse_to_start(security, raw):
+    """Anything but a JSON list of non-empty names is a misconfiguration, never a guess at what was meant."""
+    with pytest.raises(RuntimeError, match="OIDC_ADMIN_GROUPS must be a JSON list"):
+        security(OIDC_ADMIN_GROUPS=raw, OIDC_AUDIENCE="aiwb")
+
+
+@pytest.mark.parametrize(
+    "claimset",
+    [
+        {"groups": ["team-a"]},
+        {"groups": "platform-admins"},
+        {"groups": [{"name": "platform-admins"}]},
+        {"groups": ["/platform-admins"]},
+    ],
+)
+def test_admin_group_must_match_exactly(security, claimset):
+    """Only an exact group name in a list grants the role; a path, a string or an object does not."""
+    module = security(OIDC_ADMIN_GROUPS='["platform-admins"]', OIDC_AUDIENCE="aiwb")
+
+    with pytest.raises(HTTPException) as exc:
+        module.ensure_platform_administrator(claimset)
+
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize("groups", ["a", "team-a"])
+def test_groups_claim_as_a_string_never_grants_the_role(security, groups):
+    """A string claim iterates as characters, so only the list check stops it matching a one-character group."""
+    module = security(OIDC_ADMIN_GROUPS='["a"]', OIDC_AUDIENCE="aiwb")
+
+    with pytest.raises(HTTPException) as exc:
+        module.ensure_platform_administrator({"groups": groups})
+
+    assert exc.value.status_code == 403
+
+
+def test_realm_role_still_grants_the_role_with_admin_groups(security):
+    module = security(OIDC_ADMIN_GROUPS='["platform-admins"]', OIDC_AUDIENCE="aiwb")
+
+    assert module.ensure_platform_administrator({"realm_access": {"roles": ["Platform Administrator"]}}) is None
+
+
+def test_admin_groups_require_an_audience(security):
+    """Every client of an issuer gets the same groups, so trusting one needs the audience check."""
+    with pytest.raises(RuntimeError, match="OIDC_AUDIENCE"):
+        security(OIDC_ADMIN_GROUPS='["platform-admins"]')
 
 
 def test_empty_jwks_url_falls_back_to_keycloak(security):

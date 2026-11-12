@@ -26,6 +26,7 @@ from app.cluster.service import (
 from app.cluster.utils import (
     node_aim_accelerator_model_counts,
     node_aim_gpu_accelerator_model,
+    normalize_gpu_device_id,
     parse_container_image_repository_and_tag,
 )
 from app.custom_models.constants import (
@@ -139,6 +140,20 @@ def test_parse_container_image_repository_and_tag(
     repository, tag_or_digest = parse_container_image_repository_and_tag(image_ref)
     assert repository == expected_repository
     assert tag_or_digest == expected_tag_or_digest
+
+
+@pytest.mark.parametrize(
+    ("device_id", "expected"),
+    [
+        ("74a1", "74a1"),
+        ("0x75a8", "75a8"),
+        ("0X75A8", "75a8"),
+        (" 74B5 ", "74b5"),
+        (7448, "7448"),
+    ],
+)
+def test_normalize_gpu_device_id(device_id: str | int, expected: str) -> None:
+    assert normalize_gpu_device_id(device_id) == expected
 
 
 @pytest.mark.parametrize(

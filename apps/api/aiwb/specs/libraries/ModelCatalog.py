@@ -20,6 +20,10 @@ _GATED_PREFIXES = (
     "CohereLabs/",
 )
 
+# Releases inside a gated family that Hugging Face serves without approval. Gemma 4 ships under
+# Apache 2.0, unlike the earlier Gemma releases that sit behind Google's license gate.
+_OPEN_RELEASES_OF_GATED_FAMILIES = ("google/gemma-4",)
+
 # Model families that require HuggingFace approval / license acceptance before
 # their weights can be downloaded. On clusters where the artifact download pod
 # does not receive an HF token, deploying any of these fails at
@@ -145,6 +149,8 @@ def _param_count_billions(canonical_name: str) -> float:
 
 
 def _is_gated(canonical_name: str) -> bool:
+    if canonical_name.startswith(_OPEN_RELEASES_OF_GATED_FAMILIES):
+        return False
     return any(canonical_name.startswith(prefix) for prefix in _GATED_PREFIXES)
 
 
@@ -942,6 +948,106 @@ def assert_no_adapter_attributable_to_workload(adapters: list, workload_id: str)
                 f"Fine-tuning run {workload_id} left an adapter behind although none was asked for: "
                 f"{adapter.get('artifact', {}).get('metadata', {}).get('name')}"
             )
+
+
+def _bare_gpu_device_id(device_id: object) -> str:
+    """Reduce a GPU device ID to bare lowercase hex: recipes write ``0x75a8``, node labels ``75a8``."""
+    return str(device_id).strip().lower().removeprefix("0x")
+
+
+_NODE_GPU_DEVICE_ID_LABELS = ("amd.com/gpu.device-id", "beta.amd.com/gpu.device-id")
+
+
+def get_base_model_supported_gpus(models: list, canonical_name: str) -> list[str]:
+    """Return the GPU device IDs the base model's offered settings were written for, empty when they name none."""
+    for model in models:
+        if model.get("canonicalName") == canonical_name:
+            return [str(gpu) for gpu in model.get("compatibleAccelerators") or []]
+    raise ValueError(f"Model {canonical_name!r} not found in the finetunable catalog")
+
+
+def name_of_fine_tuning_job(jobs: list) -> str:
+    """Return the name of the Job a fine-tuning run created, raising until it exists so a caller polling keeps waiting."""
+    for job in jobs:
+        name = job.get("metadata", {}).get("name")
+        if name:
+            return name
+    raise AssertionError("The fine-tuning run has created no job yet")
+
+
+def node_running_fine_tuning_job(pods: list) -> str:
+    """Return the node a fine-tuning job's pod was placed on, raising until one is placed so a caller keeps waiting."""
+    for pod in pods:
+        node_name = pod.get("spec", {}).get("nodeName")
+        if node_name:
+            return node_name
+    raise AssertionError("The fine-tuning job has no pod placed on a node yet")
+
+
+def node_should_have_a_supported_gpu(node: dict, supported_gpus: list) -> None:
+    """Assert the node carries a GPU the base model's settings were written for, however either side writes the ID."""
+    labels = node.get("metadata", {}).get("labels", {})
+    node_gpus = {_bare_gpu_device_id(labels[label]) for label in _NODE_GPU_DEVICE_ID_LABELS if labels.get(label)}
+    if node_gpus.isdisjoint(_bare_gpu_device_id(gpu) for gpu in supported_gpus):
+        node_name = node.get("metadata", {}).get("name")
+        raise AssertionError(
+            f"The fine-tuning job runs on node {node_name!r} with GPUs {sorted(node_gpus) or 'unknown'}, "
+            f"but its base model's settings were written for {list(supported_gpus)}"
+        )
+
+
+def _section(container: dict, key: str) -> dict:
+    """Return a mapping nested in external recipe data, or an empty one when it is absent or malformed."""
+    value = container.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def get_recipes_the_cluster_should_offer(recipes: list, profiles: list, accelerators: list) -> list[str]:
+    """Return the base models whose recipes the fine-tuning catalog must offer on this cluster.
+
+    A recipe qualifies when a Ready profile publishes its aimId and it either declares no GPUs or
+    declares one the cluster has, however either side writes the ID. This is decided from the
+    cluster's own hardware, profiles and recipes, never from the catalog under test, so a catalog
+    that wrongly drops a model cannot also make its check disappear.
+
+    ``recipes`` are the fine-tuning chart's overlays from GET /v1/overlays, ``profiles`` the data of
+    GET /v1/inference/profiles and ``accelerators`` the data of GET /v1/cluster/accelerators.
+    """
+    cluster_gpus = {
+        _bare_gpu_device_id(accelerator["deviceId"])
+        for accelerator in accelerators
+        if accelerator.get("acceleratorType") == "gpu" and accelerator.get("deviceId")
+    }
+    servable_aim_ids = {
+        profile.get("spec", {}).get("aimId")
+        for profile in profiles
+        if profile.get("status", {}).get("status") == "Ready"
+    }
+    # An overlay authored through the API carries no source path and stands in as a recipe only for
+    # a model the chart ships no recipe file for; otherwise it only adjusts the recipe chosen.
+    models_with_recipe_files = {recipe.get("canonicalName") for recipe in recipes if recipe.get("sourcePath")}
+    expected = set()
+    for recipe in recipes:
+        if not recipe.get("sourcePath") and recipe.get("canonicalName") in models_with_recipe_files:
+            continue
+        body = _section(recipe, "overlay")
+        if not recipe.get("canonicalName") or _section(body, "aimManifest").get("aimId") not in servable_aim_ids:
+            continue
+        declared = _section(body, "metadata").get("compatibleAccelerators")
+        if declared is not None and cluster_gpus.isdisjoint(_bare_gpu_device_id(gpu) for gpu in declared):
+            continue
+        expected.add(recipe["canonicalName"])
+    return sorted(expected)
+
+
+def assert_finetuning_catalog_offers(models: list, expected: list) -> None:
+    """Assert every expected base model is offered, naming each one the catalog left out."""
+    offered = {model.get("canonicalName") for model in models}
+    missing = [name for name in expected if name not in offered]
+    if missing:
+        raise AssertionError(
+            f"Base models whose recipes support this cluster's GPUs are not offered for fine-tuning: {missing}"
+        )
 
 
 def _cpu_profiles_by_aim(profiles: list) -> dict[str, tuple[int, str, str]]:

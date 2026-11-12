@@ -10,11 +10,13 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 from pydantic.alias_generators import to_camel
 from sqlalchemy.orm import Session
 
-from api_common.auth.security import get_user_email
+from api_common.auth.security import ensure_platform_administrator, get_user_email
 from api_common.database import get_session
 from api_common.exceptions import ValidationException
 from api_common.schemas import ListResponse, QueryParam
 
+from ..common_responses import PLATFORM_ADMINISTRATOR_RESPONSES
+from .models import SOURCE_PATH_MAX_LENGTH
 from .repository import list_overlays
 from .schemas import OverlayListQuery, OverlayResponse, OverlayUpdate
 from .service import create_overlay, delete_overlay_by_id_service, get_overlay_by_id, parse_overlay_file, update_overlay
@@ -33,19 +35,24 @@ router = APIRouter(tags=["Overlays"])
         An overlay layers chart-specific or model-specific value overrides
         on top of a chart's signature defaults, so the same chart can be
         reused for different models or runtime profiles without forking
-        the template. The overlay is keyed by `(chartId, canonicalName)`:
-        omitting `canonicalName` creates a generic fallback that matches
-        any model.
+        the template. An overlay registered from a chart file is keyed by
+        `(chartId, sourcePath)`, so a chart can ship one recipe per GPU
+        family for the same model. Without `sourcePath` it is keyed by
+        `(chartId, canonicalName)`; omitting `canonicalName` as well creates
+        a generic fallback that matches any model.
 
-        Overlays are global (not project-scoped).
+        Overlays are global (not project-scoped) and apply to every project's
+        deployments, so only a Platform Administrator can create them.
     """),
     responses={
+        **PLATFORM_ADMINISTRATOR_RESPONSES,
         400: {"description": "Invalid YAML overlay file or non-YAML file extension."},
         404: {"description": "Referenced chart not found."},
         409: {"description": "An overlay with these parameters already exists for the chart."},
     },
 )
 async def create_overlay_endpoint(
+    _: None = Depends(ensure_platform_administrator),
     chart_id: UUID = Form(alias=to_camel("chart_id"), description="The ID of an existing Chart."),
     overlay_file: UploadFile = File(
         alias=to_camel("overlay_file"), description="YAML file containing the model overlay"
@@ -61,6 +68,13 @@ async def create_overlay_endpoint(
         alias=to_camel("display_name"),
         description="Optional user-visible display name for this overlay.",
     ),
+    source_path: str | None = Form(
+        None,
+        alias=to_camel("source_path"),
+        max_length=SOURCE_PATH_MAX_LENGTH,
+        description="Optional path of the chart file this overlay is registered from, relative to the chart.",
+        examples=["overrides/models/meta-llama_Llama-3.1-8B.yaml"],
+    ),
     session: Session = Depends(get_session),
     creator: str = Depends(get_user_email),
 ) -> OverlayResponse:
@@ -72,6 +86,7 @@ async def create_overlay_endpoint(
         canonical_name=canonical_name,
         display_name=display_name,
         creator=creator,
+        source_path=source_path,
     )
     return overlay
 
@@ -84,21 +99,25 @@ async def create_overlay_endpoint(
         Update an existing overlay in place.
 
         Supports partial updates: at least one of `overlayFile`, `chartId`,
-        or `canonicalName` must be supplied — submitting an empty form
-        returns 400. Providing `overlayFile` replaces the parsed overlay
-        body wholesale; `chartId` repoints the overlay at a different
-        chart; `canonicalName` rekeys the `(chartId, canonicalName)`
-        identity used to match the overlay to models.
+        `canonicalName`, `displayName` or `sourcePath` must be supplied —
+        submitting an empty form returns 400. Providing `overlayFile`
+        replaces the parsed overlay body wholesale; `chartId` repoints the
+        overlay at a different chart; `canonicalName` changes the model the
+        overlay matches; `sourcePath` records the chart file it is
+        registered from.
 
-        Overlays are global (not project-scoped).
+        Overlays are global (not project-scoped); only a Platform
+        Administrator can update them.
     """),
     responses={
+        **PLATFORM_ADMINISTRATOR_RESPONSES,
         400: {"description": "Invalid YAML overlay file, or no updatable fields provided."},
         404: {"description": "Overlay not found, or referenced chart not found."},
     },
 )
 async def update_overlay_endpoint(
     overlay_id: UUID,
+    _: None = Depends(ensure_platform_administrator),
     chart_id: UUID = Form(None, alias=to_camel("chart_id"), description="The ID of an existing Chart."),
     overlay_file: UploadFile | None = File(
         None, alias=to_camel("overlay_file"), description="YAML file containing the model overlay"
@@ -114,15 +133,22 @@ async def update_overlay_endpoint(
         alias=to_camel("display_name"),
         description="Optional user-visible display name for this overlay.",
     ),
+    source_path: str | None = Form(
+        None,
+        alias=to_camel("source_path"),
+        max_length=SOURCE_PATH_MAX_LENGTH,
+        description="Optional path of the chart file this overlay is registered from, relative to the chart.",
+        examples=["overrides/models/meta-llama_Llama-3.1-8B.yaml"],
+    ),
     session: Session = Depends(get_session),
     updater: str = Depends(get_user_email),
 ) -> OverlayResponse:
     overlay_data = None
     if overlay_file:
         overlay_data = await parse_overlay_file(overlay_file)
-    if not overlay_data and not chart_id and not canonical_name and display_name is None:
+    if not overlay_data and not chart_id and not canonical_name and display_name is None and not source_path:
         raise ValidationException(
-            "Either 'overlayFile' or 'chartId' or 'canonicalName' or 'displayName' must be provided"
+            "Either 'overlayFile' or 'chartId' or 'canonicalName' or 'displayName' or 'sourcePath' must be provided"
         )
 
     update_kwargs: dict[str, Any] = {"updated_by": updater}
@@ -134,6 +160,8 @@ async def update_overlay_endpoint(
         update_kwargs["canonical_name"] = canonical_name
     if display_name is not None:
         update_kwargs["display_name"] = display_name
+    if source_path is not None:
+        update_kwargs["source_path"] = source_path
     overlay_update = OverlayUpdate(**update_kwargs)
 
     overlay = await update_overlay(
@@ -201,14 +229,17 @@ async def get_overlay_endpoint(
         have matched this overlay fall back to chart defaults (or to a
         generic overlay if one exists for the chart).
 
-        Overlays are global (not project-scoped).
+        Overlays are global (not project-scoped); only a Platform
+        Administrator can delete them.
     """),
     responses={
+        **PLATFORM_ADMINISTRATOR_RESPONSES,
         404: {"description": "Overlay not found."},
     },
 )
 async def delete_overlay_endpoint(
     overlay_id: UUID,
+    _: None = Depends(ensure_platform_administrator),
     session: Session = Depends(get_session),
 ) -> None:
     await delete_overlay_by_id_service(session, overlay_id)

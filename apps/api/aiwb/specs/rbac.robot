@@ -6,7 +6,12 @@
 Documentation       API-level RBAC tests for AIWB endpoints accessed by AIRM team members.
 ...                 Verifies that AIWB enforces the team-member access model: a user with the
 ...                 team member role assigned to an AIRM project can call AIWB namespace-scoped
-...                 endpoints for that project's namespace.
+...                 endpoints for that project's namespace, but cannot change the cluster-wide
+...                 chart catalog that every project deploys from.
+...
+...                 The catalog scenarios cover one change per kind of catalog entry and one read.
+...                 Every chart and overlay create, update and delete route is checked for the
+...                 Platform Administrator role by the API unit tests.
 ...
 ...                 The team member session infrastructure lives in the AIRM specs
 ...                 (`airm_rbac.resource`, `APICredentials.py`) because team-member roles and
@@ -21,7 +26,7 @@ Resource            resources/aiwb_rbac.resource
 Resource            resources/airm_projects.resource
 
 Suite Setup         Initialize AIWB RBAC Test Suite
-Suite Teardown      Clean Up All Created Projects
+Suite Teardown      Run Keywords    Clean Up Overlay Test Environment    AND    Clean Up All Created Projects
 
 
 *** Keywords ***
@@ -62,3 +67,56 @@ Team member can list AIM services for assigned project via API
 
     Then response should be successful
     And response should contain AIM service list
+
+Team member can read the chart catalog via API
+    [Documentation]    Verifies that a team member can still see the cluster-wide catalog
+    ...    they deploy from, although they cannot change it.
+    [Tags]    rbac    access-control    charts    list    smoke    needs-team-member
+
+    Given a team member API session exists
+    And a chart exists
+
+    When team member lists the chart catalog
+
+    Then response should be successful
+    And the catalog listing should include the chart
+
+Team member cannot add a chart to the catalog via API
+    [Documentation]    Verifies that a team member cannot add a chart to the cluster-wide
+    ...    catalog, since every project would then deploy from it.
+    [Tags]    rbac    access-control    charts    create    smoke    needs-team-member
+
+    Given a team member API session exists
+    And valid chart data is prepared
+
+    When team member uploads the chart
+
+    Then response should be forbidden
+    And the chart should not be in the catalog
+
+Team member cannot remove a chart from the catalog via API
+    [Documentation]    Verifies that a team member cannot remove a chart that other projects
+    ...    rely on from the cluster-wide catalog.
+    [Tags]    rbac    access-control    charts    delete    smoke    needs-team-member
+
+    Given a team member API session exists
+    And a chart exists
+
+    When team member deletes the chart
+
+    Then response should be forbidden
+    And the chart should still be in the catalog
+
+Team member cannot remove an overlay from the catalog via API
+    [Documentation]    Verifies that a team member cannot remove an overlay that shapes other
+    ...    projects' deployments from the cluster-wide catalog.
+    [Tags]    rbac    access-control    overlays    delete    smoke    needs-team-member
+
+    Given a team member API session exists
+    And a chart exists
+    And an overlay exists
+
+    When team member deletes the overlay
+
+    Then response should be forbidden
+    And overlay should exist in system

@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: MIT
 
 import asyncio
+import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -145,6 +147,65 @@ def test_chart_directory_with_no_files() -> None:
 
         # But it should be empty
         assert list(chart_path.iterdir()) == []
+
+
+def _assert_chart_directory_rejects(malicious_path: str, tmp_path: Path, temp_base: Path) -> None:
+    chart = Chart(
+        name="malicious-chart",
+        type=WorkloadType.INFERENCE,
+        signature={},
+        files=[
+            ChartFile(path="Chart.yaml", content="apiVersion: v2"),
+            ChartFile(path=malicious_path, content="pwned"),
+        ],
+    )
+
+    with pytest.raises(ValidationException, match="outside the chart directory"), chart_directory(chart):
+        pytest.fail("chart_directory should not yield for an escaping path")
+
+    assert not (tmp_path / "escaped.yaml").exists()
+    assert not (temp_base / "escaped.yaml").exists()
+    assert not (temp_base / "outside").exists()
+    # The temp directory itself is still cleaned up on rejection.
+    assert list(temp_base.iterdir()) == []
+
+
+@pytest.fixture
+def temp_base(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Root tempfile under tmp_path so writes escaping the chart temp dir are observable."""
+    base = tmp_path / "base"
+    base.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(base))
+    return base
+
+
+@pytest.mark.parametrize(
+    "malicious_path",
+    ["../escaped.yaml", "templates/../../escaped.yaml", "../outside/escaped.yaml", "."],
+)
+def test_chart_directory_rejects_relative_paths_escaping_temp_dir(
+    malicious_path: str, tmp_path: Path, temp_base: Path
+) -> None:
+    """Stored relative paths that resolve outside the temp directory must never be written."""
+    _assert_chart_directory_rejects(malicious_path, tmp_path, temp_base)
+
+
+def test_chart_directory_rejects_absolute_path(tmp_path: Path, temp_base: Path) -> None:
+    """Absolute stored paths would discard the temp dir prefix on join and must be rejected."""
+    _assert_chart_directory_rejects(str(tmp_path / "escaped.yaml"), tmp_path, temp_base)
+
+
+def test_chart_directory_allows_dot_segments_that_stay_inside() -> None:
+    """Paths that normalize to a location inside the chart are still materialized."""
+    chart = Chart(
+        name="dot-segment-chart",
+        type=WorkloadType.INFERENCE,
+        signature={},
+        files=[ChartFile(path="templates/../values.yaml", content="replicas: 1")],
+    )
+
+    with chart_directory(chart) as chart_path:
+        assert (chart_path / "values.yaml").read_text() == "replicas: 1"
 
 
 # =============================================================================

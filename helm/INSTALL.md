@@ -515,6 +515,7 @@ oidc:
   jwksUrl: http://dex.dex.svc:5556/keys # the JWKS as the API reaches it, required
   audience: aiwb # optional, empty means not checked
   scopes: "openid profile email" # optional, this is also the default
+  adminGroups: [platform-admins] # optional, requires audience
 ```
 
 `jwksUrl` is required as soon as `issuer` or `internalUrl` is set. The chart
@@ -527,6 +528,28 @@ access token must be a signed JWT with the `email` claim, and with the
 `groups` claim when the installation is not standalone. The UI reads the
 token, userinfo and JWKS endpoints from the discovery document of
 `internalUrl` and replaces the `issuer` prefix of each with `internalUrl`.
+
+On every installation, only a Platform Administrator can create, update or
+delete charts and overlays, because every project deploys from them. The API
+grants the role to a token whose `realm_access` claim is an object with a
+`roles` list holding `Platform Administrator`, as in
+`{"realm_access": {"roles": ["Platform Administrator"]}}`. Keycloak emits that
+claim for a realm role, so with Keycloak, create the `Platform Administrator`
+realm role and assign it to the administrators (see
+[Keycloak Realm Setup](#keycloak-realm-setup); `airm-realm.json` already
+defines it). The API also grants the role to a token whose `groups` claim holds
+one of the groups in `oidc.adminGroups`. The group name must match exactly, so
+a Keycloak group path such as `/platform-admins` does not match
+`platform-admins`. With another issuer, set `oidc.adminGroups` to the directory
+group of the administrators, and add `groups` to `oidc.scopes` when the issuer
+emits the claim only for that scope, as Dex does. `oidc.adminGroups` requires
+`oidc.audience`: every client of an issuer gets the same groups, so without the
+audience check a token minted for another client would grant the role. When
+the installation is not standalone, the `groups` claim also names the projects
+a user belongs to, so an admin group must not have the name of a project.
+Without either claim, these requests get 403 for every user. Either way, AIWB
+registers the charts and overlays it ships at startup, and every user can read
+them and deploy from them.
 
 The discovery document that the issuer serves on `internalUrl` must name the
 public `issuer`. The UI rejects a document with another issuer, and a token
@@ -543,9 +566,14 @@ The chart renders the block as environment variables. The UI reads
 fallback, so a chart or a `.env.local` file that still sets the former names
 works. The fallback is temporary and goes away in a later release. The UI also
 reads `OIDC_SCOPES`, which the chart renders from `oidc.scopes`; the default is
-`openid profile email`. The API reads `OIDC_JWKS_URL`, `OIDC_ISSUER` and
-`OIDC_AUDIENCE`; without them it derives the JWKS URL and the issuer from
-`KEYCLOAK_INTERNAL_URL`, `KEYCLOAK_PUBLIC_URL` and `KEYCLOAK_REALM`.
+`openid profile email`. The API reads `OIDC_JWKS_URL`, `OIDC_ISSUER`,
+`OIDC_AUDIENCE` and `OIDC_ADMIN_GROUPS` (a JSON list such as
+`["platform-admins"]`, rendered from `oidc.adminGroups`); without the first two
+it derives the JWKS URL and the issuer from `KEYCLOAK_INTERNAL_URL`,
+`KEYCLOAK_PUBLIC_URL` and `KEYCLOAK_REALM`. A JSON list keeps a group name that
+contains a comma, such as an LDAP distinguished name, as one group. The API
+refuses to start when `OIDC_ADMIN_GROUPS` is not a JSON list of non-empty
+names, or is set without `OIDC_AUDIENCE`.
 
 The API always checks the `iss` claim of the access token against
 `OIDC_ISSUER`. There is no value that turns the check off. A token from
@@ -768,9 +796,9 @@ discovery document names the public issuer on the in-cluster address too. See
 
 **Required Realm Roles:**
 
-| Role                     | Purpose                                                   |
-| ------------------------ | --------------------------------------------------------- |
-| `Platform Administrator` | Grants full platform access. Assign to at least one user. |
+| Role                     | Purpose                                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `Platform Administrator` | Grants full platform access, including changing AIWB's charts and overlays. Assign to at least one user. |
 
 **Client Mappers (on the UI login client):**
 
@@ -1399,6 +1427,13 @@ helm upgrade ai-gateway-discovery ./ai-gateway-discovery \
   --reuse-values \
   --set controller.gateway.routeHostname=ai.<YOUR-DOMAIN>
 ```
+
+> **Note**: Creating, updating and deleting AIWB charts and overlays (`POST`, `PUT` and `DELETE`
+> on `/v1/charts` and `/v1/overlays`) now needs the Platform Administrator role; any other caller
+> gets 403. Scripts and tools that make these changes, such as `wm register`, must use an
+> administrator's token. Reading charts and overlays, and the charts AIWB registers at startup,
+> are unchanged. See [AIWB with another OIDC issuer](#aiwb-with-another-oidc-issuer) for how
+> the API recognises the role.
 
 > **Note**: The `airm-configure` Job (see [Step 5](#step-5-onboard-a-cluster)) has a
 > fixed name and no Helm hook, so `helm upgrade` does not re-run it even when

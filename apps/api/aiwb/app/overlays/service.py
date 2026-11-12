@@ -24,6 +24,7 @@ async def create_overlay(
     canonical_name: str | None = None,
     display_name: str | None = None,
     creator: str | None = None,
+    source_path: str | None = None,
 ) -> Overlay:
     overlay = await insert_overlay(
         session=session,
@@ -32,6 +33,7 @@ async def create_overlay(
         canonical_name=canonical_name,
         display_name=display_name,
         creator=creator,
+        source_path=source_path,
     )
     return overlay
 

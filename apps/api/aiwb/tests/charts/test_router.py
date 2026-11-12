@@ -12,13 +12,20 @@ import yaml
 from fastapi import status
 from fastapi.testclient import TestClient
 
+from api_common.auth.security import auth_token_claimset
 from api_common.exceptions import ConflictException, NotFoundException
 from app import app  # type: ignore[attr-defined]
 from app.charts.models import Chart
 from app.charts.schemas import ChartFile as ChartFileSchema
 from app.charts.schemas import ChartListResponse, ChartResponse
 from app.workloads.enums import WorkloadType
-from tests.dependency_overrides import SESSION_OVERRIDES, override_dependencies
+from tests.dependency_overrides import (
+    PLATFORM_ADMIN_OVERRIDES,
+    SESSION_OVERRIDES,
+    TEAM_MEMBER_OVERRIDES,
+    override_dependencies,
+    runtime_dependency_overrides,
+)
 
 
 @pytest.fixture
@@ -105,7 +112,7 @@ def test_list_charts_with_invalid_type_returns_422() -> None:
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
-@override_dependencies(SESSION_OVERRIDES)
+@override_dependencies(PLATFORM_ADMIN_OVERRIDES)
 @patch("app.charts.router.create_chart", autospec=True)
 def test_create_chart_success(mock_repo_create_chart: MagicMock, chart_response: ChartResponse) -> None:
     """Test create chart endpoint returns 201."""
@@ -130,7 +137,7 @@ def test_create_chart_success(mock_repo_create_chart: MagicMock, chart_response:
     mock_repo_create_chart.assert_called_once()
 
 
-@override_dependencies(SESSION_OVERRIDES)
+@override_dependencies(PLATFORM_ADMIN_OVERRIDES)
 @patch("app.charts.router.update_chart", autospec=True)
 def test_update_chart_success(mock_update_chart: MagicMock, chart_response: ChartResponse) -> None:
     """Test update chart endpoint returns 200."""
@@ -153,7 +160,7 @@ def test_update_chart_success(mock_update_chart: MagicMock, chart_response: Char
     mock_update_chart.assert_called_once()
 
 
-@override_dependencies(SESSION_OVERRIDES)
+@override_dependencies(PLATFORM_ADMIN_OVERRIDES)
 @patch("app.charts.router.update_chart", autospec=True)
 def test_update_chart_conflict(mock_update_chart: MagicMock, chart_response: ChartResponse) -> None:
     """Test update chart with conflict returns 409."""
@@ -172,7 +179,7 @@ def test_update_chart_conflict(mock_update_chart: MagicMock, chart_response: Cha
     mock_update_chart.assert_called_once()
 
 
-@override_dependencies(SESSION_OVERRIDES)
+@override_dependencies(PLATFORM_ADMIN_OVERRIDES)
 @patch(
     "app.charts.router.create_chart",
     autospec=True,
@@ -196,7 +203,7 @@ def test_create_chart_duplicate_name(mock_repo_create_chart: MagicMock) -> None:
     mock_repo_create_chart.assert_called_once()
 
 
-@override_dependencies(SESSION_OVERRIDES)
+@override_dependencies(PLATFORM_ADMIN_OVERRIDES)
 @patch("app.charts.router.create_chart", autospec=True, side_effect=ValueError("Invalid input"))
 def test_create_chart_invalid_values(mock_repo_create_chart: MagicMock) -> None:
     """Test create chart with invalid values returns 400."""
@@ -216,7 +223,7 @@ def test_create_chart_invalid_values(mock_repo_create_chart: MagicMock) -> None:
     mock_repo_create_chart.assert_called_once()
 
 
-@override_dependencies(SESSION_OVERRIDES)
+@override_dependencies(PLATFORM_ADMIN_OVERRIDES)
 @patch("app.charts.router.delete_chart", autospec=True, return_value=False)
 def test_delete_chart_not_found(mock_repo_delete_chart: MagicMock) -> None:
     """Test delete chart not found returns 404."""
@@ -229,7 +236,7 @@ def test_delete_chart_not_found(mock_repo_delete_chart: MagicMock) -> None:
     mock_repo_delete_chart.assert_called_once()
 
 
-@override_dependencies(SESSION_OVERRIDES)
+@override_dependencies(PLATFORM_ADMIN_OVERRIDES)
 @patch("app.charts.router.delete_chart", autospec=True)
 def test_delete_chart_success(mock_repo_delete_chart: MagicMock, sample_chart: Chart) -> None:
     """Test delete chart success returns 204."""
@@ -237,6 +244,45 @@ def test_delete_chart_success(mock_repo_delete_chart: MagicMock, sample_chart: C
 
     with TestClient(app) as client:
         response = client.delete(f"/v1/charts/{sample_chart.id}")
+
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+    mock_repo_delete_chart.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "repository_function"),
+    [
+        ("POST", "/v1/charts", "create_chart"),
+        ("PUT", "/v1/charts/00000000-0000-0000-0000-000000000001", "update_chart"),
+        ("DELETE", "/v1/charts/00000000-0000-0000-0000-000000000001", "delete_chart"),
+    ],
+    ids=["create", "update", "delete"],
+)
+@override_dependencies(TEAM_MEMBER_OVERRIDES)
+def test_chart_mutations_require_platform_administrator(method: str, path: str, repository_function: str) -> None:
+    """Charts are cluster-wide, so a project member without the admin role must not change them."""
+    with patch(f"app.charts.router.{repository_function}", autospec=True) as mock_repository:
+        with TestClient(app) as client:
+            response = client.request(
+                method,
+                path,
+                data={"name": "chart", "type": WorkloadType.INFERENCE.value},
+                files=[("signature", ("values.yaml", yaml.dump({"key": "value"}), "text/yaml"))],
+            )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+    assert response.json()["detail"] == "Missing required role: Platform Administrator"
+    mock_repository.assert_not_called()
+
+
+@override_dependencies(SESSION_OVERRIDES)
+@patch("app.charts.router.delete_chart", autospec=True, return_value=True)
+def test_platform_administrator_token_can_delete_chart(mock_repo_delete_chart: MagicMock) -> None:
+    """The real role check accepts a token whose realm roles hold Platform Administrator."""
+    admin_claims = {"email": "admin@example.com", "realm_access": {"roles": ["Platform Administrator"]}}
+    with runtime_dependency_overrides({auth_token_claimset: lambda: admin_claims}):
+        with TestClient(app) as client:
+            response = client.delete(f"/v1/charts/{uuid4()}")
 
     assert response.status_code == status.HTTP_204_NO_CONTENT
     mock_repo_delete_chart.assert_called_once()

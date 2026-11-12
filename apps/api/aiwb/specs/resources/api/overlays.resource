@@ -9,6 +9,7 @@ Documentation       Keywords for interacting with the Catalog API overlays endpo
 Library             RequestsLibrary
 Library             Collections
 Library             OperatingSystem
+Library             CallerAuthorization
 Resource            resources/api/common.resource
 
 
@@ -128,14 +129,16 @@ Delete overlay
     ...
     ...    Args:
     ...    overlay_id (str): UUID of the overlay to delete
+    ...    access_token (str): Token to delete with (optional, defaults to the session's admin token)
     ...
     ...    Returns:
     ...    response: API response (empty on success)
-    [Arguments]             ${overlay_id}           ${expected_status}=any
+    [Arguments]             ${overlay_id}           ${expected_status}=any    ${access_token}=${None}
     Create API Session      aiwb
     ${endpoint}=            Overlays endpoint
+    &{request_options}=     Request options for token    ${access_token}
     Log                     DELETE ${endpoint}/${overlay_id}                 DEBUG
-    ${response}=            Safe Delete Request     ${endpoint}/${overlay_id}    expected_status=${expected_status}
+    ${response}=            Safe Delete Request     ${endpoint}/${overlay_id}    expected_status=${expected_status}    &{request_options}
     Log                     Delete overlay response: status=${response.status_code}                 DEBUG
     IF    ${response.status_code} == 204
         Log                     Deleted overlay ${overlay_id}                   INFO

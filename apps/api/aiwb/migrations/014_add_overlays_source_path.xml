@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Copyright © Advanced Micro Devices, Inc., or its affiliates.
+
+SPDX-License-Identifier: MIT
+-->
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.0.xsd">
+
+    <changeSet id="014-add-overlays-source-path" author="aiwb">
+        <comment>
+            Identify registered overlays by the recipe file they came from, so a chart can ship one
+            recipe per GPU family for the same model. Existing rows keep a NULL source_path and are
+            adopted by their recipe file on the next registration.
+        </comment>
+
+        <addColumn tableName="overlays">
+            <column name="source_path" type="VARCHAR(512)">
+                <constraints nullable="true"/>
+            </column>
+        </addColumn>
+
+        <dropIndex tableName="overlays" indexName="overlays_chart_id_canonical_name_key"/>
+
+        <sql>
+            CREATE UNIQUE INDEX overlays_chart_id_canonical_name_unsourced_key
+                ON overlays (chart_id, canonical_name)
+                WHERE source_path IS NULL;
+            CREATE UNIQUE INDEX overlays_chart_id_source_path_key
+                ON overlays (chart_id, source_path)
+                WHERE source_path IS NOT NULL;
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

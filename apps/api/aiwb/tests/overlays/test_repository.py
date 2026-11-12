@@ -124,6 +124,43 @@ async def test_create_overlay_duplicate_canonical_name_chart(db_session: AsyncSe
 
 
 @pytest.mark.asyncio
+async def test_recipes_from_different_files_may_share_a_canonical_name(db_session: AsyncSession) -> None:
+    """A chart can ship one recipe per GPU family for the same model."""
+    chart = await factory.create_chart(db_session, name=f"recipes-{uuid4()}")
+
+    general = await insert_overlay(
+        db_session, chart.id, {"finetuningGpus": 8}, "org/model", source_path="overrides/models/general.yaml"
+    )
+    mi350p = await insert_overlay(
+        db_session, chart.id, {"finetuningGpus": 1}, "org/model", source_path="overrides/models/mi350p.yaml"
+    )
+
+    overlays = await list_overlays(db_session, chart_id=chart.id, canonical_name="org/model")
+    assert {overlay.id for overlay in overlays} == {general.id, mi350p.id}
+
+
+@pytest.mark.asyncio
+async def test_create_overlay_duplicate_source_path_chart(db_session: AsyncSession) -> None:
+    """A chart file backs at most one overlay on its chart."""
+    chart = await factory.create_chart(db_session, name=f"recipes-{uuid4()}")
+    await insert_overlay(db_session, chart.id, {}, "org/model", source_path="overrides/models/recipe.yaml")
+
+    with pytest.raises(ConflictException, match="source path"):
+        await insert_overlay(db_session, chart.id, {}, "org/other", source_path="overrides/models/recipe.yaml")
+
+
+@pytest.mark.asyncio
+async def test_api_overlay_may_share_a_canonical_name_with_a_registered_recipe(db_session: AsyncSession) -> None:
+    """Uniqueness per canonical name only binds overlays that no chart file backs."""
+    chart = await factory.create_chart(db_session, name=f"recipes-{uuid4()}")
+    await insert_overlay(db_session, chart.id, {}, "org/model", source_path="overrides/models/recipe.yaml")
+
+    api_overlay = await insert_overlay(db_session, chart.id, {}, "org/model")
+
+    assert api_overlay.source_path is None
+
+
+@pytest.mark.asyncio
 async def test_overlay_isolation_between_charts(db_session: AsyncSession) -> None:
     """Test that overlays are properly isolated between different charts."""
     # Create charts
@@ -421,7 +458,7 @@ async def test_delete_overlays_absent_from_chart_spares_other_creators(db_sessio
 
 @pytest.mark.asyncio
 async def test_delete_overlays_absent_from_chart_spares_generic_overlays(db_session: AsyncSession) -> None:
-    """An overlay without a canonical name cannot be traced to a file, so it is never pruned."""
+    """An overlay with neither a canonical name nor a source path cannot be traced to a file, so it is never pruned."""
     chart = await factory.create_chart(db_session, name=f"prune-chart-{uuid4()}")
     generic = await factory.create_overlay(db_session, chart_id=chart.id, canonical_name=None, created_by="system")
 
@@ -430,6 +467,21 @@ async def test_delete_overlays_absent_from_chart_spares_generic_overlays(db_sess
     assert deleted == []
     remaining = await list_overlays(db_session, chart_id=chart.id)
     assert [o.id for o in remaining] == [generic.id]
+
+
+@pytest.mark.asyncio
+async def test_delete_overlays_absent_from_chart_prunes_generic_overlays_with_a_source(
+    db_session: AsyncSession,
+) -> None:
+    """A source path traces a generic overlay to its file, so it is pruned once the file is gone."""
+    chart = await factory.create_chart(db_session, name=f"prune-chart-{uuid4()}")
+    stale = await insert_overlay(
+        db_session, chart.id, {"a": 1}, None, creator="system", source_path="overrides/models/gone.yaml"
+    )
+
+    deleted = await delete_overlays_absent_from_chart(db_session, chart.id, keep_ids=[], creator="system")
+
+    assert deleted == [stale.id]
 
 
 @pytest.mark.asyncio

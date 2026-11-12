@@ -1511,6 +1511,49 @@ Training configuration of fine-tuning run
     ${training_config}=    Training Configuration Of Run    ${published}[items]
     RETURN    ${training_config}
 
+The fine-tuning job should run on a GPU its base model supports
+    [Documentation]    A base model may offer different settings per GPU family, each written for
+    ...    that hardware's memory and GPU count. On a cluster with more than one family, a run that
+    ...    lands on another family's GPUs can run out of memory or never start. The shared
+    ...    fine-tuning run always trains the smallest catalog model, so the GPUs that model reports
+    ...    are the ones its run must be on.
+    ...    Skips when the model's settings name no GPU, since then any GPU is the right one.
+    ...    Requires: TEST_FINETUNING_WORKLOAD_ID
+    [Tags]    kubectl
+    ${base_model_name}=    Get smallest finetunable catalog model
+    ${response}=    Get finetunable models    expected_status=200
+    ${supported_gpus}=    Get Base Model Supported Gpus    ${response.json()}[data]    ${base_model_name}
+    IF    not $supported_gpus
+        Skip    Base model ${base_model_name} names no GPU its settings were written for, so any GPU is the right one
+    END
+    ${namespace}=    Get Project Namespace
+    ${node}=    Wait Until Keyword Succeeds    10 min    10 sec
+    ...    Node running fine-tuning run    ${TEST_FINETUNING_WORKLOAD_ID}    ${namespace}
+    Node Should Have A Supported Gpu    ${node}    ${supported_gpus}
+
+Node running fine-tuning run
+    [Documentation]    Helper for polling: returns the node a run's training pod was placed on.
+    ...    The run stamps its id on the job it creates, and the job's pods are found through it.
+    [Tags]    kubectl
+    [Arguments]    ${workload_id}    ${namespace}
+    ${jobs}=    Run Process    kubectl    get    jobs
+    ...    -n    ${namespace}    -l    airm.silogen.ai/workload-id\=${workload_id}
+    ...    -o    json    stderr=PIPE    timeout=30s
+    Should Be Equal As Integers    ${jobs.rc}    0
+    ...    msg=Could not read the jobs of fine-tuning run ${workload_id} in ${namespace}: ${jobs.stderr}
+    ${job_name}=    Name Of Fine Tuning Job    ${{json.loads($jobs.stdout)["items"]}}
+    ${pods}=    Run Process    kubectl    get    pods
+    ...    -n    ${namespace}    -l    batch.kubernetes.io/job-name\=${job_name}
+    ...    -o    json    stderr=PIPE    timeout=30s
+    Should Be Equal As Integers    ${pods.rc}    0
+    ...    msg=Could not read the pods of fine-tuning job ${job_name} in ${namespace}: ${pods.stderr}
+    ${node_name}=    Node Running Fine Tuning Job    ${{json.loads($pods.stdout)["items"]}}
+    ${node}=    Run Process    kubectl    get    node    ${node_name}
+    ...    -o    json    stderr=PIPE    timeout=30s
+    Should Be Equal As Integers    ${node.rc}    0
+    ...    msg=Could not read node ${node_name}: ${node.stderr}
+    RETURN    ${{json.loads($node.stdout)}}
+
 A base model that cannot produce an adapter is offered
     [Documentation]    Selects a base model whose recipe trains every weight and so has no
     ...    adapter to keep. Skips when the cluster offers no such model — without one the

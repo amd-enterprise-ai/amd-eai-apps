@@ -158,6 +158,8 @@ spec:
           value: {{ include "aiwb.oidcIssuer" . | quote }}
         - name: OIDC_AUDIENCE
           value: {{ .Values.oidc.audience | quote }}
+        - name: OIDC_ADMIN_GROUPS
+          value: {{ include "aiwb.oidcAdminGroups" . | toJson }}
 
         # MinIO configuration
         - name: MINIO_URL

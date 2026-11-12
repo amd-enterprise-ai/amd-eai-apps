@@ -9,6 +9,7 @@ Documentation       Keywords for interacting with the Catalog API charts endpoin
 Library             RequestsLibrary
 Library             Collections
 Library             OperatingSystem
+Library             CallerAuthorization
 Resource            resources/api/common.resource
 
 
@@ -34,6 +35,8 @@ Create chart request
     ...    values_schema_file (str): Path to values schema JSON file
     ...    signature_file (str): Path to signature YAML file (optional, defaults to test data)
     ...    additional_files (list): Optional additional chart files
+    ...    template_name (str): Location of the template file within the chart, as sent in the upload
+    ...    access_token (str): Token to upload with (optional, defaults to the run's admin token)
     ...
     ...    Returns:
     ...    response: API response containing the created chart
@@ -41,7 +44,7 @@ Create chart request
     ...    Raises:
     ...    HTTPError: If chart creation fails
     ...    IOError: If any of the required files cannot be read
-    [Arguments]             ${name}                 ${template_file}        ${values_file}          ${values_schema_file}       ${signature_file}=${SIGNATURE_FILE}     @{additional_files}     ${expected_status}=any
+    [Arguments]             ${name}                 ${template_file}        ${values_file}          ${values_schema_file}       ${signature_file}=${SIGNATURE_FILE}     @{additional_files}     ${expected_status}=any    ${template_name}=template.yaml    ${access_token}=${None}
     ${template_content}=    Get Binary File         ${template_file}
     ${values_content}=      Get Binary File         ${values_file}
     ${schema_content}=      Get Binary File         ${values_schema_file}
@@ -50,7 +53,7 @@ Create chart request
     # Format: {'field_name': ('filename', filedata, 'content-type')}
     # No projectId needed for AIWB charts API
     ${data}=                Create dictionary       name=${name}            type=INFERENCE
-    @{template}=            Create list             template.yaml           ${template_content}
+    @{template}=            Create list             ${template_name}        ${template_content}
     @{values}=              Create list             values.yaml             ${values_content}
     @{schema}=              Create list             schema.json             ${schema_content}
     @{signature}=           Create list             signature.yaml          ${signature_content}
@@ -60,8 +63,7 @@ Create chart request
     ...                     signature=${signature}
 
     ${endpoint} =           Charts endpoint
-    ${access_token}=        Authorization token
-    &{headers}=             Create Dictionary       Authorization=Bearer ${access_token}
+    &{headers}=             Bearer headers          ${access_token}
 
     Log                     POST ${endpoint} with data: ${data}             DEBUG
     ${response}=            POST                    ${endpoint}             headers=${headers}      data=${data}            files=${files}          expected_status=${expected_status}    verify=${VERIFY_SSL}
@@ -82,10 +84,11 @@ List charts request
     ...    page_size (int): Number of items per page (default: 10)
     ...    sort_by (str): Field to sort by (default: createdAt)
     ...    sort_order (str): Sort direction - asc or desc (default: desc)
+    ...    access_token (str): Token to list with (optional, defaults to the session's admin token)
     ...
     ...    Returns:
     ...    response: API response containing list of charts
-    [Arguments]             ${page_number}=1        ${page_size}=10         ${sort_by}=createdAt                            ${sort_order}=desc      ${expected_status}=any
+    [Arguments]             ${page_number}=1        ${page_size}=10         ${sort_by}=createdAt                            ${sort_order}=desc      ${expected_status}=any    ${access_token}=${None}
     ${params}=              Create dictionary
     ...                     pageNumber=${page_number}
     ...                     pageSize=${page_size}
@@ -94,8 +97,9 @@ List charts request
 
     Create api session    aiwb
     ${endpoint} =           Charts endpoint
+    &{request_options}=     Request options for token    ${access_token}
     Log                     GET ${endpoint} with params: ${params}          DEBUG
-    ${response}=            Safe Get Request          ${endpoint}             params=${params}        expected_status=${expected_status}
+    ${response}=            Safe Get Request          ${endpoint}             params=${params}        expected_status=${expected_status}    &{request_options}
     Log                     List charts response: status=${response.status_code}                    DEBUG
     RETURN                  ${response}
 
@@ -104,17 +108,19 @@ Delete chart
     ...
     ...    Args:
     ...    chart_id (str): UUID of the chart to delete
+    ...    access_token (str): Token to delete with (optional, defaults to the session's admin token)
     ...
     ...    Returns:
     ...    response: API response (empty on success)
     ...
     ...    Raises:
     ...    HTTPError: If the chart is not found or deletion fails
-    [Arguments]             ${chart_id}             ${expected_status}=any
+    [Arguments]             ${chart_id}             ${expected_status}=any    ${access_token}=${None}
     Create api session    aiwb
     ${endpoint} =           Charts endpoint
+    &{request_options}=     Request options for token    ${access_token}
     Log                     DELETE ${endpoint}/${chart_id}  DEBUG
-    ${response}=            Safe Delete Request       ${endpoint}/${chart_id}                         expected_status=${expected_status}
+    ${response}=            Safe Delete Request       ${endpoint}/${chart_id}                         expected_status=${expected_status}    &{request_options}
     Log                     Delete chart response: status=${response.status_code}                   DEBUG
     IF    ${response.status_code} == 204
         Log                     Deleted chart ${chart_id}       INFO
@@ -130,16 +136,17 @@ Update chart request
     ...    values_file (str): Optional path to updated values YAML file
     ...    values_schema_file (str): Optional path to updated values schema JSON file
     ...    signature_file (str): Optional path to updated signature YAML file
+    ...    template_name (str): Location of the template file within the chart, as sent in the upload
     ...
     ...    Returns:
     ...    response: API response containing the updated chart
-    [Arguments]             ${chart_id}             ${template_file}=${None}    ${values_file}=${None}      ${values_schema_file}=${None}       ${signature_file}=${None}    ${expected_status}=any
+    [Arguments]             ${chart_id}             ${template_file}=${None}    ${values_file}=${None}      ${values_schema_file}=${None}       ${signature_file}=${None}    ${expected_status}=any    ${template_name}=template.yaml
     ${data}=                Create Dictionary
     &{files}=               Create Dictionary
 
     IF    $template_file is not None
         ${template_content}=    Get Binary File         ${template_file}
-        @{template}=            Create List             template.yaml           ${template_content}
+        @{template}=            Create List             ${template_name}        ${template_content}
         Set To Dictionary       ${files}                files=${template}
     END
     IF    $values_file is not None

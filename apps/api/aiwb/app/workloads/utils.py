@@ -11,6 +11,7 @@ import yaml
 from kubernetes.client import ApiException, V1DeploymentStatus, V1JobStatus
 from loguru import logger
 
+from ..cluster.constants import AMD_GPU_DEVICE_ID_LABEL, AMD_GPU_DEVICE_ID_LABEL_BETA
 from ..config import CLUSTER_HOST, SUBMITTER_ANNOTATION
 from ..dispatch.kube_client import KubernetesClient, get_dynamic_client
 from ..dispatch.utils import sanitize_label_value
@@ -61,6 +62,37 @@ def get_resource_type(manifest: str) -> "WorkloadResourceType":
     except yaml.YAMLError as e:
         raise ValueError(f"Malformed manifest YAML: {e}") from e
     raise ValueError("Manifest has no Deployment or Job")
+
+
+def pin_jobs_to_gpu_devices(manifest: str, device_ids: list[str]) -> str:
+    """Restrict every Job in the manifest to nodes carrying one of the given AMD GPU device IDs.
+
+    `device_ids` must be written as the nodes' labels write them. Nodes carry the device ID under
+    either the current or the beta label, so a node matching either qualifies. A node affinity the
+    chart already requires is kept: each of its terms must now also match a device ID.
+    """
+    gpu_terms = [
+        {"matchExpressions": [{"key": label, "operator": "In", "values": device_ids}]}
+        for label in (AMD_GPU_DEVICE_ID_LABEL, AMD_GPU_DEVICE_ID_LABEL_BETA)
+    ]
+    documents = list(yaml.safe_load_all(manifest))
+    for doc in documents:
+        if not isinstance(doc, dict) or doc.get("kind") != JOB_RESOURCE:
+            continue
+        pod_spec = doc.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {})
+        affinity = pod_spec["affinity"] = pod_spec.get("affinity") or {}
+        node_affinity = affinity["nodeAffinity"] = affinity.get("nodeAffinity") or {}
+        required = node_affinity["requiredDuringSchedulingIgnoredDuringExecution"] = (
+            node_affinity.get("requiredDuringSchedulingIgnoredDuringExecution") or {}
+        )
+        # Node selector terms are alternatives, so the GPU constraint is combined into each one.
+        existing_terms = required.get("nodeSelectorTerms") or [{}]
+        required["nodeSelectorTerms"] = [
+            {**term, "matchExpressions": [*(term.get("matchExpressions") or []), *gpu_term["matchExpressions"]]}
+            for term in existing_terms
+            for gpu_term in gpu_terms
+        ]
+    return yaml.safe_dump_all(documents, sort_keys=False)
 
 
 def derive_deployment_status(status: V1DeploymentStatus | None) -> WorkloadStatus:

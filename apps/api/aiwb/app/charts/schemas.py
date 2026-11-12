@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -34,6 +34,23 @@ async def _parse_signature_file(signature: UploadFile | Path) -> dict:
     return parsed
 
 
+def _validate_chart_file_path(raw_path: str | None) -> str:
+    """Ensure a chart file path is relative and stays inside the chart root.
+
+    Paths are later joined onto a temporary directory on the API pod's filesystem,
+    so anything that could resolve outside that directory is rejected here. Accepted
+    paths are returned exactly as sent, since clients read them back from the API.
+    """
+    if not raw_path or "\x00" in raw_path or "\\" in raw_path:
+        raise ValueError(f"Invalid chart file path: {raw_path!r}")
+    path = PurePosixPath(raw_path)
+    if not path.parts:
+        raise ValueError(f"Invalid chart file path: {raw_path!r}")
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"Chart file path must be relative and stay within the chart: {raw_path!r}")
+    return raw_path
+
+
 async def _parse_chart_files(files: list[UploadFile | Path]) -> list[dict]:
     """Parse chart files into dict objects."""
     files_data = []
@@ -52,7 +69,7 @@ async def _parse_chart_files(files: list[UploadFile | Path]) -> list[dict]:
         else:
             content = (await file.read()).decode()
             file_name = file.filename
-        files_data.append({"path": file_name, "content": content})
+        files_data.append({"path": _validate_chart_file_path(file_name), "content": content})
     return files_data
 
 

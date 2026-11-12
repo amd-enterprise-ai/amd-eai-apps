@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: MIT
 
 import asyncio
-import os
 import subprocess
 import tempfile
 from collections.abc import Generator
@@ -36,16 +35,18 @@ def chart_directory(chart: Chart) -> Generator[Path]:
     """
     temp_dir = tempfile.TemporaryDirectory()
     try:
+        root = Path(temp_dir.name).resolve()
         for file in chart.files:
-            if os.path.sep in file.path:
-                # Create the directory structure based on the relative path of file.path
-                file_dir = os.path.join(temp_dir.name, os.path.dirname(file.path))
-                os.makedirs(file_dir, exist_ok=True)
-            else:
-                file_dir = temp_dir.name
-
-            with open(os.path.join(file_dir, os.path.basename(file.path)), "w") as f:
-                f.write(file.content)
+            # Stored paths are client-supplied and may predate ingest validation, so
+            # containment is enforced again here, right before touching the filesystem.
+            target = (root / file.path).resolve()
+            if target == root or not target.is_relative_to(root):
+                raise ValidationException(
+                    message="Chart contains a file path outside the chart directory",
+                    detail=f"Rejected chart file path: {file.path!r}",
+                )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(file.content)
 
         yield Path(temp_dir.name)
     finally:

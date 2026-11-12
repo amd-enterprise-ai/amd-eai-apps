@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+import yaml
 from kubernetes.client import ApiException
 
 from app.workloads.constants import (
@@ -29,6 +30,7 @@ from app.workloads.utils import (
     get_resource_type,
     get_workload_host_from_HTTPRoute_manifest,
     get_workload_internal_url,
+    pin_jobs_to_gpu_devices,
     sanitize_user_id,
 )
 
@@ -1059,3 +1061,76 @@ def test_external_url_falls_back_to_cluster_host_without_hostnames() -> None:
     )
     url = get_workload_host_from_HTTPRoute_manifest(manifest=manifest, cluster_host="https://workloads.example.com")
     assert url == "https://workloads.example.com/demo/abc/v1"
+
+
+def _job_node_selector_terms(manifest: str) -> list[dict]:
+    job = next(doc for doc in yaml.safe_load_all(manifest) if doc.get("kind") == "Job")
+    affinity = job["spec"]["template"]["spec"]["affinity"]["nodeAffinity"]
+    return affinity["requiredDuringSchedulingIgnoredDuringExecution"]["nodeSelectorTerms"]
+
+
+def test_pin_jobs_to_gpu_devices_accepts_either_device_id_label() -> None:
+    """A node carrying the device ID under the current or the beta label qualifies."""
+    manifest = "kind: ConfigMap\nmetadata:\n  name: config\n---\nkind: Job\nspec:\n  template:\n    spec: {}\n"
+
+    pinned = pin_jobs_to_gpu_devices(manifest, ["75a8"])
+
+    assert _job_node_selector_terms(pinned) == [
+        {"matchExpressions": [{"key": "amd.com/gpu.device-id", "operator": "In", "values": ["75a8"]}]},
+        {"matchExpressions": [{"key": "beta.amd.com/gpu.device-id", "operator": "In", "values": ["75a8"]}]},
+    ]
+    config_map = next(doc for doc in yaml.safe_load_all(pinned) if doc.get("kind") == "ConfigMap")
+    assert config_map == {"kind": "ConfigMap", "metadata": {"name": "config"}}
+
+
+def test_pin_jobs_to_gpu_devices_keeps_a_node_affinity_the_chart_requires() -> None:
+    """Each term the chart already requires must now also match a device ID, rather than being replaced."""
+    zone = {"key": "topology.kubernetes.io/zone", "operator": "In", "values": ["zone-a"]}
+    job = {
+        "kind": "Job",
+        "spec": {
+            "template": {
+                "spec": {
+                    "affinity": {
+                        "nodeAffinity": {
+                            "requiredDuringSchedulingIgnoredDuringExecution": {
+                                "nodeSelectorTerms": [{"matchExpressions": [zone]}]
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+
+    pinned = pin_jobs_to_gpu_devices(yaml.safe_dump(job), ["74a1"])
+
+    assert [term["matchExpressions"] for term in _job_node_selector_terms(pinned)] == [
+        [zone, {"key": "amd.com/gpu.device-id", "operator": "In", "values": ["74a1"]}],
+        [zone, {"key": "beta.amd.com/gpu.device-id", "operator": "In", "values": ["74a1"]}],
+    ]
+
+
+@pytest.mark.parametrize(
+    "pod_spec",
+    [
+        "affinity: null",
+        "affinity:\n        nodeAffinity: null",
+        "affinity:\n        nodeAffinity:\n          requiredDuringSchedulingIgnoredDuringExecution: null",
+        (
+            "affinity:\n        nodeAffinity:\n          requiredDuringSchedulingIgnoredDuringExecution:\n"
+            "            nodeSelectorTerms:\n              - matchExpressions: null"
+        ),
+    ],
+    ids=["affinity", "node-affinity", "required", "match-expressions"],
+)
+def test_pin_jobs_to_gpu_devices_treats_an_empty_affinity_as_unset(pod_spec: str) -> None:
+    """Charts that render an affinity section with no value still get pinned instead of failing the launch."""
+    manifest = f"kind: Job\nspec:\n  template:\n    spec:\n      {pod_spec}\n"
+
+    pinned = pin_jobs_to_gpu_devices(manifest, ["75a8"])
+
+    assert _job_node_selector_terms(pinned) == [
+        {"matchExpressions": [{"key": "amd.com/gpu.device-id", "operator": "In", "values": ["75a8"]}]},
+        {"matchExpressions": [{"key": "beta.amd.com/gpu.device-id", "operator": "In", "values": ["75a8"]}]},
+    ]

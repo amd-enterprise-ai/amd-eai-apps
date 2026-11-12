@@ -9,6 +9,8 @@ from pydantic import Field
 
 from api_common.schemas import BaseEntityPublic, BaseModel
 
+from .models import SOURCE_PATH_MAX_LENGTH
+
 
 class OverlayListQuery(BaseModel):
     chart_id: UUID | None = Field(
@@ -31,6 +33,15 @@ class OverlayResponse(BaseEntityPublic):
     canonical_name: str | None = Field(
         description="Optional canonical name for a model which this overlay is compatible with. Used to identify overlays for models of the same origin.",
         examples=["meta-llama/Llama-3.1-8B"],
+    )
+    source_path: str | None = Field(
+        default=None,
+        description=(
+            "Path of the chart file this overlay was registered from, relative to the chart. Identifies a "
+            "chart-shipped recipe, so one model can have a recipe per GPU family. Null for overlays created "
+            "through the API."
+        ),
+        examples=["overrides/models/meta-llama_Llama-3.1-8B.yaml"],
     )
     chart_id: UUID = Field(
         description="ID of the chart this overlay is attached to.",
@@ -63,6 +74,12 @@ class OverlayUpdate(BaseModel):
         None,
         description="Optional canonical name to associate the overlay with a model type, for example 'meta-llama/Llama-3.1-8B'.",
         examples=["meta-llama/Llama-3.1-8B"],
+    )
+    source_path: str | None = Field(
+        None,
+        max_length=SOURCE_PATH_MAX_LENGTH,
+        description="Path of the chart file this overlay is registered from, relative to the chart.",
+        examples=["overrides/models/meta-llama_Llama-3.1-8B.yaml"],
     )
     updated_by: str = Field(
         description="Email of the user who updated the overlay.",
